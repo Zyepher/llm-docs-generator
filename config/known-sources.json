@@ -1,0 +1,165 @@
+{
+  "version": "1.0.0",
+  "description": "Curated registry of known documentation sources for LLM optimization. Claude Code and other AI assistants can reference this list to discover and generate documentation.",
+  "lastUpdated": "2025-10-17",
+  "sources": [
+    {
+      "id": "supabase-sdks",
+      "name": "Supabase SDK Documentation",
+      "repository": "https://github.com/supabase/supabase",
+      "format": "openref",
+      "path": "apps/docs/spec",
+      "pattern": "supabase_*_v*.yml",
+      "description": "OpenRef YAML specifications for all Supabase client SDK libraries across multiple programming languages",
+      "languages": [
+        "javascript",
+        "typescript",
+        "python",
+        "dart",
+        "flutter",
+        "kotlin",
+        "swift",
+        "csharp"
+      ],
+      "versions": ["v0", "v1", "v2", "v3"],
+      "examples": [
+        {
+          "file": "apps/docs/spec/supabase_swift_v2.yml",
+          "description": "Supabase Swift SDK v2"
+        },
+        {
+          "file": "apps/docs/spec/supabase_js_v2.yml",
+          "description": "Supabase JavaScript Client v2"
+        }
+      ],
+      "usage": "llm-docs generate --source apps/docs/spec/supabase_swift_v2.yml",
+      "tested": true,
+      "maintainer": "Supabase"
+    },
+    {
+      "id": "swift-book",
+      "name": "The Swift Programming Language",
+      "repository": "https://github.com/swiftlang/swift-book",
+      "format": "markdown",
+      "subformat": "docc",
+      "path": "TSPL.docc",
+      "pattern": "**/*.md",
+      "description": "Official Swift programming language documentation in Apple's DocC format. Comprehensive guide covering Swift syntax, language features, and best practices.",
+      "sections": [
+        {
+          "name": "GuidedTour",
+          "description": "Quick introduction to Swift programming"
+        },
+        {
+          "name": "LanguageGuide",
+          "description": "Comprehensive guide to Swift language features"
+        },
+        {
+          "name": "ReferenceManual",
+          "description": "Formal Swift language reference"
+        }
+      ],
+      "examples": [
+        {
+          "file": "TSPL.docc/LanguageGuide/BasicOperators.md",
+          "description": "Swift Basic Operators documentation"
+        },
+        {
+          "file": "TSPL.docc/LanguageGuide",
+          "description": "Complete Language Guide (all chapters)"
+        }
+      ],
+      "usage": "llm-docs generate --source TSPL.docc/LanguageGuide --format markdown",
+      "tested": true,
+      "maintainer": "Apple / Swift Community"
+    },
+    {
+      "id": "python-docs",
+      "name": "Python Documentation",
+      "repository": "https://github.com/python/cpython",
+      "format": "restructuredtext",
+      "path": "Doc",
+      "pattern": "**/*.rst",
+      "description": "Official Python language documentation covering the standard library, language reference, and tutorials",
+      "sections": [
+        {
+          "name": "tutorial",
+          "description": "Python tutorial for beginners"
+        },
+        {
+          "name": "library",
+          "description": "Python standard library reference"
+        },
+        {
+          "name": "reference",
+          "description": "Python language reference"
+        }
+      ],
+      "examples": [
+        {
+          "file": "Doc/library/index.rst",
+          "description": "Standard library documentation"
+        }
+      ],
+      "usage": "llm-docs generate --source Doc --format rst",
+      "tested": false,
+      "status": "planned",
+      "note": "Requires reStructuredText parser implementation",
+      "maintainer": "Python Software Foundation"
+    },
+    {
+      "id": "typescript-handbook",
+      "name": "TypeScript Handbook",
+      "repository": "https://github.com/microsoft/TypeScript-Handbook",
+      "format": "markdown",
+      "path": ".",
+      "pattern": "**/*.md",
+      "description": "Official TypeScript handbook and documentation",
+      "examples": [
+        {
+          "file": "README.md",
+          "description": "TypeScript handbook entry point"
+        }
+      ],
+      "usage": "llm-docs generate --source . --format markdown",
+      "tested": false,
+      "status": "planned",
+      "note": "Requires testing with current markdown parser",
+      "maintainer": "Microsoft"
+    },
+    {
+      "id": "rust-book",
+      "name": "The Rust Programming Language",
+      "repository": "https://github.com/rust-lang/book",
+      "format": "markdown",
+      "path": "src",
+      "pattern": "**/*.md",
+      "description": "Official Rust programming language book (The Book)",
+      "examples": [
+        {
+          "file": "src/SUMMARY.md",
+          "description": "Book table of contents"
+        },
+        {
+          "file": "src/ch01-00-getting-started.md",
+          "description": "Getting Started chapter"
+        }
+      ],
+      "usage": "llm-docs generate --source src --format markdown",
+      "tested": false,
+      "status": "planned",
+      "note": "Requires testing with current markdown parser",
+      "maintainer": "Rust Foundation"
+    }
+  ],
+  "contributing": {
+    "message": "To add a new documentation source, submit a PR with:",
+    "requirements": [
+      "Add entry to this JSON file with all required fields",
+      "Add entry to README.md Known Documentation Sources table",
+      "Test generation with the new source",
+      "Provide usage example",
+      "Set tested: true only after successful generation"
+    ]
+  }
+}

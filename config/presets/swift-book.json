@@ -1,0 +1,42 @@
+{
+  "name": "Swift Programming Language",
+  "format": "markdown",
+  "description": "The Swift Programming Language official documentation",
+  "sources": [
+    {
+      "type": "directory",
+      "path": "TSPL.docc",
+      "glob": "**/*.md"
+    }
+  ],
+  "sections": [
+    {
+      "id": "guided-tour",
+      "name": "GuidedTour",
+      "title": "A Swift Tour",
+      "description": "Quick introduction to Swift programming",
+      "order": 1
+    },
+    {
+      "id": "language-guide",
+      "name": "LanguageGuide",
+      "title": "Language Guide",
+      "description": "Comprehensive guide to Swift language features",
+      "order": 2
+    },
+    {
+      "id": "reference-manual",
+      "name": "ReferenceManual",
+      "title": "Language Reference",
+      "description": "Formal Swift language reference",
+      "order": 3
+    }
+  ],
+  "output": {
+    "baseDir": "output/swift-book",
+    "filenamePrefix": "swift-book",
+    "modular": true,
+    "formats": ["txt"]
+  },
+  "systemPrompt": "Complete Swift Programming Language documentation optimized for LLMs and AI coding assistants."
+}
