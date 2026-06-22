@@ -3,7 +3,7 @@
  */
 
 // Core exports
-export { OpenRefParser, parseOpenRefSpec, getParserStats } from './core/parser.js';
+export { OpenRefParser, parseOpenRefSpec, getParserStats } from './parsers/openref/parser.js';
 export { LLMFormatter, formatSpecData } from './core/formatter.js';
 export type { Example } from './core/models.js';
 export type { Operation } from './core/models.js';

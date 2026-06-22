@@ -49,11 +49,11 @@ export type ContentBlock = z.infer<typeof ContentBlockSchema>;
  * DocNode types representing the documentation hierarchy
  */
 export enum DocNodeType {
-  ROOT = 'root',         // Top-level document
+  ROOT = 'root', // Top-level document
   CATEGORY = 'category', // Major section (e.g., "Database Operations")
-  SECTION = 'section',   // Subsection or chapter
+  SECTION = 'section', // Subsection or chapter
   OPERATION = 'operation', // Single API method or topic
-  ITEM = 'item',        // Individual example or detail
+  ITEM = 'item', // Individual example or detail
 }
 
 /**
@@ -66,7 +66,7 @@ export enum DocNodeType {
  *
  * Performance: O(1) access to children, O(log n) tree operations
  */
-export const DocNodeSchema: z.ZodType<DocNode> = z.lazy(() =>
+export const DocNodeSchema: z.ZodType<DocNode, z.ZodTypeDef, unknown> = z.lazy(() =>
   z.object({
     type: z.nativeEnum(DocNodeType),
     id: z.string(),
@@ -124,12 +124,20 @@ export function createContentBlock(
     annotations?: Map<string, unknown>;
   }
 ): ContentBlock {
-  return {
+  const block: ContentBlock = {
     type,
     content,
-    language: options?.language,
-    annotations: options?.annotations,
   };
+
+  if (options?.language !== undefined) {
+    block.language = options.language;
+  }
+
+  if (options?.annotations !== undefined) {
+    block.annotations = options.annotations;
+  }
+
+  return block;
 }
 
 /**
@@ -216,13 +224,7 @@ export type Example = z.infer<typeof ExampleSchema>;
  * Type guard for Example (O(1) check without full validation)
  */
 export function isExample(obj: unknown): obj is Example {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    'id' in obj &&
-    'name' in obj &&
-    'code' in obj
-  );
+  return typeof obj === 'object' && obj !== null && 'id' in obj && 'name' in obj && 'code' in obj;
 }
 
 // ============================================================================
@@ -334,10 +336,7 @@ export function createSpecData(info: SpecInfo, operations: Operation[]): SpecDat
 /**
  * Get operation by ID (O(1) with cached map vs O(n) linear search)
  */
-export function getOperationById(
-  specData: SpecData,
-  operationId: string
-): Operation | undefined {
+export function getOperationById(specData: SpecData, operationId: string): Operation | undefined {
   // Use cached map if available (O(1))
   if (specData._operationMap !== undefined) {
     return specData._operationMap.get(operationId);
@@ -348,9 +347,7 @@ export function getOperationById(
 
   // Build cache for future lookups
   if (specData._operationMap === undefined) {
-    specData._operationMap = new Map(
-      specData.operations.map((o) => [o.id, o])
-    );
+    specData._operationMap = new Map(specData.operations.map((o) => [o.id, o]));
   }
 
   return op;
@@ -360,15 +357,10 @@ export function getOperationById(
  * Get multiple operations by IDs (O(k) where k = ids.length, using cached map)
  * More efficient than multiple individual lookups
  */
-export function getOperationsByIds(
-  specData: SpecData,
-  operationIds: string[]
-): Operation[] {
+export function getOperationsByIds(specData: SpecData, operationIds: string[]): Operation[] {
   // Ensure map is built (O(n) once)
   if (specData._operationMap === undefined) {
-    specData._operationMap = new Map(
-      specData.operations.map((o) => [o.id, o])
-    );
+    specData._operationMap = new Map(specData.operations.map((o) => [o.id, o]));
   }
 
   // Collect operations (O(k) where k = operationIds.length)
@@ -393,10 +385,7 @@ export function getTotalExamples(specData: SpecData): number {
   }
 
   // Calculate and cache
-  const total = specData.operations.reduce(
-    (sum, op) => sum + op.examples.length,
-    0
-  );
+  const total = specData.operations.reduce((sum, op) => sum + op.examples.length, 0);
 
   specData._totalExamples = total;
   return total;

@@ -48,10 +48,7 @@ export class FormatDetector {
    * @param hint - Optional format hint to skip detection
    * @returns Detected format type
    */
-  async detect(
-    sourcePath: string,
-    hint?: FormatType
-  ): Promise<FormatType> {
+  async detect(sourcePath: string, hint?: FormatType): Promise<FormatType> {
     // If hint provided and not AUTO, use it
     if (hint && hint !== FormatType.AUTO) {
       return hint;
@@ -63,7 +60,7 @@ export class FormatDetector {
     if (quickGuess !== FormatType.AUTO) {
       // Verify with parser
       const parser = this.getParserForFormat(quickGuess);
-      if (parser && await parser.detect(sourcePath)) {
+      if (parser && (await parser.detect(sourcePath))) {
         return quickGuess;
       }
     }
@@ -78,8 +75,8 @@ export class FormatDetector {
     // Could not detect
     throw new Error(
       `Unable to detect format for: ${sourcePath}\n` +
-      `Supported formats: ${this.parsers.map((p) => p.format).join(', ')}\n` +
-      `Try specifying --format explicitly`
+        `Supported formats: ${this.parsers.map((p) => p.format).join(', ')}\n` +
+        `Try specifying --format explicitly`
     );
   }
 
@@ -131,7 +128,7 @@ export class FormatDetector {
    */
   private getFileExtension(path: string): string {
     const parts = path.split('.');
-    return parts.length > 1 ? parts[parts.length - 1] : '';
+    return parts.length > 1 ? (parts.at(-1) ?? '') : '';
   }
 }
 
@@ -151,10 +148,7 @@ export function getFormatDetector(): FormatDetector {
 /**
  * Detect format (convenience function)
  */
-export async function detectFormat(
-  sourcePath: string,
-  hint?: FormatType
-): Promise<FormatType> {
+export async function detectFormat(sourcePath: string, hint?: FormatType): Promise<FormatType> {
   const detector = getFormatDetector();
   return await detector.detect(sourcePath, hint);
 }
