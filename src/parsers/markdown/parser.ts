@@ -13,6 +13,7 @@
 
 import { readFile } from 'fs/promises';
 import { marked } from 'marked';
+import type { Token } from 'marked';
 
 /**
  * Parsed markdown document structure
@@ -120,7 +121,7 @@ export class MarkdownParser {
    *
    * Performance: O(k) where k = number of tokens until first H1
    */
-  private extractTitle(tokens: marked.Token[], filePath: string): string {
+  private extractTitle(tokens: Token[], filePath: string): string {
     // Find first heading
     for (const token of tokens) {
       if (token.type === 'heading' && token.depth === 1) {
@@ -130,7 +131,7 @@ export class MarkdownParser {
 
     // Fallback to filename
     const parts = filePath.split('/');
-    const filename = parts[parts.length - 1];
+    const filename = parts.at(-1) ?? 'document';
     return filename.replace(/\.md$/, '');
   }
 
@@ -144,9 +145,10 @@ export class MarkdownParser {
 
     // Check for YAML frontmatter (--- at start)
     const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    if (frontmatterMatch) {
+    const frontmatter = frontmatterMatch?.[1];
+    if (frontmatter !== undefined) {
       // Simple key-value parsing (could use yaml parser for complex cases)
-      const lines = frontmatterMatch[1].split('\n');
+      const lines = frontmatter.split('\n');
       for (const line of lines) {
         const colonIndex = line.indexOf(':');
         if (colonIndex > 0) {
@@ -166,18 +168,16 @@ export class MarkdownParser {
    * Performance: O(n) where n = number of tokens
    * Creates tree structure based on heading levels
    */
-  private buildSections(tokens: marked.Token[]): MarkdownSection[] {
+  private buildSections(tokens: Token[]): MarkdownSection[] {
     const rootSections: MarkdownSection[] = [];
     const stack: MarkdownSection[] = [];
     let currentContent: MarkdownContent[] = [];
 
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
-
+    for (const token of tokens) {
       if (token.type === 'heading') {
         // Save accumulated content to previous section
         if (stack.length > 0 && currentContent.length > 0) {
-          stack[stack.length - 1].content.push(...currentContent);
+          stack[stack.length - 1]!.content.push(...currentContent);
           currentContent = [];
         }
 
@@ -191,13 +191,13 @@ export class MarkdownParser {
         };
 
         // Pop stack until we find the parent level
-        while (stack.length > 0 && stack[stack.length - 1].level >= token.depth) {
+        while (stack.length > 0 && stack[stack.length - 1]!.level >= token.depth) {
           stack.pop();
         }
 
         // Add as child of parent or as root
         if (stack.length > 0) {
-          stack[stack.length - 1].children.push(section);
+          stack[stack.length - 1]!.children.push(section);
         } else {
           rootSections.push(section);
         }
@@ -215,7 +215,7 @@ export class MarkdownParser {
 
     // Add remaining content to last section
     if (stack.length > 0 && currentContent.length > 0) {
-      stack[stack.length - 1].content.push(...currentContent);
+      stack[stack.length - 1]!.content.push(...currentContent);
     }
 
     return rootSections;
@@ -226,7 +226,7 @@ export class MarkdownParser {
    *
    * Performance: O(1)
    */
-  private tokenToContent(token: marked.Token): MarkdownContent | null {
+  private tokenToContent(token: Token): MarkdownContent | null {
     switch (token.type) {
       case 'code':
         return {
@@ -239,7 +239,7 @@ export class MarkdownParser {
       case 'text':
         return {
           type: 'prose',
-          content: token.text || (token as marked.Tokens.Text).text,
+          content: token.text,
         };
 
       case 'blockquote':
@@ -256,7 +256,9 @@ export class MarkdownParser {
 
       default:
         // Convert other tokens to prose
-        const tokenText = (token as any).text || (token as any).raw || '';
+        const tokenText =
+          ('text' in token && typeof token.text === 'string' ? token.text : '') ||
+          ('raw' in token && typeof token.raw === 'string' ? token.raw : '');
         if (tokenText.trim()) {
           return {
             type: 'prose',

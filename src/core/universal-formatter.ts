@@ -15,10 +15,7 @@ import { mkdir, writeFile } from 'fs/promises';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 
-import type {
-  DocNode,
-  ContentBlock,
-} from './models.js';
+import type { DocNode, ContentBlock } from './models.js';
 import { DocNodeType, ContentBlockType } from './models.js';
 
 // ============================================================================
@@ -97,9 +94,7 @@ export class UniversalFormatter {
    */
   private async generateModularDocs(): Promise<void> {
     // Find all CATEGORY nodes
-    const categories = this.root.children.filter(
-      (child) => child.type === DocNodeType.CATEGORY
-    );
+    const categories = this.root.children.filter((child) => child.type === DocNodeType.CATEGORY);
 
     if (categories.length === 0) return;
 
@@ -129,7 +124,8 @@ export class UniversalFormatter {
     const parts: string[] = [];
 
     // System prompt
-    const systemPrompt = this.options.systemPrompt ||
+    const systemPrompt =
+      this.options.systemPrompt ||
       `This is the complete developer documentation for ${this.options.title || this.root.title}.`;
     parts.push(`<SYSTEM>${systemPrompt}</SYSTEM>`, DOUBLE_NEWLINE);
 
@@ -139,7 +135,7 @@ export class UniversalFormatter {
       const date = now.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
-        day: 'numeric'
+        day: 'numeric',
       });
 
       const format = this.root.metadata.get('format') || 'unknown';
@@ -221,7 +217,7 @@ export class UniversalFormatter {
   /**
    * Get markdown heading prefix based on node type and depth
    */
-  private getHeading(type: DocNodeType, depth: number): string {
+  private getHeading(_type: DocNodeType, depth: number): string {
     // Map depth to heading level (H2-H4)
     const level = Math.min(depth + 1, 4); // Cap at H4
     return '#'.repeat(level);
@@ -272,10 +268,7 @@ export class UniversalFormatter {
 /**
  * Format DocNode tree (convenience function)
  */
-export async function formatDocNode(
-  root: DocNode,
-  options: FormatterOptions
-): Promise<void> {
+export async function formatDocNode(root: DocNode, options: FormatterOptions): Promise<void> {
   const formatter = new UniversalFormatter(root, options);
   await formatter.generateAll();
 }

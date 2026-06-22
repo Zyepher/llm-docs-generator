@@ -140,7 +140,7 @@ export abstract class BaseParser implements Parser {
    */
   protected getFileExtension(path: string): string {
     const parts = path.split('.');
-    return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
+    return parts.length > 1 ? (parts.at(-1)?.toLowerCase() ?? '') : '';
   }
 
   /**
@@ -176,7 +176,10 @@ export abstract class BaseParser implements Parser {
  * Parser registry error
  */
 export class ParserError extends Error {
-  constructor(message: string, public readonly parser?: string) {
+  constructor(
+    message: string,
+    public readonly parser?: string
+  ) {
     super(message);
     this.name = 'ParserError';
   }

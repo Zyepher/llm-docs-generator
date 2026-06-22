@@ -11,11 +11,7 @@
  * - Example → DocNode (ITEM) with code ContentBlocks
  */
 
-import type {
-  SpecData,
-  Operation,
-  Example,
-} from '../../core/models.js';
+import type { SpecData, Operation, Example } from '../../core/models.js';
 
 import {
   DocNode,
@@ -36,25 +32,17 @@ import {
  * @param categoryMap - Optional category groupings (from config)
  * @returns Root DocNode representing the entire SDK documentation
  */
-export function openRefToDocNode(
-  specData: SpecData,
-  categoryMap?: Map<string, string[]>
-): DocNode {
+export function openRefToDocNode(specData: SpecData, categoryMap?: Map<string, string[]>): DocNode {
   const metadata = new Map<string, unknown>();
   metadata.set('format', 'openref');
   metadata.set('sdk', specData.info.id);
   metadata.set('title', specData.info.title);
   metadata.set('specUrl', specData.info.specUrl);
 
-  const root = createDocNode(
-    DocNodeType.ROOT,
-    specData.info.id,
-    specData.info.title,
-    {
-      description: specData.info.description,
-      metadata,
-    }
-  );
+  const root = createDocNode(DocNodeType.ROOT, specData.info.id, specData.info.title, {
+    description: specData.info.description,
+    metadata,
+  });
 
   // If we have category mappings, organize by category
   if (categoryMap && categoryMap.size > 0) {
@@ -74,16 +62,12 @@ export function openRefToDocNode(
  * @param categoryMap - Map of category name to operation IDs
  * @returns Array of category DocNodes
  */
-function convertWithCategories(
-  specData: SpecData,
-  categoryMap: Map<string, string[]>
-): DocNode[] {
+function convertWithCategories(specData: SpecData, categoryMap: Map<string, string[]>): DocNode[] {
   const categoryNodes: DocNode[] = [];
 
   // Build operation lookup map
-  const operationMap = specData._operationMap ?? new Map(
-    specData.operations.map((op) => [op.id, op])
-  );
+  const operationMap =
+    specData._operationMap ?? new Map(specData.operations.map((op) => [op.id, op]));
 
   for (const [categoryName, operationIds] of categoryMap.entries()) {
     const operations: Operation[] = [];
@@ -99,14 +83,9 @@ function convertWithCategories(
     if (operations.length === 0) continue;
 
     // Create category node
-    const categoryNode = createDocNode(
-      DocNodeType.CATEGORY,
-      categoryName,
-      categoryName,
-      {
-        children: operations.map((op) => convertOperation(op)),
-      }
-    );
+    const categoryNode = createDocNode(DocNodeType.CATEGORY, categoryName, categoryName, {
+      children: operations.map((op) => convertOperation(op)),
+    });
 
     categoryNodes.push(categoryNode);
   }
@@ -133,27 +112,18 @@ export function convertOperation(operation: Operation): DocNode {
   // Add description as prose content if present
   const content: ContentBlock[] = [];
   if (operation.description) {
-    content.push(
-      createContentBlock(ContentBlockType.PROSE, operation.description)
-    );
+    content.push(createContentBlock(ContentBlockType.PROSE, operation.description));
   }
   if (operation.notes) {
-    content.push(
-      createContentBlock(ContentBlockType.PROSE, operation.notes)
-    );
+    content.push(createContentBlock(ContentBlockType.PROSE, operation.notes));
   }
 
-  return createDocNode(
-    DocNodeType.OPERATION,
-    operation.id,
-    operation.title,
-    {
-      description: operation.description,
-      content,
-      children,
-      metadata,
-    }
-  );
+  return createDocNode(DocNodeType.OPERATION, operation.id, operation.title, {
+    description: operation.description,
+    content,
+    children,
+    metadata,
+  });
 }
 
 /**
@@ -173,18 +143,14 @@ export function convertExample(example: Example): DocNode {
 
   // Add description as prose if present
   if (example.description) {
-    content.push(
-      createContentBlock(ContentBlockType.PROSE, example.description)
-    );
+    content.push(createContentBlock(ContentBlockType.PROSE, example.description));
   }
 
   // Add code block
   if (example.code) {
     // Try to infer language from code content or use generic
     const language = inferLanguage(example.code);
-    content.push(
-      createContentBlock(ContentBlockType.CODE, example.code, { language })
-    );
+    content.push(createContentBlock(ContentBlockType.CODE, example.code, { language }));
   }
 
   // Add SQL schema as data block if present
@@ -207,16 +173,11 @@ export function convertExample(example: Example): DocNode {
     );
   }
 
-  return createDocNode(
-    DocNodeType.ITEM,
-    example.id,
-    example.name,
-    {
-      description: example.description,
-      content,
-      metadata,
-    }
-  );
+  return createDocNode(DocNodeType.ITEM, example.id, example.name, {
+    description: example.description,
+    content,
+    metadata,
+  });
 }
 
 /**
@@ -232,16 +193,16 @@ function inferLanguage(code: string): string {
   if (code.includes('const ') || code.includes('let ') || code.includes('async ')) {
     return 'javascript';
   }
-  if (code.includes('func ') || code.includes('let ') && code.includes(':')) {
+  if (code.includes('func ') || (code.includes('let ') && code.includes(':'))) {
     return 'swift';
   }
-  if (code.includes('def ') || code.includes('import ') && code.includes('from ')) {
+  if (code.includes('def ') || (code.includes('import ') && code.includes('from '))) {
     return 'python';
   }
   if (code.includes('public class') || code.includes('private val')) {
     return 'kotlin';
   }
-  if (code.includes('class ') && code.includes('{') || code.includes('using ')) {
+  if ((code.includes('class ') && code.includes('{')) || code.includes('using ')) {
     return 'csharp';
   }
   if (code.includes('void ') || code.includes('Future<')) {
@@ -260,7 +221,7 @@ function inferLanguage(code: string): string {
  * @param root - Root DocNode
  * @returns OpenRef SpecData
  */
-export function docNodeToOpenRef(root: DocNode): SpecData {
+export function docNodeToOpenRef(_root: DocNode): SpecData {
   // Note: This is a lossy conversion since DocNode is more generic
   // Only implement if needed for backward compatibility tests
   throw new Error('docNodeToOpenRef not yet implemented');

@@ -11,11 +11,7 @@
  * - MarkdownContent → ContentBlock
  */
 
-import type {
-  MarkdownDocument,
-  MarkdownSection,
-  MarkdownContent,
-} from './parser.js';
+import type { MarkdownDocument, MarkdownSection, MarkdownContent } from './parser.js';
 
 import {
   DocNode,
@@ -47,14 +43,9 @@ export function markdownToDocNode(
   metadata.set('format', 'markdown');
   metadata.set('path', doc.path);
 
-  const root = createDocNode(
-    docType,
-    extractIdFromPath(doc.path),
-    doc.title,
-    {
-      metadata,
-    }
-  );
+  const root = createDocNode(docType, extractIdFromPath(doc.path), doc.title, {
+    metadata,
+  });
 
   // Convert each top-level section
   root.children = doc.sections.map((section) =>
@@ -72,8 +63,11 @@ export function markdownToDocNode(
  */
 function extractIdFromPath(path: string): string {
   const parts = path.split('/');
-  const filename = parts[parts.length - 1];
-  return filename.replace(/\.md$/, '').toLowerCase().replace(/\s+/g, '-');
+  const filename = parts.at(-1) ?? 'document';
+  return filename
+    .replace(/\.mdx?$/, '')
+    .toLowerCase()
+    .replace(/\s+/g, '-');
 }
 
 /**
@@ -87,10 +81,7 @@ function extractIdFromPath(path: string): string {
  *
  * Performance: O(n) where n = total content + children
  */
-export function convertSection(
-  section: MarkdownSection,
-  mapH2ToCategory: boolean
-): DocNode {
+export function convertSection(section: MarkdownSection, mapH2ToCategory: boolean): DocNode {
   // Determine node type based on heading level
   let nodeType: DocNodeType;
   if (section.level === 2 && mapH2ToCategory) {
@@ -107,23 +98,16 @@ export function convertSection(
   const content = section.content.map((c) => convertContent(c));
 
   // Convert child sections recursively
-  const children = section.children.map((child) =>
-    convertSection(child, mapH2ToCategory)
-  );
+  const children = section.children.map((child) => convertSection(child, mapH2ToCategory));
 
   const metadata = new Map<string, unknown>();
   metadata.set('level', section.level);
 
-  return createDocNode(
-    nodeType,
-    section.id,
-    section.title,
-    {
-      content,
-      children,
-      metadata,
-    }
-  );
+  return createDocNode(nodeType, section.id, section.title, {
+    content,
+    children,
+    metadata,
+  });
 }
 
 /**
@@ -134,45 +118,27 @@ export function convertSection(
 export function convertContent(content: MarkdownContent): ContentBlock {
   switch (content.type) {
     case 'code':
-      return createContentBlock(
-        ContentBlockType.CODE,
-        content.content,
-        {
-          language: content.language || 'text',
-        }
-      );
+      return createContentBlock(ContentBlockType.CODE, content.content, {
+        language: content.language || 'text',
+      });
 
     case 'prose':
-      return createContentBlock(
-        ContentBlockType.PROSE,
-        content.content
-      );
+      return createContentBlock(ContentBlockType.PROSE, content.content);
 
     case 'blockquote':
       // Treat blockquotes as prose with annotation
-      return createContentBlock(
-        ContentBlockType.PROSE,
-        content.content,
-        {
-          annotations: new Map([['style', 'blockquote']]),
-        }
-      );
+      return createContentBlock(ContentBlockType.PROSE, content.content, {
+        annotations: new Map([['style', 'blockquote']]),
+      });
 
     case 'image':
       // Treat images as data blocks
-      return createContentBlock(
-        ContentBlockType.DATA,
-        content.content,
-        {
-          annotations: new Map([['type', 'image']]),
-        }
-      );
+      return createContentBlock(ContentBlockType.DATA, content.content, {
+        annotations: new Map([['type', 'image']]),
+      });
 
     default:
-      return createContentBlock(
-        ContentBlockType.PROSE,
-        content.content
-      );
+      return createContentBlock(ContentBlockType.PROSE, content.content);
   }
 }
 
@@ -187,24 +153,21 @@ export function convertContent(content: MarkdownContent): ContentBlock {
  * @param rootTitle - Title for the combined root node
  * @returns Combined root DocNode
  */
-export function mergeMarkdownDocuments(
-  docs: MarkdownDocument[],
-  rootTitle: string
-): DocNode {
-  const root = createDocNode(
-    DocNodeType.ROOT,
-    'root',
-    rootTitle,
-    {
-      metadata: new Map([['format', 'markdown'], ['count', docs.length]]),
-    }
-  );
+export function mergeMarkdownDocuments(docs: MarkdownDocument[], rootTitle: string): DocNode {
+  const root = createDocNode(DocNodeType.ROOT, 'root', rootTitle, {
+    metadata: new Map<string, unknown>([
+      ['format', 'markdown'],
+      ['count', docs.length],
+    ]),
+  });
 
   // Convert each document to a SECTION node
-  root.children = docs.map((doc) => markdownToDocNode(doc, {
-    documentType: DocNodeType.SECTION,
-    mapH2ToCategory: false,
-  }));
+  root.children = docs.map((doc) =>
+    markdownToDocNode(doc, {
+      documentType: DocNodeType.SECTION,
+      mapH2ToCategory: false,
+    })
+  );
 
   return root;
 }
@@ -217,7 +180,7 @@ export function mergeMarkdownDocuments(
  * @param node - DocNode to convert
  * @returns MarkdownDocument
  */
-export function docNodeToMarkdown(node: DocNode): MarkdownDocument {
+export function docNodeToMarkdown(_node: DocNode): MarkdownDocument {
   // Note: This is a lossy conversion
   // Implement only if needed for export/testing
   throw new Error('docNodeToMarkdown not yet implemented');
