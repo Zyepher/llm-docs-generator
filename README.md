@@ -1,443 +1,209 @@
-# Multi-Format LLM Documentation Generator
+# llm-docs-generator
 
-For AI coding assistants. Converts documentation formats into LLM-optimized output.
+`llm-docs-generator` is a tool for giving AI agents better documentation context.
 
-## For Humans
+Humans should not have to drive the CLI by hand. You tell your AI agent what
+docs you need. The agent uses `llm-docs` to find the right sources, extract the
+useful documentation, turn it into structured Markdown, and record where every
+piece came from.
 
-### Purpose
-Transforms documentation (OpenRef YAML, Markdown/DocC) into token-efficient text files for AI consumption.
+The result is a local documentation pack your agent can read repeatedly without
+guessing, browsing from scratch, or trusting stale memory.
 
-### Quick Start
+## The Problem
 
-1. Install dependencies:
+Official docs are written for humans in a browser.
+
+They are often split across many pages, mixed with navigation UI, hidden behind
+generated sites, duplicated across versions, and hard to cite back to a precise
+source. They may be correct, but they are not shaped like stable working memory
+for an AI agent.
+
+An AI agent needs something different:
+
+- clean Markdown files
+- stable sections
+- preserved code examples
+- version-aware output
+- source links and provenance
+- a manifest that says what was generated from where
+- a way to verify whether the docs are stale later
+
+This project turns trusted documentation sources into that agent-ready format.
+
+## What It Produces
+
+A generated documentation pack looks like this:
+
+```text
+tailwindcss-v3-agent-docs/
+  index.md
+  full.md
+  categories/
+    configuration.md
+    utilities.md
+    responsive-design.md
+  manifest.json
+  discovery-report.json
+  source/
+    selected-source.ref.json
+```
+
+The Markdown files are for the AI agent to read. The manifest is for trust. It
+records the selected source, version, commit or content hash, generated files,
+warnings, and confidence score.
+
+If the source moves, changes, or becomes impossible to verify, the agent can
+tell you instead of quietly using stale docs.
+
+## How You Use It
+
+You talk to your AI agent naturally and tell it to use `llm-docs`.
+
+Examples:
+
+```text
+Use `llm-docs` to generate agent-optimized docs for Tailwind CSS.
+Stay on Tailwind 3.
+```
+
+```text
+Use `llm-docs` to crawl the official Supabase Swift docs and create local
+Markdown docs my agent can use.
+```
+
+```text
+Use `llm-docs` to generate docs for https://github.com/supabase/supabase.
+If the existing docs are incomplete, use the source code as truth and generate
+or verify the missing sections with source-file provenance.
+```
+
+```text
+Use `llm-docs` to convert the official Supabase Swift docs, but verify API
+signatures and behavior against the source code.
+```
+
+```text
+Use `llm-docs` to check whether the generated docs in ./docs/generated are stale.
+Do not upgrade pinned versions.
+```
+
+```text
+Use `llm-docs` to turn this local docs folder into an agent-readable docs pack:
+./docs
+```
+
+The human interface is the prompt. The CLI is the tool your agent uses behind
+the scenes.
+
+## What the CLI Actually Does
+
+`llm-docs` gives the AI agent a repeatable workflow.
+
+It can:
+
+- discover official docs, source repos, specs, sitemaps, `llms.txt`, and linked
+  documentation sources
+- crawl or extract the relevant documentation pages
+- clone and cache repos when the source lives in GitHub
+- choose between candidate sources with an explainable score
+- preserve version intent, such as "Tailwind 3" instead of silently choosing
+  Tailwind 4
+- parse structured sources like OpenAPI, OpenRef, Markdown, MDX, RST, and DocC
+- convert the selected source into agent-optimized Markdown
+- split output by category while keeping a full combined file
+- write manifests so generated docs can be verified or refreshed later
+- generate source-truth codebase docs when the user explicitly asks for docs
+  from code or asks to verify docs against implementation
+- fact-check official docs against source code when the user asks for
+  source-truth confidence
+
+The point is not to replace official docs. The point is to convert official docs
+into a local, structured, verifiable form that an AI agent can use well.
+
+## Why This Is Better Than Just Browsing
+
+Browsing is temporary. A generated docs pack is durable.
+
+Without this tool, an agent may:
+
+- read the wrong version
+- miss pages hidden behind navigation
+- mix official docs with community posts
+- forget where a claim came from
+- repeat expensive discovery work
+- keep using stale context
+
+With this tool, the agent gets source material that is structured, local,
+versioned, and refreshable.
+
+## Why This Is More Than a Skill
+
+A skill can tell an AI agent how to search.
+
+`llm-docs-generator` gives the agent machinery:
+
+- a CLI it can run
+- a source discovery pipeline
+- parsers and formatters
+- repo caching
+- version checks
+- manifests
+- stale-doc verification
+
+The skill helps the agent decide what to do. The CLI does the work and writes
+the artifact.
+
+## Typical Use Cases
+
+Use it when:
+
+- you want your agent to work from official docs, but in local Markdown
+- you need docs pinned to a specific major version
+- a repo has docs scattered across a monorepo
+- you want to regenerate docs only when the source changed
+- you need a manifest showing where generated docs came from
+- you want official docs checked against implementation source code
+- existing docs are incomplete and you want source-truth codebase docs
+
+Do not use it as a generic summarizer. The goal is not to make docs shorter at
+all costs. The goal is to preserve source facts and examples while removing the
+browser-shaped noise that makes docs hard for agents to use.
+
+## Agent Setup
+
+Install the CLI where your AI agent can run shell commands:
+
+```bash
+npm install -g llm-docs-generator
+```
+
+If your AI host supports skills, install the bundled agent instructions:
+
+```bash
+llm-docs agent install codex
+llm-docs agent doctor
+```
+
+After that, prompts like "use `llm-docs` for this" should be enough for the
+agent to route documentation tasks through the tool.
+
+## For Contributors
+
+The product architecture and edge cases are in `NEXT_GEN_PLAN.html`.
+
+Agent-facing routing rules are in `AGENT_CONTEXT.md`.
+
+The crawl map for humans and agents is in `index.md`.
+
+Useful development commands:
+
 ```bash
 npm install
-```
-
-2. Generate documentation:
-```bash
-npx tsx src/cli.ts generate --source path/to/docs
-```
-
-3. View output in generated directory
-
-### Supported Formats
-- OpenRef YAML: Supabase SDK specifications
-- Markdown/DocC: Swift Programming Language
-- Auto-detection: Automatically identifies format
-
-### Common Use Cases
-- Generate reference docs for Claude Code
-- Convert SDK specs to AI-readable format
-- Process technical documentation for LLM context
-
-### More Information
-- Known sources: config/known-sources.json
-- Examples: test-swift-book.ts
-- Architecture: IMPLEMENTATION.md
-
----
-
-## For AI Assistants
-
-### CAPABILITIES
-Input: openref (yml), markdown (md), docc
-Output: LLM-optimized txt files
-Features: auto-detection, hierarchical numbering, token-optimization, modular output
-
-### KNOWN SOURCES
-File: config/known-sources.json
-
-Tested:
-- supabase-sdks (openref): github.com/supabase/supabase/tree/master/apps/docs/spec
-  - Files: supabase_js_v2.yml, supabase_swift_v2.yml, supabase_py_v2.yml, supabase_kt_v3.yml, supabase_dart_v2.yml, supabase_csharp_v1.yml
-  - Languages: JavaScript, Python, Swift, Kotlin, Dart, C#
-  - Versions: v0-v3 across SDKs
-- swift-book (markdown/docc): github.com/swiftlang/swift-book/tree/main/TSPL.docc
-  - Sections: GuidedTour, LanguageGuide, ReferenceManual
-  - Format: Apple DocC markdown
-
-Planned:
-- python-docs (rst): github.com/python/cpython/tree/master/Doc
-- typescript-handbook (markdown): github.com/microsoft/TypeScript-Handbook
-- rust-book (markdown): github.com/rust-lang/book/tree/main/src
-
-### CLI COMMANDS
-
-Generate from source:
-```bash
-llm-docs generate --source <path>
-llm-docs generate --source <path> --format <openref|markdown>
-llm-docs generate --sdk <sdk-name> --sdk-version <version>
-```
-
-List available SDKs:
-```bash
-llm-docs list-sdks
-```
-
-Validate specification:
-```bash
-llm-docs validate --sdk <name>
-```
-
-Options:
-- --verbose: Enable debug logging
-- --output-dir: Specify output location (default: ../../public/llms-openref)
-- --config-dir: Custom config directory (default: config)
-- --force: Force re-download specs
-
-### USAGE PATTERNS
-
-Pattern 1: Supabase SDK (OpenRef)
-```bash
-cd supabase
-llm-docs generate --source apps/docs/spec/supabase_swift_v2.yml
-# Output: ../../public/llms-openref/swift/v2/llm-docs/
-#   - supabase-swift-v2-full-llms.txt (complete)
-#   - supabase-swift-v2-database-llms.txt (category)
-#   - supabase-swift-v2-auth-llms.txt (category)
-```
-
-Pattern 2: Swift-Book (Markdown/DocC)
-```bash
-cd swift-book
-llm-docs generate --source TSPL.docc/LanguageGuide --format markdown
-# Output: ./output/*.txt
-```
-
-Pattern 3: Auto-detection
-```bash
-llm-docs generate --source /path/to/docs
-# Format automatically detected
-```
-
-### OUTPUT STRUCTURE
-
-Format: Hierarchical markdown with numbering
-- Numbering: 1.1, 1.2.1, 2.1.3 (precise navigation)
-- Headers: SYSTEM tags for semantic context
-- Content: Code examples, schemas, JSON responses inline
-- Files: Per-category + full combined
-
-Example output:
-```
-<SYSTEM>Supabase Swift SDK v2 - Database Operations</SYSTEM>
-
-# Supabase Swift SDK v2 Database Operations Documentation
-
-# 1. Fetch Data: select()
-
-## 1.1. Getting Your Data
-```swift
-let instruments: [Instrument] = try await supabase
-  .from("instruments")
-  .select()
-  .execute()
-  .value
-
-// Data Source
-/*
-create table instruments (
-  id int8 primary key,
-  name text
-);
-*/
-
-// Response
-/*
-{
-  "data": [{"id": 1, "name": "violin"}],
-  "status": 200
-}
-*/
-```
-
-## 1.2. Select Specific Columns
-```
-
-### ARCHITECTURE
-
-Data flow:
-```
-Input → Parser → IR (DocNode) → Formatter → Output
-```
-
-Components:
-- src/parsers/openref/: OpenRef YAML → IR
-- src/parsers/markdown/: Markdown/DocC → IR
-- src/core/detector.ts: Format auto-detection
-- src/core/universal-formatter.ts: IR → LLM output
-- src/core/models.ts: Unified IR types
-
-Unified IR (Intermediate Representation):
-- DocNode types: ROOT, CATEGORY, SECTION, OPERATION, ITEM
-- ContentBlock types: PROSE, CODE, DATA
-- Format-agnostic tree structure
-
-Performance:
-- O(1) map-based lookups
-- O(n) single-pass parsing
-- Streaming writes for large files (>10MB)
-- Lazy configuration loading
-
-### CONFIGURATION
-
-Files:
-- config/sdks.json: SDK definitions
-- config/categories.json: Documentation categories
-- config/known-sources.json: Source registry
-- config/presets/: Format presets
-
-SDK configuration (config/sdks.json):
-```json
-{
-  "sdks": {
-    "swift": {
-      "name": "Swift",
-      "language": "swift",
-      "versions": {
-        "v2": {
-          "displayName": "Supabase Swift SDK v2",
-          "spec": {
-            "url": "https://raw.githubusercontent.com/.../supabase_swift_v2.yml",
-            "localPath": "../../spec/supabase_swift_v2.yml"
-          },
-          "output": {
-            "baseDir": "swift",
-            "filenamePrefix": "supabase-swift-v2"
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-Category configuration (config/categories.json):
-```json
-{
-  "categories": {
-    "database": {
-      "title": "Database Operations",
-      "systemPrompt": "This is the developer documentation for Supabase {sdk_name} - Database Operations.",
-      "operations": ["select", "insert", "update", "delete", "..."],
-      "order": 4
-    }
-  }
-}
-```
-
-### PROGRAMMATIC API
-
-TypeScript:
-```typescript
-import { markdownParser } from './src/parsers/markdown/index.js';
-import { openRefParser } from './src/parsers/openref/index.js';
-import { formatDocNode } from './src/core/universal-formatter.js';
-
-// Parse markdown
-const docNode = await markdownParser.parse(sourcePath);
-
-// Format for LLMs
-await formatDocNode(docNode, {
-  outputDir: './output',
-  filenamePrefix: 'docs',
-  title: 'Documentation',
-  systemPrompt: 'Context for LLM'
-});
-```
-
-Exports:
-- OpenRefParser, parseOpenRefSpec, getParserStats
-- LLMFormatter, formatSpecData
-- ConfigLoader, loadConfig
-- fetchSpec, isSpecCached, clearSpecCache
-- Logger, LogLevel
-
-### ADDING SOURCE TO REGISTRY
-
-Steps:
-1. Edit config/known-sources.json
-2. Add entry with required fields
-3. Test generation
-4. Update tested: true
-5. Submit PR
-
-Entry format:
-```json
-{
-  "id": "project-id",
-  "name": "Project Name",
-  "repository": "https://github.com/org/repo",
-  "format": "markdown",
-  "path": "docs/",
-  "pattern": "**/*.md",
-  "description": "Brief description",
-  "examples": [
-    {
-      "file": "docs/api.md",
-      "description": "API documentation"
-    }
-  ],
-  "usage": "llm-docs generate --source docs/",
-  "tested": false,
-  "maintainer": "Organization"
-}
-```
-
-### FILE STRUCTURE
-```
-llm-docs-generator/
-├── src/
-│   ├── cli.ts                      # CLI entry point
-│   ├── index.ts                    # Programmatic API exports
-│   ├── core/
-│   │   ├── models.ts               # Unified IR types + legacy OpenRef
-│   │   ├── detector.ts             # Format auto-detection
-│   │   ├── universal-formatter.ts  # IR → LLM output
-│   │   ├── formatter.ts            # Legacy OpenRef formatter
-│   │   └── parser.ts               # Legacy OpenRef parser
-│   ├── parsers/
-│   │   ├── base.ts                 # Parser interface
-│   │   ├── openref/
-│   │   │   ├── parser.ts           # OpenRef YAML parser
-│   │   │   ├── adapter.ts          # OpenRef → IR
-│   │   │   └── index.ts            # Wrapper
-│   │   └── markdown/
-│   │       ├── parser.ts           # Markdown/DocC parser
-│   │       ├── adapter.ts          # Markdown → IR
-│   │       └── index.ts            # Wrapper
-│   ├── config/
-│   │   ├── loader.ts               # Configuration loader
-│   │   └── schemas.ts              # Zod validation schemas
-│   └── utils/
-│       ├── fetcher.ts              # HTTP client + caching
-│       └── logger.ts               # Logging utilities
-├── config/
-│   ├── sdks.json                   # SDK definitions (OpenRef)
-│   ├── categories.json             # Documentation categories
-│   ├── known-sources.json          # Source registry
-│   └── presets/
-│       └── swift-book.json         # Swift-Book preset
-├── tests/
-│   └── unit/
-│       └── models.test.ts          # Unit tests
-├── test-swift-book.ts              # Example usage
-├── package.json
-├── tsconfig.json
-└── vitest.config.ts
-```
-
-### INSTALLATION
-```bash
-npm install
+npm run type-check
+npm run test
 npm run build
 ```
 
-Dependencies:
-- chalk: Terminal styling
-- commander: CLI framework
-- js-yaml: YAML parsing
-- marked: Markdown parsing
-- ora: Progress spinners
-- undici: HTTP client
-- zod: Schema validation
-
-DevDependencies:
-- typescript, tsx, tsup
-- vitest, @vitest/coverage-v8
-- eslint, prettier
-
-### DEVELOPMENT
-
-Commands:
-```bash
-npm test              # Run tests
-npm run test:watch    # Watch mode
-npm run test:coverage # Coverage report
-npm run lint          # Lint code
-npm run lint:fix      # Fix lint issues
-npm run format        # Format code
-npm run type-check    # TypeScript check
-npm run build         # Build dist/
-```
-
-Adding new SDK (OpenRef):
-1. Add to config/sdks.json
-2. Ensure spec YAML exists at localPath
-3. Run: npx tsx src/cli.ts generate --sdk your_sdk
-
-Adding new category:
-1. Edit config/categories.json
-2. Specify operations array
-3. Set order for sorting
-
-### TROUBLESHOOTING
-
-Configuration not loaded:
-- Run commands from project directory
-- Or use --config-dir flag
-
-SDK not found:
-- Run: npx tsx src/cli.ts list-sdks
-- Check SDK name is exact match
-
-Spec file not found:
-- Verify localPath in config/sdks.json
-- Paths are relative to script directory
-
-Uncategorized operations:
-- Check warnings during generation
-- Add operation IDs to config/categories.json
-
-### ADVANCED USAGE
-
-Programmatic consumption:
-```
-URL pattern: /llms-openref/{sdk}/{version}/llm-docs/{filename}.txt
-Example: https://supabase.com/llms-openref/swift/v2/llm-docs/supabase-swift-v2-full-llms.txt
-```
-
-Embedding pipelines:
-```python
-import requests
-
-url = 'https://supabase.com/llms-openref/dart/v2/llm-docs/supabase-dart-v2-full-llms.txt'
-docs = requests.get(url).text
-chunks = docs.split('\n## ')  # Split by H2 headers
-
-for chunk in chunks:
-    # Process for embeddings
-    pass
-```
-
-Hierarchical parsing:
-```javascript
-const docs = await fetch(url).then(r => r.text());
-const operations = docs.split(/\n### \d+\.\d+\./);
-const examples = operation.split(/\n#### \d+\.\d+\.\d+\./);
-```
-
-Metadata headers:
-```html
-<!-- Generated from: spec/supabase_dart_v2.yml -->
-<!-- SDK: dart, Version: v2, Generated: October 17, 2025 -->
-```
-
-### FUTURE ENHANCEMENTS
-
-Planned:
-- Manifest files: JSON listing all artifacts with hashes
-- JSONL export: For embedding pipelines
-- CI integration: Automated validation
-- Deterministic chunk IDs: Stable anchors for retrieval
-- MCP server: Native Claude Code integration
-- Git repository support: Clone and process remote sources
-- Watch mode: Auto-regenerate on file changes
-
-### REFERENCES
-
-- OpenRef Specifications: github.com/supabase/supabase/tree/master/apps/docs/spec
-- Swift-Book: github.com/swiftlang/swift-book
-- Supabase PR: github.com/supabase/supabase/pull/39461
+Good agent documentation is not just shorter documentation. It is verified,
+structured, refreshable, and honest about where it came from.
