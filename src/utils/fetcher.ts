@@ -22,6 +22,13 @@ import { info, warn, error as logError } from './logger.js';
 const FETCH_TIMEOUT = 30000; // 30 seconds
 const USER_AGENT = 'supabase-llm-docs/1.0.0';
 
+class SourceAvailabilityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SourceAvailabilityError';
+  }
+}
+
 // ============================================================================
 // FETCHER FUNCTIONS
 // ============================================================================
@@ -80,6 +87,7 @@ export async function fetchSpec(
   info(`Fetching spec from: ${specUrl}`);
 
   try {
+    await checkRemoteSpecAvailability(specUrl, FETCH_TIMEOUT);
     const content = await downloadFile(specUrl, FETCH_TIMEOUT);
 
     // Ensure cache directory exists
@@ -91,9 +99,54 @@ export async function fetchSpec(
     info(`Spec downloaded and cached: ${cachePath}`);
     return [cachePath, actualVersion];
   } catch (err) {
-    logError(`Failed to fetch spec from ${specUrl}: ${String(err)}`);
-    throw new Error(`Failed to fetch spec: ${String(err)}`);
+    if (err instanceof SourceAvailabilityError) {
+      logError(err.message);
+      throw err;
+    }
+
+    logError(`Failed to download spec from ${specUrl}: ${String(err)}`);
+    throw new Error(`Failed to download spec from ${specUrl}: ${String(err)}`);
   }
+}
+
+async function checkRemoteSpecAvailability(url: string, timeout: number): Promise<void> {
+  let response;
+
+  try {
+    response = await request(url, {
+      method: 'HEAD',
+      headersTimeout: timeout,
+      bodyTimeout: timeout,
+      headers: {
+        'User-Agent': USER_AGENT,
+      },
+    });
+  } catch (err) {
+    throw new SourceAvailabilityError(
+      `Spec source availability check failed for ${url}: ${String(err)}`
+    );
+  }
+
+  try {
+    await response.body.text();
+  } catch (err) {
+    throw new SourceAvailabilityError(
+      `Spec source availability check failed for ${url}: ${String(err)}`
+    );
+  }
+
+  const { statusCode } = response;
+
+  if (statusCode >= 200 && statusCode < 400) {
+    return;
+  }
+
+  if (statusCode === 405 || statusCode === 501) {
+    warn(`Spec source HEAD check unsupported for ${url} (HTTP ${statusCode}); trying GET`);
+    return;
+  }
+
+  throw new SourceAvailabilityError(`Spec source unavailable at ${url}: HTTP ${statusCode}`);
 }
 
 /**
@@ -116,6 +169,12 @@ async function downloadFile(url: string, timeout: number): Promise<string> {
   });
 
   if (response.statusCode !== 200) {
+    try {
+      await response.body.text();
+    } catch {
+      // Preserve the existing HTTP status failure while still attempting cleanup.
+    }
+
     throw new Error(`HTTP ${response.statusCode}: ${response.statusCode}`);
   }
 
@@ -203,9 +262,7 @@ export async function clearSpecCache(sdkName?: string, version?: string): Promis
   }
 
   const files = await readdir(cacheDir);
-  const cacheFiles = files.filter(
-    (f) => f.startsWith('supabase_') && f.endsWith('.yml')
-  );
+  const cacheFiles = files.filter((f) => f.startsWith('supabase_') && f.endsWith('.yml'));
 
   let deletedCount = 0;
   for (const file of cacheFiles) {
