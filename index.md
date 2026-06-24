@@ -96,9 +96,10 @@ npx tsx src/cli.ts validate --sdk swift --version v2
 ```
 
 The current CLI does not yet expose target-driven discovery, `generate
---source`, manifests, refresh, repo caching, source verification, or
-source-truth codebase docs generation. Markdown / DocC parsing exists in parser
-modules but is not wired as a current CLI command.
+--source`, refresh, repo caching, source verification, or source-truth codebase
+docs generation. It writes `manifest.json` for successful configured
+`generate --sdk` tasks only. Markdown / DocC parsing exists in parser modules
+but is not wired as a current CLI command.
 
 The current CLI is implemented in:
 
@@ -115,6 +116,7 @@ Core model and formatting:
 - [src/core/models.ts](src/core/models.ts)
 - [src/core/formatter.ts](src/core/formatter.ts)
 - [src/core/universal-formatter.ts](src/core/universal-formatter.ts)
+- [src/core/manifest.ts](src/core/manifest.ts)
 - [src/core/detector.ts](src/core/detector.ts)
 
 Parsers:
@@ -179,7 +181,9 @@ target resolver
 - If the user pins a version, branch, tag, commit, or major version, do not
   silently upgrade.
 - If the user asks for latest, verify remote state before reusing a cached clone.
-- Every generated output should eventually include manifest provenance:
+- Successful configured SDK generation currently writes a scoped manifest with
+  source and output hashes.
+- Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL
   - branch, tag, or commit

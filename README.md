@@ -4,7 +4,8 @@
 
 The current CLI is a compatibility implementation for configured Supabase
 OpenRef specs. It can list configured SDKs, generate LLM-optimized text from
-those configured specs, and validate a configured SDK/version pair.
+those configured specs, write a scoped generation manifest, and validate a
+configured SDK/version pair.
 
 The next-generation roadmap is broader: humans should be able to tell an AI
 agent what docs they need, and the agent should use `llm-docs` to find the right
@@ -30,9 +31,10 @@ An AI agent needs something different:
 - a manifest that says what was generated from where
 - a way to verify whether the docs are stale later
 
-The current implementation covers the OpenRef conversion foundation. Discovery,
-manifests, source verification, refresh, and source-truth codebase docs are
-planned next-generation capabilities, not current CLI behavior.
+The current implementation covers the OpenRef conversion foundation and writes
+a scoped manifest for successful configured SDK generation. Discovery, source
+verification, refresh, and source-truth codebase docs are planned
+next-generation capabilities, not current CLI behavior.
 
 ## What It Produces
 
@@ -56,8 +58,11 @@ The Markdown files are for the AI agent to read. The manifest is for trust. In
 the target design, it records the selected source, version, commit or content
 hash, generated files, warnings, and confidence score.
 
-Manifest writing and stale-source verification are not implemented in the
-current CLI yet.
+The current configured SDK generation path writes
+`<output-dir>/<sdk>/<resolvedVersion>/manifest.json` with the configured source,
+resolved spec path, source hash, parser and formatter metadata, and generated
+file hashes. Discovery reports, stale-source verification, repo provenance, and
+source-code verification are not implemented yet.
 
 ## How You Use It
 
@@ -116,6 +121,7 @@ Current CLI capabilities:
 
 - list configured SDKs from `config/sdks.json`
 - generate LLM-optimized text from configured OpenRef YAML specs
+- write `manifest.json` for each successful configured SDK/version generation
 - validate a configured OpenRef SDK/version pair
 - preserve the existing Supabase/OpenRef command surface while the next-gen
   resolver is built
@@ -137,7 +143,8 @@ Planned next-generation capabilities:
   Tailwind 4
 - parse additional structured sources such as OpenAPI, MDX, RST, and HTML
 - convert selected sources into agent-optimized Markdown packs
-- write manifests so generated docs can be verified or refreshed later
+- extend manifests to cover discovered sources, repo commits, refresh, and
+  verification
 - generate source-truth codebase docs only after that explicit mode exists
 - fact-check official docs against source code only after source verification is
   implemented
@@ -170,10 +177,11 @@ A skill can tell an AI agent how to search.
 - implemented now: a CLI it can run for configured OpenRef specs
 - implemented now: OpenRef and Markdown/DocC parser modules
 - implemented now: LLM-oriented formatters
+- implemented now: scoped manifests for successful configured SDK generation
 - planned: a source discovery pipeline
 - planned: repo caching
 - planned: version/freshness checks beyond configured SDK versions
-- planned: manifests
+- planned: discovered-source and verification manifest expansion
 - planned: stale-doc verification
 
 The skill helps the agent decide what to do. For implemented workflows, the CLI
