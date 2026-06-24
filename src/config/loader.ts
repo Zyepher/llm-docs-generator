@@ -120,12 +120,7 @@ export class ConfigLoader {
    */
   getSDKVersionConfig(sdkName: string, version: string): SDKVersionConfig {
     const sdk = this.getSDK(sdkName);
-
-    // Resolve 'latest' to actual version
-    let actualVersion = version;
-    if (version === 'latest') {
-      actualVersion = this.getLatestVersion(sdk);
-    }
+    const actualVersion = this.resolveSDKVersion(sdkName, version);
 
     const versionConfig = sdk.versions[actualVersion];
     if (versionConfig === undefined) {
@@ -136,6 +131,18 @@ export class ConfigLoader {
     }
 
     return versionConfig;
+  }
+
+  /**
+   * Resolve aliases such as 'latest' to an actual configured SDK version.
+   * Performance: O(n) for 'latest', O(1) otherwise
+   */
+  resolveSDKVersion(sdkName: string, version: string): string {
+    if (version !== 'latest') {
+      return version;
+    }
+
+    return this.getLatestVersion(this.getSDK(sdkName));
   }
 
   /**

@@ -147,7 +147,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [ ] CLI enhancements (--format, --preset flags)
 - [ ] Directory parsing for full swift-book (all chapters)
 - [ ] JSONL export format for embedding pipelines
-- [ ] Manifest generation for RAG systems
+- [x] Scoped manifest generation for configured OpenRef CLI output
+- [ ] Manifest expansion for RAG, discovery, and refresh systems
 - [ ] Plugin system for custom parsers
 - [ ] OpenRef backward compatibility tests
 

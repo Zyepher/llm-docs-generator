@@ -27,10 +27,12 @@ Current implementation:
 - Can parse local Markdown / DocC-style sources through parser modules.
 - Can format parsed docs into LLM-friendly text.
 - Has early multi-format architecture.
+- Writes scoped manifests for successful configured `generate --sdk` tasks.
 - Current CLI commands are limited to `generate --sdk`, `list-sdks`, and
   `validate --sdk`.
-- Does not yet fully implement repo discovery, website discovery, manifests, or
-  source-truth codebase documentation generation.
+- Does not yet fully implement repo discovery, website discovery, refresh,
+  source verification, full next-generation manifests, or source-truth codebase
+  documentation generation.
 
 Target next-generation implementation:
 
@@ -57,9 +59,10 @@ Use this router before running commands.
 
 The workflows below describe the approved next-generation product direction.
 When using the current CLI, verify that the needed command exists first. If the
-workflow needs discovery, manifests, repo caching, refresh, source verification,
-or source-truth codebase docs generation, treat it as planned work unless source
-and tests prove it has been implemented.
+workflow needs discovery, repo caching, refresh, source verification,
+source-truth codebase docs generation, or manifest data beyond the current
+configured SDK generation manifest, treat it as planned work unless source and
+tests prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -348,7 +351,10 @@ Record at minimum:
 - generated output paths
 - warnings, skipped candidates, and confidence score
 
-Future implementations should write this to `manifest.json`.
+The current configured SDK generation path writes a scoped
+`manifest.json` with configured source details, hashes, parser and formatter
+metadata, and generated file hashes. Future implementations should extend
+manifest coverage to the broader provenance fields above.
 
 ## Clarifying Questions
 

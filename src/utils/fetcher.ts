@@ -53,11 +53,7 @@ export async function fetchSpec(
   const versionConfig = config.getSDKVersionConfig(sdkName, version);
 
   // Resolve 'latest' to actual version for caching
-  let actualVersion = version;
-  if (version === 'latest') {
-    const versions = config.getSDKVersions(sdkName);
-    actualVersion = versions[0] ?? 'v1';
-  }
+  const actualVersion = config.resolveSDKVersion(sdkName, version);
 
   // Check for local path override
   if (versionConfig.spec.localPath !== null && !forceDownload) {

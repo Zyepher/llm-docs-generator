@@ -85,7 +85,7 @@ export class LLMFormatter {
    *
    * Optimization: Parallel writes using Promise.all
    */
-  async generateAll(outputDir: string): Promise<void> {
+  async generateAll(outputDir: string): Promise<string[]> {
     const llmDocsDir = `${outputDir}/llm-docs`;
     await mkdir(llmDocsDir, { recursive: true });
 
@@ -93,7 +93,7 @@ export class LLMFormatter {
     const categorized = this.categorizeOperations();
 
     // Collect all write promises for parallel execution
-    const writePromises: Promise<void>[] = [];
+    const writePromises: Promise<string>[] = [];
 
     // Generate each module (can be parallelized)
     for (const [categoryName, _categoryConfig] of this.config.getSortedCategories()) {
@@ -109,10 +109,12 @@ export class LLMFormatter {
     }
 
     // Wait for all module writes to complete (parallel I/O)
-    await Promise.all(writePromises);
+    const outputPaths = await Promise.all(writePromises);
 
     // Generate full documentation with proper hierarchy
-    await this.generateFullDoc(llmDocsDir, categorized);
+    outputPaths.push(await this.generateFullDoc(llmDocsDir, categorized));
+
+    return outputPaths;
   }
 
   /**
@@ -348,11 +350,13 @@ export class LLMFormatter {
     outputDir: string,
     categoryName: string,
     content: string
-  ): Promise<void> {
+  ): Promise<string> {
     const filename = `${this.versionConfig.output.filenamePrefix}-${categoryName}-llms.txt`;
     const filepath = `${outputDir}/${filename}`;
 
     await writeFile(filepath, content, 'utf-8');
+
+    return filepath;
   }
 
   /**
@@ -364,7 +368,7 @@ export class LLMFormatter {
   private async generateFullDoc(
     outputDir: string,
     categorized: CategorizedOperations
-  ): Promise<void> {
+  ): Promise<string> {
     const filename = `${this.versionConfig.output.filenamePrefix}-full-llms.txt`;
     const filepath = `${outputDir}/${filename}`;
 
@@ -426,6 +430,8 @@ export class LLMFormatter {
       // Direct write for smaller files
       await writeFile(filepath, fullContent, 'utf-8');
     }
+
+    return filepath;
   }
 
   /**

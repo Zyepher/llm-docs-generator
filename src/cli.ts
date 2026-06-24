@@ -12,10 +12,13 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import packageJson from '../package.json';
+import { rm } from 'node:fs/promises';
 
 import { ConfigLoader } from './config/loader.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
+import { writeGenerationManifest } from './core/manifest.js';
 import { fetchSpec } from './utils/fetcher.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
@@ -24,11 +27,27 @@ import { Logger, LogLevel } from './utils/logger.js';
 // ============================================================================
 
 const program = new Command();
+const CLI_NAME = 'supabase-llm-docs';
+const GENERATOR_NAME = packageJson.name;
+const GENERATOR_VERSION = packageJson.version;
+const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';
+
+function resolvePlannedOutputVersion(
+  sdkName: string,
+  requestedVersion: string,
+  config: ConfigLoader
+): string {
+  return config.resolveSDKVersion(sdkName, requestedVersion);
+}
+
+async function removeScopedManifest(outputDir: string): Promise<void> {
+  await rm(`${outputDir}/manifest.json`, { force: true });
+}
 
 program
-  .name('supabase-llm-docs')
+  .name(CLI_NAME)
   .description('Generate LLM-optimized documentation from Supabase SDK specifications')
-  .version('1.0.0')
+  .version(GENERATOR_VERSION)
   .enablePositionalOptions();
 
 // ============================================================================
@@ -100,6 +119,10 @@ program
           const spinner = ora(`Processing ${sdkName} ${ver}...`).start();
 
           try {
+            const plannedVersion = resolvePlannedOutputVersion(sdkName, ver, config);
+            const plannedOutputDir = `${options.outputDir}/${sdkName}/${plannedVersion}`;
+            await removeScopedManifest(plannedOutputDir);
+
             // Fetch spec (uses cache by default) - returns [specPath, resolvedVersion]
             const [specPath, resolvedVersion] = await fetchSpec(
               sdkName,
@@ -107,6 +130,7 @@ program
               config,
               options.force
             );
+            const versionConfig = config.getSDKVersionConfig(sdkName, resolvedVersion);
 
             // Parse spec
             const parser = new OpenRefParser(specPath);
@@ -114,10 +138,8 @@ program
 
             // Save parsed JSON using resolved version
             const outputDir = `${options.outputDir}/${sdkName}/${resolvedVersion}`;
-            await parser.saveJSON(
-              parsedData,
-              `${outputDir}/parsed/${sdkName}-${resolvedVersion}-spec.json`
-            );
+            const parsedSpecPath = `${outputDir}/parsed/${sdkName}-${resolvedVersion}-spec.json`;
+            await parser.saveJSON(parsedData, parsedSpecPath);
 
             // Format for LLM using resolved version
             const formatter = new LLMFormatter(
@@ -127,7 +149,43 @@ program
               resolvedVersion,
               specPath
             );
-            await formatter.generateAll(outputDir);
+            const llmOutputPaths = await formatter.generateAll(outputDir);
+
+            await writeGenerationManifest({
+              manifestPath: `${outputDir}/manifest.json`,
+              generatedAt: new Date(),
+              generator: {
+                name: GENERATOR_NAME,
+                version: GENERATOR_VERSION,
+                cliName: CLI_NAME,
+              },
+              sdk: {
+                name: sdkName,
+                resolvedVersion,
+                displayName: versionConfig.displayName,
+              },
+              source: {
+                configuredUrl: versionConfig.spec.url,
+                configuredLocalPath: versionConfig.spec.localPath,
+                resolvedSpecPath: specPath,
+                format: versionConfig.spec.format,
+              },
+              parser: {
+                name: 'OpenRefParser',
+                version: GENERATOR_VERSION,
+                format: versionConfig.spec.format,
+              },
+              formatter: {
+                name: 'LLMFormatter',
+                version: GENERATOR_VERSION,
+                format: LEGACY_FORMATTER_FORMAT,
+              },
+              generatedOutputs: [
+                { path: parsedSpecPath, kind: 'parsed-spec-json' },
+                ...llmOutputPaths.map((path) => ({ path, kind: 'llm-docs' as const })),
+              ],
+              warnings: [],
+            });
 
             spinner.succeed(chalk.green(`Completed ${sdkName} ${resolvedVersion}`));
             successCount++;
