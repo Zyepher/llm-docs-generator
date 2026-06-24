@@ -149,10 +149,18 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [ ] JSONL export format for embedding pipelines
 - [x] Scoped manifest generation for configured OpenRef CLI output
 - [x] Scoped manifest hash/size verification for current configured SDK output
+- [x] Explicit local `discover --source` bounded inspection report
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
 - [ ] Repo, source-code, discovery, and refresh verification
 - [ ] Plugin system for custom parsers
 - [ ] OpenRef backward compatibility tests
+
+Current discovery scope: `llm-docs discover --source <path>` accepts only an
+explicit local file or directory, writes `discovery-report.json`, and reports
+candidate file hints, byte sizes, hashes, traversal bounds, skipped generated
+directories, and warnings. It does not generate docs, clone repositories, crawl
+websites, score authority, choose candidates, or implement source-truth codebase
+docs generation.
 
 ## Files Modified/Created
 
