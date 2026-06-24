@@ -9,9 +9,11 @@ configured SDK/version pair. It can also verify the current configured SDK
 manifest's recorded file hashes and byte sizes.
 
 The next-generation roadmap is broader: humans should be able to tell an AI
-agent what docs they need, and the agent should use `llm-docs` to find the right
-sources, extract useful documentation, turn it into structured Markdown, and
-record where every piece came from.
+agent what docs they need, and the agent should resolve intent, source, scope,
+version, and path before calling `llm-docs`. The CLI is the deterministic,
+scriptable capability layer that ingests explicit sources, performs bounded
+inspection, turns selected documentation into structured Markdown, and records
+where every piece came from.
 
 ## The Problem
 
@@ -92,8 +94,8 @@ Stay on Tailwind 3.
 ```
 
 ```text
-Use `llm-docs` to crawl the official Supabase Swift docs and create local
-Markdown docs my agent can use.
+Resolve the official Supabase Swift docs URL, then use `llm-docs` to inspect
+that URL within scope and create local Markdown docs my agent can use.
 ```
 
 ```text
@@ -133,7 +135,7 @@ Current CLI capabilities:
   byte sizes
 - validate a configured OpenRef SDK/version pair
 - preserve the existing Supabase/OpenRef command surface while the next-gen
-  resolver is built
+  input normalizer and inspection reports are built
 
 Current library/parser capabilities:
 
@@ -143,16 +145,17 @@ Current library/parser capabilities:
 
 Planned next-generation capabilities:
 
-- discover official docs, source repos, specs, sitemaps, `llms.txt`, and linked
-  documentation sources
-- crawl or extract relevant documentation pages
-- clone and cache repos when the source lives in GitHub
-- choose between candidate sources with an explainable score
+- inspect explicit docs, source repos, specs, sitemaps, `llms.txt`, and linked
+  documentation sources within bounded scope
+- crawl or extract relevant documentation pages from provided URLs and allowed
+  scope
+- clone and cache repos when the agent provides or approves the source repo
+- produce explainable candidate scores and reports for agent review
 - preserve version intent, such as "Tailwind 3" instead of silently choosing
   Tailwind 4
 - parse additional structured sources such as OpenAPI, MDX, RST, and HTML
 - convert selected sources into agent-optimized Markdown packs
-- extend manifests to cover discovered sources, repo commits, refresh, and
+- extend manifests to cover inspected sources, repo commits, refresh, and
   verification
 - generate source-truth codebase docs only after that explicit mode exists
 - fact-check official docs against source code only after source verification is
@@ -175,7 +178,8 @@ Without this tool, an agent may:
 - keep using stale context
 
 With the target next-generation implementation, the agent gets source material
-that is structured, local, versioned, and refreshable.
+that is structured, local, versioned, refreshable, and backed by inspectable CLI
+reports.
 
 ## Why This Is More Than a Skill
 
@@ -189,14 +193,15 @@ A skill can tell an AI agent how to search.
 - implemented now: scoped manifests for successful configured SDK generation
 - implemented now: hash and byte-size verification for current configured SDK
   manifests
-- planned: a source discovery pipeline
+- planned: bounded source inspection and discovery reports
 - planned: repo caching
 - planned: version/freshness checks beyond configured SDK versions
 - planned: discovered-source and verification manifest expansion
 - planned: stale-doc verification
 
 The skill helps the agent decide what to do. For implemented workflows, the CLI
-does the deterministic conversion work and writes the artifact.
+does deterministic conversion, verification, and artifact writing over explicit
+inputs; bounded inspection reports are planned next-generation work.
 
 ## Typical Use Cases
 

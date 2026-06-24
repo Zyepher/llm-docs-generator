@@ -7,12 +7,14 @@ Read this file first, then follow the links for the task you are doing.
 ## Project Summary
 
 `llm-docs-generator` is a Node.js / TypeScript CLI and library for producing
-LLM-friendly documentation from reliable source material.
+LLM-friendly documentation from reliable source material. The agent resolves
+intent, source, scope, version, and path; the CLI performs deterministic,
+bounded inspection and conversion over explicit inputs.
 
 The next-generation direction is to make the project an agent-aware system that
 will be able to:
 
-1. Find official documentation.
+1. Help agents inspect explicit official documentation candidates.
 2. Convert local documentation.
 3. Explore cloned repositories when needed.
 4. Respect pinned versions.
@@ -96,9 +98,9 @@ npx tsx src/cli.ts verify --output-dir ./output/swift/v2
 npx tsx src/cli.ts validate --sdk swift --version v2
 ```
 
-The current CLI does not yet expose target-driven discovery, `generate
---source`, refresh, repo caching, source verification, or source-truth codebase
-docs generation. It writes `manifest.json` for successful configured
+The current CLI does not yet expose bounded target inspection/discovery reports,
+`generate --source`, refresh, repo caching, source verification, or
+source-truth codebase docs generation. It writes `manifest.json` for successful configured
 `generate --sdk` tasks and verifies current configured SDK manifest source and
 output file hashes and byte sizes only. Markdown / DocC parsing exists in
 parser modules but is not wired as a current CLI command.
@@ -166,10 +168,11 @@ Tests:
 The project should evolve toward these modules:
 
 ```text
-target resolver
-  -> official docs discovery
+agent intent/source/scope resolution
+  -> CLI input normalizer
+  -> bounded source inspection
   -> repo explorer / cache manager
-  -> candidate scorer
+  -> candidate report writer
   -> docs parser
   -> source-truth codebase docs generator, when explicitly requested
   -> LLM formatter
@@ -185,8 +188,8 @@ target resolver
 - If the user asks for latest, verify remote state before reusing a cached clone.
 - Successful configured SDK generation currently writes a scoped manifest with
   source and output hashes. Current `verify` checks those configured SDK
-  manifest file hashes and byte sizes only; refresh, discovery, repo, and
-  source-code verification remain planned.
+  manifest file hashes and byte sizes only; refresh, bounded inspection reports,
+  repo, and source-code verification remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL

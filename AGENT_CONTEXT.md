@@ -19,6 +19,24 @@ It should support three major user intents:
 
 The AI agent must identify the user's intent before choosing a workflow.
 
+## Product Boundary
+
+The AI agent is the intelligent planner. It investigates the user's request,
+resolves intent, source, scope, version, and path, and chooses which command to
+run.
+
+The CLI is a deterministic, scriptable capability layer for agents. It should
+ingest explicit sources, normalize documentation, preserve structure, write
+index, manifest, provenance, and freshness metadata, validate output, and report
+honest failures.
+
+Discovery-like CLI behavior must stay bounded, explicit, inspectable, and
+deterministic. Acceptable examples include listing files under a provided source
+path, crawling a provided URL within explicit scope, extracting links from
+provided content, and producing discovery reports for agent review. The CLI must
+not silently choose authoritative sources, guess source-specific documentation
+rules, or pretend to understand arbitrary websites.
+
 ## Current Capability Versus Target Capability
 
 Current implementation:
@@ -38,8 +56,8 @@ Current implementation:
 
 Target next-generation implementation:
 
-- Discover official docs from repo links, docs URLs, package metadata, or product
-  names.
+- Produce bounded inspection reports from explicit repo links, docs URLs,
+  package metadata, source paths, or agent-approved scopes.
 - Convert official or local docs into LLM-friendly output.
 - Clone and cache repositories outside the active workspace.
 - Compare cached clones against remote state to determine freshness.
@@ -80,7 +98,7 @@ User signals:
 
 Agent workflow:
 
-1. Resolve the official source.
+1. Resolve the official source as the agent.
 2. Prefer first-party sources over community mirrors.
 3. Check for machine-readable entry points:
    - `llms.txt`
@@ -91,15 +109,16 @@ Agent workflow:
    - DocC directories
    - GitHub source links from docs pages
 4. If a source repo is discovered, use the repo exploration workflow.
-5. Select the best docs source by authority, structure, relevance, freshness,
-   and parseability.
-6. Run this project's parser/formatter on the selected source.
+5. Review candidate reports by first-party evidence, structure, relevance,
+   freshness, and parseability.
+6. Run this project's parser/formatter on the agent-selected source.
 7. If the user asks for source-truth confidence and a source repo is available,
    verify API signatures, config defaults, routes, exported types, and behavior
    claims against implementation source files.
 8. Report provenance, confidence, and any source-code conflicts.
 
-Use this project as the conversion engine after source discovery succeeds.
+Use this project as the conversion engine after the agent selects an explicit
+source from user input or a bounded inspection report.
 Official docs remain the preferred source for explanations and intended usage,
 but source code wins when implementation-verifiable facts conflict.
 
@@ -205,6 +224,10 @@ Agent workflow:
 3. Run relevant checks such as `npm run type-check` and `npm run test`.
 4. Report current limitations and what was verified.
 
+For future worker or reviewer prompts that touch CLI source ingestion,
+discovery-like inspection, manifests, freshness, provenance, or docs contracts,
+include an explicit reminder to align with the Product Boundary above.
+
 ## Repo Exploration Workflow
 
 Use a repo-explorer skill or equivalent workflow when the target repository is
@@ -245,7 +268,8 @@ Version policy:
 - "latest" means the latest verified source according to the target's release
   conventions, not blindly the newest branch.
 - A user-pinned major version must remain pinned.
-- A tag, branch, or commit supplied by the user is authoritative.
+- A tag, branch, or commit supplied by the user is binding unless it cannot be
+  fetched or verified.
 - If the repo has multiple release channels, ask or report ambiguity.
 
 ## Skill Orchestration Model
@@ -266,8 +290,8 @@ Recommended skills:
   implementation source files and report conflicts with file-level provenance.
 
 The CLI should remain deterministic. Skills guide the agent's decisions; the CLI
-should do the repeatable parsing, formatting, verification, and manifest writing
-as those target capabilities are implemented.
+should do the repeatable bounded inspection, parsing, formatting, verification,
+and manifest writing as those target capabilities are implemented.
 
 ## Distribution Model
 
@@ -313,12 +337,13 @@ Expected behavior:
 
 When an agent is in another directory and receives a prompt such as "Generate
 LLM docs for Tailwind CSS," the installed skill is what should tell the agent to
-call the globally available `llm-docs` CLI. The CLI then performs the
-deterministic work.
+investigate source and scope, then call the globally available `llm-docs` CLI
+with explicit inputs. The CLI then performs the deterministic work.
 
 ## Source Selection Priority
 
-Prefer sources in this order:
+The agent should prefer sources in this order, using CLI reports as evidence
+rather than hidden authority decisions:
 
 1. First-party machine-readable specs: OpenAPI, Swagger, OpenRef.
 2. First-party docs source: Markdown, MDX, RST, DocC.
@@ -380,7 +405,8 @@ Ask when:
 Do not ask when:
 
 - The user provides a direct local docs path.
-- There is one clearly authoritative docs source.
+- The agent has verified one clear first-party source and no material ambiguity
+  remains.
 - The user explicitly pins a tag, branch, commit, docs URL, or source path.
 
 ## Hard Rules
@@ -389,6 +415,8 @@ Do not ask when:
   repository commands during discovery or parsing.
 - Do not silently trust stale source hints.
 - Do not silently upgrade pinned versions.
+- Do not let CLI discovery or scoring make hidden authority decisions; it must
+  produce inspectable evidence for agent review.
 - Do not claim source-truth codebase docs are supported unless that mode exists.
 - Do not mark official docs as source-verified unless implementation files were
   actually inspected.
@@ -405,8 +433,9 @@ Official docs:
 
 ```text
 User: Generate LLM docs for Tailwind CSS.
-Agent: Resolve official docs/repo, decide latest or requested version, discover
-docs source, convert, and write provenance.
+Agent: Resolve official docs/repo, decide latest or requested version, review a
+bounded inspection report when needed, convert the selected source, and write
+provenance.
 ```
 
 Verified official docs:
