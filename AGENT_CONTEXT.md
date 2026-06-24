@@ -24,9 +24,11 @@ The AI agent must identify the user's intent before choosing a workflow.
 Current implementation:
 
 - Can parse configured OpenRef YAML specs.
-- Can parse local Markdown / DocC-style sources.
+- Can parse local Markdown / DocC-style sources through parser modules.
 - Can format parsed docs into LLM-friendly text.
 - Has early multi-format architecture.
+- Current CLI commands are limited to `generate --sdk`, `list-sdks`, and
+  `validate --sdk`.
 - Does not yet fully implement repo discovery, website discovery, manifests, or
   source-truth codebase documentation generation.
 
@@ -52,6 +54,12 @@ and either implement it or provide the next engineering step.
 ## Intent Router
 
 Use this router before running commands.
+
+The workflows below describe the approved next-generation product direction.
+When using the current CLI, verify that the needed command exists first. If the
+workflow needs discovery, manifests, repo caching, refresh, source verification,
+or source-truth codebase docs generation, treat it as planned work unless source
+and tests prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -104,7 +112,8 @@ Agent workflow:
 
 1. Verify the path exists.
 2. Detect the format or honor the user's requested format.
-3. Run source conversion directly.
+3. Run source conversion directly when a CLI mode exists, or use this as the
+   next implementation step if only parser modules support the format.
 4. Report generated output files and source path.
 
 Do not clone external repositories unless the user also asks for discovery or
@@ -252,7 +261,8 @@ Recommended skills:
   implementation source files and report conflicts with file-level provenance.
 
 The CLI should remain deterministic. Skills guide the agent's decisions; the CLI
-does the repeatable parsing, formatting, verification, and manifest writing.
+should do the repeatable parsing, formatting, verification, and manifest writing
+as those target capabilities are implemented.
 
 ## Distribution Model
 
@@ -377,6 +387,9 @@ Do not ask when:
 - Do not use cached source content as fresh output unless verification succeeds.
 
 ## Examples
+
+These examples describe target agent behavior. Before executing them with the
+current CLI, verify that the corresponding mode is implemented.
 
 Official docs:
 

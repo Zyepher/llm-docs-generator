@@ -2,13 +2,14 @@
 
 `llm-docs-generator` is a tool for giving AI agents better documentation context.
 
-Humans should not have to drive the CLI by hand. You tell your AI agent what
-docs you need. The agent uses `llm-docs` to find the right sources, extract the
-useful documentation, turn it into structured Markdown, and record where every
-piece came from.
+The current CLI is a compatibility implementation for configured Supabase
+OpenRef specs. It can list configured SDKs, generate LLM-optimized text from
+those configured specs, and validate a configured SDK/version pair.
 
-The result is a local documentation pack your agent can read repeatedly without
-guessing, browsing from scratch, or trusting stale memory.
+The next-generation roadmap is broader: humans should be able to tell an AI
+agent what docs they need, and the agent should use `llm-docs` to find the right
+sources, extract useful documentation, turn it into structured Markdown, and
+record where every piece came from.
 
 ## The Problem
 
@@ -29,11 +30,13 @@ An AI agent needs something different:
 - a manifest that says what was generated from where
 - a way to verify whether the docs are stale later
 
-This project turns trusted documentation sources into that agent-ready format.
+The current implementation covers the OpenRef conversion foundation. Discovery,
+manifests, source verification, refresh, and source-truth codebase docs are
+planned next-generation capabilities, not current CLI behavior.
 
 ## What It Produces
 
-A generated documentation pack looks like this:
+A target next-generation documentation pack should look like this:
 
 ```text
 tailwindcss-v3-agent-docs/
@@ -49,18 +52,27 @@ tailwindcss-v3-agent-docs/
     selected-source.ref.json
 ```
 
-The Markdown files are for the AI agent to read. The manifest is for trust. It
-records the selected source, version, commit or content hash, generated files,
-warnings, and confidence score.
+The Markdown files are for the AI agent to read. The manifest is for trust. In
+the target design, it records the selected source, version, commit or content
+hash, generated files, warnings, and confidence score.
 
-If the source moves, changes, or becomes impossible to verify, the agent can
-tell you instead of quietly using stale docs.
+Manifest writing and stale-source verification are not implemented in the
+current CLI yet.
 
 ## How You Use It
 
-You talk to your AI agent naturally and tell it to use `llm-docs`.
+Today, use the compatibility CLI directly for configured Supabase SDK specs:
 
-Examples:
+```bash
+llm-docs list-sdks
+llm-docs generate --sdk swift --sdk-version v2 --output-dir ./output
+llm-docs validate --sdk swift --version v2
+```
+
+The target agent workflow is prompt-driven: you talk to your AI agent naturally
+and tell it to use `llm-docs`.
+
+Target next-generation examples:
 
 ```text
 Use `llm-docs` to generate agent-optimized docs for Tailwind CSS.
@@ -93,30 +105,42 @@ Use `llm-docs` to turn this local docs folder into an agent-readable docs pack:
 ./docs
 ```
 
-The human interface is the prompt. The CLI is the tool your agent uses behind
-the scenes.
+The intended human interface is the prompt. The current CLI is the conversion
+tool your agent can use for the implemented compatibility workflow.
 
 ## What the CLI Actually Does
 
-`llm-docs` gives the AI agent a repeatable workflow.
+`llm-docs` currently provides the repeatable compatibility workflow.
 
-It can:
+Current CLI capabilities:
+
+- list configured SDKs from `config/sdks.json`
+- generate LLM-optimized text from configured OpenRef YAML specs
+- validate a configured OpenRef SDK/version pair
+- preserve the existing Supabase/OpenRef command surface while the next-gen
+  resolver is built
+
+Current library/parser capabilities:
+
+- parse OpenRef YAML into the legacy model and the shared DocNode model
+- parse local Markdown / DocC-style files through the parser modules
+- format parsed docs into LLM-friendly text
+
+Planned next-generation capabilities:
 
 - discover official docs, source repos, specs, sitemaps, `llms.txt`, and linked
   documentation sources
-- crawl or extract the relevant documentation pages
+- crawl or extract relevant documentation pages
 - clone and cache repos when the source lives in GitHub
 - choose between candidate sources with an explainable score
 - preserve version intent, such as "Tailwind 3" instead of silently choosing
   Tailwind 4
-- parse structured sources like OpenAPI, OpenRef, Markdown, MDX, RST, and DocC
-- convert the selected source into agent-optimized Markdown
-- split output by category while keeping a full combined file
+- parse additional structured sources such as OpenAPI, MDX, RST, and HTML
+- convert selected sources into agent-optimized Markdown packs
 - write manifests so generated docs can be verified or refreshed later
-- generate source-truth codebase docs when the user explicitly asks for docs
-  from code or asks to verify docs against implementation
-- fact-check official docs against source code when the user asks for
-  source-truth confidence
+- generate source-truth codebase docs only after that explicit mode exists
+- fact-check official docs against source code only after source verification is
+  implemented
 
 The point is not to replace official docs. The point is to convert official docs
 into a local, structured, verifiable form that an AI agent can use well.
@@ -134,29 +158,36 @@ Without this tool, an agent may:
 - repeat expensive discovery work
 - keep using stale context
 
-With this tool, the agent gets source material that is structured, local,
-versioned, and refreshable.
+With the target next-generation implementation, the agent gets source material
+that is structured, local, versioned, and refreshable.
 
 ## Why This Is More Than a Skill
 
 A skill can tell an AI agent how to search.
 
-`llm-docs-generator` gives the agent machinery:
+`llm-docs-generator` gives the agent machinery that is being built in layers:
 
-- a CLI it can run
-- a source discovery pipeline
-- parsers and formatters
-- repo caching
-- version checks
-- manifests
-- stale-doc verification
+- implemented now: a CLI it can run for configured OpenRef specs
+- implemented now: OpenRef and Markdown/DocC parser modules
+- implemented now: LLM-oriented formatters
+- planned: a source discovery pipeline
+- planned: repo caching
+- planned: version/freshness checks beyond configured SDK versions
+- planned: manifests
+- planned: stale-doc verification
 
-The skill helps the agent decide what to do. The CLI does the work and writes
-the artifact.
+The skill helps the agent decide what to do. For implemented workflows, the CLI
+does the deterministic conversion work and writes the artifact.
 
 ## Typical Use Cases
 
-Use it when:
+Use the current CLI when:
+
+- you need the configured Supabase/OpenRef compatibility workflow
+- you want to list, generate, or validate configured SDK specs
+- you are extending the parser/formatter foundation toward the next-gen plan
+
+The target next-generation product is intended for:
 
 - you want your agent to work from official docs, but in local Markdown
 - you need docs pinned to a specific major version
@@ -178,15 +209,16 @@ Install the CLI where your AI agent can run shell commands:
 npm install -g llm-docs-generator
 ```
 
-If your AI host supports skills, install the bundled agent instructions:
+Bundled agent setup commands are planned but not implemented yet:
 
 ```bash
 llm-docs agent install codex
 llm-docs agent doctor
 ```
 
-After that, prompts like "use `llm-docs` for this" should be enough for the
-agent to route documentation tasks through the tool.
+Until those commands exist, prompts like "use `llm-docs` for this" require the
+agent to read `AGENT_CONTEXT.md` and verify current CLI support before running
+commands.
 
 ## For Contributors
 
