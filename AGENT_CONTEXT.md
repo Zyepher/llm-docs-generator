@@ -28,8 +28,10 @@ Current implementation:
 - Can format parsed docs into LLM-friendly text.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks.
-- Current CLI commands are limited to `generate --sdk`, `list-sdks`, and
-  `validate --sdk`.
+- Verifies current `configured-sdk` manifests by checking the recorded
+  configured source and generated output file hashes and byte sizes.
+- Current CLI commands are limited to `generate --sdk`, `verify`, `list-sdks`,
+  and `validate --sdk`.
 - Does not yet fully implement repo discovery, website discovery, refresh,
   source verification, full next-generation manifests, or source-truth codebase
   documentation generation.
@@ -61,8 +63,8 @@ The workflows below describe the approved next-generation product direction.
 When using the current CLI, verify that the needed command exists first. If the
 workflow needs discovery, repo caching, refresh, source verification,
 source-truth codebase docs generation, or manifest data beyond the current
-configured SDK generation manifest, treat it as planned work unless source and
-tests prove it has been implemented.
+configured SDK generation manifest hash and size checks, treat it as planned
+work unless source and tests prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -353,8 +355,10 @@ Record at minimum:
 
 The current configured SDK generation path writes a scoped
 `manifest.json` with configured source details, hashes, parser and formatter
-metadata, and generated file hashes. Future implementations should extend
-manifest coverage to the broader provenance fields above.
+metadata, and generated file hashes. The current `verify` command checks those
+configured SDK manifest file hashes and byte sizes only; it does not perform
+refresh, discovery, repo, or source-code verification. Future implementations
+should extend manifest coverage to the broader provenance fields above.
 
 ## Clarifying Questions
 
@@ -456,6 +460,7 @@ The following commands are the current regression baseline:
 ```bash
 llm-docs generate --sdk swift --sdk-version v2
 llm-docs generate --sdk all --sdk-version all
+llm-docs verify --output-dir ./output/swift/v2
 llm-docs list-sdks
 llm-docs validate --sdk swift --version v2
 ```

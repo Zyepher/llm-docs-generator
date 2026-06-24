@@ -148,7 +148,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [ ] Directory parsing for full swift-book (all chapters)
 - [ ] JSONL export format for embedding pipelines
 - [x] Scoped manifest generation for configured OpenRef CLI output
+- [x] Scoped manifest hash/size verification for current configured SDK output
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
+- [ ] Repo, source-code, discovery, and refresh verification
 - [ ] Plugin system for custom parsers
 - [ ] OpenRef backward compatibility tests
 
