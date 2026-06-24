@@ -96,6 +96,17 @@ export interface DiscoveryReport {
   warnings: string[];
 }
 
+export interface DiscoveryInspection {
+  source: {
+    input: string;
+    resolvedPath: string;
+    type: DiscoverySourceType;
+  };
+  traversal: DiscoveryTraversalSettings;
+  candidates: DiscoveryCandidate[];
+  warnings: string[];
+}
+
 export interface DiscoverLocalSourcesOptions {
   source: string;
   outputDir?: string;
@@ -128,6 +139,35 @@ interface CandidateHint {
 export async function discoverLocalSources(
   options: DiscoverLocalSourcesOptions
 ): Promise<DiscoverLocalSourcesResult> {
+  const inspection = await inspectLocalSource(options);
+  const outputDir =
+    options.outputDir === undefined
+      ? defaultOutputDirForSource(inspection.source.resolvedPath)
+      : resolve(options.outputDir);
+  const reportPath = join(outputDir, 'discovery-report.json');
+
+  const report: DiscoveryReport = {
+    schemaVersion: DISCOVERY_REPORT_SCHEMA_VERSION,
+    mode: LOCAL_BOUNDED_INSPECTION_MODE,
+    generatedAt: new Date().toISOString(),
+    source: inspection.source,
+    output: {
+      reportPath,
+    },
+    traversal: inspection.traversal,
+    candidates: inspection.candidates,
+    warnings: inspection.warnings,
+  };
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+
+  return { report, reportPath };
+}
+
+export async function inspectLocalSource(
+  options: Omit<DiscoverLocalSourcesOptions, 'outputDir'>
+): Promise<DiscoveryInspection> {
   validateSourceInput(options.source);
 
   const resolvedSourcePath = resolve(options.source);
@@ -151,11 +191,6 @@ export async function discoverLocalSources(
     'maxFiles',
     false
   );
-  const outputDir =
-    options.outputDir === undefined
-      ? defaultOutputDirForSource(resolvedSourcePath)
-      : resolve(options.outputDir);
-  const reportPath = join(outputDir, 'discovery-report.json');
   const candidates: DiscoveryCandidate[] = [];
   const warnings: string[] = [];
   const state: MutableTraversalState = {
@@ -192,17 +227,11 @@ export async function discoverLocalSources(
 
   candidates.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
 
-  const report: DiscoveryReport = {
-    schemaVersion: DISCOVERY_REPORT_SCHEMA_VERSION,
-    mode: LOCAL_BOUNDED_INSPECTION_MODE,
-    generatedAt: new Date().toISOString(),
+  return {
     source: {
       input: options.source,
       resolvedPath: resolvedSourcePath,
       type: sourceType,
-    },
-    output: {
-      reportPath,
     },
     traversal: {
       followSymlinks: false,
@@ -218,11 +247,6 @@ export async function discoverLocalSources(
     candidates,
     warnings,
   };
-
-  await mkdir(outputDir, { recursive: true });
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
-
-  return { report, reportPath };
 }
 
 export async function discoverLocalSource(

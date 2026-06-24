@@ -41,6 +41,7 @@ export {
   LOCAL_BOUNDED_INSPECTION_MODE,
   discoverLocalSource,
   discoverLocalSources,
+  inspectLocalSource,
   isUrlLikeInput,
 } from './core/discovery.js';
 export type {
@@ -49,7 +50,20 @@ export type {
   DiscoverLocalSourcesResult,
   DiscoveryCandidate,
   DiscoveryCandidateKind,
+  DiscoveryInspection,
   DiscoveryReport,
   DiscoverySourceType,
   DiscoveryTraversalSettings,
 } from './core/discovery.js';
+export {
+  DEFAULT_REPO_CACHE_ROOT,
+  REPO_BOUNDED_INSPECTION_MODE,
+  discoverRepo,
+} from './core/repo-discovery.js';
+export type {
+  DiscoverRepoOptions,
+  DiscoverRepoResult,
+  RepoDiscoveryReport,
+  RepoGitState,
+  RepoUpdateState,
+} from './core/repo-discovery.js';

@@ -6,13 +6,14 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { discoverLocalSources } from '../../src/core/discovery.js';
+import { discoverRepo } from '../../src/core/repo-discovery.js';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -101,6 +102,45 @@ interface DiscoveryReport {
     candidateCount: number;
     truncated: boolean;
   };
+  candidates: DiscoveryCandidate[];
+  warnings: string[];
+}
+
+interface RepoDiscoveryReport {
+  schemaVersion: string;
+  mode: string;
+  generatedAt: string;
+  repo: {
+    input: string;
+    normalizedInput: string;
+    cacheDir: string;
+    cacheKey: string;
+    cachePath: string;
+    cloned: boolean;
+    existingCache: boolean;
+    git: {
+      remoteUrl: string | null;
+      commit: string | null;
+      dirty: boolean | null;
+      status: string[];
+    };
+    update: {
+      attempted: boolean;
+      successful: boolean | null;
+      skippedReason?: string;
+      error?: string;
+    };
+  };
+  scope: {
+    input: string;
+    path: string;
+    resolvedPath: string;
+    type: string;
+  };
+  output: {
+    reportPath: string;
+  };
+  traversal: DiscoveryReport['traversal'];
   candidates: DiscoveryCandidate[];
   warnings: string[];
 }
@@ -248,6 +288,44 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+async function git(args: string[], cwd: string): Promise<void> {
+  await execFileAsync('git', args, { cwd });
+}
+
+async function gitOutput(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, { cwd });
+
+  return stdout.toString().trim();
+}
+
+async function createLocalGitRepo(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-source-'));
+  tempDirs.push(dir);
+
+  await git(['init'], dir);
+  await mkdir(join(dir, 'docs'), { recursive: true });
+  await mkdir(join(dir, 'src'), { recursive: true });
+  await writeFile(join(dir, 'README.md'), '# Root\n', 'utf-8');
+  await writeFile(join(dir, 'docs/guide.md'), '# Guide\n', 'utf-8');
+  await writeFile(join(dir, 'docs/openapi.json'), '{"openapi":"3.1.0"}\n', 'utf-8');
+  await writeFile(join(dir, 'src/ignored.ts'), 'export const value = 1;\n', 'utf-8');
+  await git(['add', '.'], dir);
+  await git(
+    [
+      '-c',
+      'user.email=tests@example.com',
+      '-c',
+      'user.name=Tests',
+      'commit',
+      '-m',
+      'Initial fixture',
+    ],
+    dir
+  );
+
+  return dir;
+}
+
 async function findManifestFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const found: string[] = [];
@@ -265,7 +343,11 @@ async function findManifestFiles(root: string): Promise<string[]> {
   return found.sort(compareStringsByCodeUnit);
 }
 
-async function generateSwiftFixture(): Promise<{ configDir: string; outputDir: string; manifestPath: string }> {
+async function generateSwiftFixture(): Promise<{
+  configDir: string;
+  outputDir: string;
+  manifestPath: string;
+}> {
   const configDir = await createTestConfig();
   const outputDir = join(configDir, 'output');
 
@@ -397,13 +479,7 @@ describe('CLI compatibility behavior', () => {
     await writeFile(join(sourceDir, 'node_modules/pkg/ignored.md'), '# Ignored\n', 'utf-8');
     await writeFile(join(sourceDir, 'dist/ignored.md'), '# Ignored\n', 'utf-8');
 
-    const { stdout } = await runCli([
-      'discover',
-      '--source',
-      sourceDir,
-      '--output-dir',
-      outputDir,
-    ]);
+    const { stdout } = await runCli(['discover', '--source', sourceDir, '--output-dir', outputDir]);
     const reportPath = join(outputDir, 'discovery-report.json');
     const reportText = await readFile(reportPath, 'utf-8');
     const report = JSON.parse(reportText) as DiscoveryReport;
@@ -532,17 +608,14 @@ describe('CLI compatibility behavior', () => {
     'http://example.com/docs',
     'git@github.com:owner/repo.git',
     ' https://example.com/docs ',
-  ])(
-    'rejects URL-like discovery source %s with a non-zero exit',
-    async (source) => {
-      const result = await runCliWithExit(['discover', '--source', source]);
+  ])('rejects URL-like discovery source %s with a non-zero exit', async (source) => {
+    const result = await runCliWithExit(['discover', '--source', source]);
 
-      expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain(
-        'Discovery failed: discover --source accepts local file or directory paths only'
-      );
-    }
-  );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Discovery failed: discover --source accepts local file or directory paths only'
+    );
+  });
 
   it('does not make unsupported source authority claims in discovery output', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-claims-'));
@@ -557,6 +630,568 @@ describe('CLI compatibility behavior', () => {
       'discover',
       '--source',
       sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    const reportText = await readFile(join(outputDir, 'discovery-report.json'), 'utf-8');
+    const combinedOutput = `${stdout}\n${stderr}\n${reportText}`;
+
+    expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(combinedOutput).not.toMatch(/\bofficial\b/i);
+    expect(combinedOutput).not.toMatch(/\bscore\b/i);
+    expect(combinedOutput).not.toMatch(/\bselected\b/i);
+  });
+
+  it('clones a local git repo into an explicit cache and writes a repo discovery report', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-discover-'));
+    tempDirs.push(dir);
+
+    const cacheDir = join(dir, 'cache');
+    const outputDir = join(dir, 'reports');
+    const { stdout } = await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      cacheDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const reportText = await readFile(reportPath, 'utf-8');
+    const report = JSON.parse(reportText) as RepoDiscoveryReport;
+
+    expect(stdout).toContain('Repo discovery');
+    expect(stdout).toContain(`Report: ${reportPath}`);
+    expect(reportText.endsWith('\n')).toBe(true);
+    expect(new Date(report.generatedAt).toISOString()).toBe(report.generatedAt);
+    expect(report).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'repo-bounded-inspection',
+      repo: {
+        input: repoDir,
+        cacheDir,
+        cloned: true,
+        existingCache: false,
+        git: {
+          dirty: false,
+          status: [],
+        },
+      },
+      scope: {
+        input: '.',
+        path: '.',
+        type: 'directory',
+      },
+      output: {
+        reportPath,
+      },
+      traversal: {
+        followSymlinks: false,
+        maxDepth: 8,
+        maxEntries: 20000,
+        maxFiles: 5000,
+        candidateCount: 3,
+        truncated: false,
+      },
+    });
+    expect(report.repo.normalizedInput.endsWith(basename(repoDir))).toBe(true);
+    expect(report.repo.git.remoteUrl?.endsWith(basename(repoDir))).toBe(true);
+    expect(report.repo.cachePath.startsWith(`${cacheDir}/`)).toBe(true);
+    expect(await pathExists(join(report.repo.cachePath, '.git'))).toBe(true);
+    expect(report.repo.cachePath.startsWith(repoRoot)).toBe(false);
+    expect(report.repo.git.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(report.warnings).toContain('Skipped directory by default: .git');
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual([
+      'README.md',
+      'docs/guide.md',
+      'docs/openapi.json',
+    ]);
+    expect(report.candidates[0]?.resolvedPath.startsWith(report.repo.cachePath)).toBe(true);
+  });
+
+  it('inspects only the requested repo scope path', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-scope-'));
+    tempDirs.push(dir);
+
+    const outputDir = join(dir, 'reports');
+    await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--scope',
+      'docs',
+      '--cache-dir',
+      join(dir, 'cache'),
+      '--output-dir',
+      outputDir,
+    ]);
+    const report = JSON.parse(
+      await readFile(join(outputDir, 'discovery-report.json'), 'utf-8')
+    ) as RepoDiscoveryReport;
+
+    expect(report.scope).toMatchObject({
+      input: 'docs',
+      path: 'docs',
+      type: 'directory',
+    });
+    expect(report.scope.resolvedPath).toBe(join(report.repo.cachePath, 'docs'));
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual([
+      'guide.md',
+      'openapi.json',
+    ]);
+  });
+
+  it('fetches clean existing caches without changing checkout or inspected candidates', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-fetch-only-cache-'));
+    tempDirs.push(dir);
+
+    const cacheDir = join(dir, 'cache');
+    const first = await discoverRepo({
+      repo: repoDir,
+      cacheDir,
+      outputDir: join(dir, 'reports-first'),
+    });
+    const firstCommit = first.report.repo.git.commit;
+    const firstCandidatePaths = first.report.candidates.map((candidate) => candidate.path);
+    const branchName = await gitOutput(['branch', '--show-current'], repoDir);
+
+    await writeFile(join(repoDir, 'docs/new.md'), '# New upstream docs\n', 'utf-8');
+    await git(['add', 'docs/new.md'], repoDir);
+    await git(
+      [
+        '-c',
+        'user.email=tests@example.com',
+        '-c',
+        'user.name=Tests',
+        'commit',
+        '-m',
+        'Add upstream docs',
+      ],
+      repoDir
+    );
+    const upstreamCommit = await gitOutput(['rev-parse', 'HEAD'], repoDir);
+
+    const second = await discoverRepo({
+      repo: repoDir,
+      cacheDir,
+      outputDir: join(dir, 'reports-second'),
+    });
+    const fetchedRemoteCommit = await gitOutput(
+      ['rev-parse', `refs/remotes/origin/${branchName}`],
+      second.report.repo.cachePath
+    );
+
+    expect(second.report.repo).toMatchObject({
+      cloned: false,
+      existingCache: true,
+      git: {
+        commit: firstCommit,
+        dirty: false,
+        status: [],
+      },
+      update: {
+        attempted: true,
+        successful: true,
+      },
+    });
+    expect(second.report.candidates.map((candidate) => candidate.path)).toEqual(
+      firstCandidatePaths
+    );
+    expect(second.report.candidates.map((candidate) => candidate.path)).not.toContain(
+      'docs/new.md'
+    );
+    expect(fetchedRemoteCommit).toBe(upstreamCommit);
+    expect(second.report.repo.git.commit).not.toBe(upstreamCommit);
+  });
+
+  it('fails clearly when the requested repo scope path is missing', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-missing-scope-'));
+    tempDirs.push(dir);
+
+    const result = await runCliWithExit([
+      'discover',
+      '--repo',
+      repoDir,
+      '--scope',
+      'missing-docs',
+      '--cache-dir',
+      join(dir, 'cache'),
+      '--output-dir',
+      join(dir, 'reports'),
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: scope path not found or cannot be read');
+    expect(result.stderr).toContain('missing-docs');
+  });
+
+  it('fails clearly when the requested repo scope escapes the cached repository', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-escaping-scope-'));
+    tempDirs.push(dir);
+
+    const result = await runCliWithExit([
+      'discover',
+      '--repo',
+      repoDir,
+      '--scope',
+      '../outside',
+      '--cache-dir',
+      join(dir, 'cache'),
+      '--output-dir',
+      join(dir, 'reports'),
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: scope path must stay inside');
+    expect(result.stderr).toContain('../outside');
+  });
+
+  it('fails clearly when repo scope escapes through an intermediate symlink component', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-symlink-scope-escape-'));
+    tempDirs.push(dir);
+
+    const outsideDir = join(dir, 'outside');
+    await mkdir(join(outsideDir, 'docs'), { recursive: true });
+    await writeFile(join(outsideDir, 'docs/outside.md'), '# Outside\n', 'utf-8');
+    await symlink(outsideDir, join(repoDir, 'link'), 'dir');
+    await git(['add', 'link'], repoDir);
+    await git(
+      [
+        '-c',
+        'user.email=tests@example.com',
+        '-c',
+        'user.name=Tests',
+        'commit',
+        '-m',
+        'Add symlink fixture',
+      ],
+      repoDir
+    );
+
+    const result = await runCliWithExit([
+      'discover',
+      '--repo',
+      repoDir,
+      '--scope',
+      'link/docs',
+      '--cache-dir',
+      join(dir, 'cache'),
+      '--output-dir',
+      join(dir, 'reports'),
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: scope path must stay inside');
+    expect(result.stderr).toContain('link/docs');
+  });
+
+  it('fails clearly when repo scope is absolute instead of repo-relative', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-absolute-scope-'));
+    tempDirs.push(dir);
+
+    const result = await runCliWithExit([
+      'discover',
+      '--repo',
+      repoDir,
+      '--scope',
+      join(repoDir, 'docs'),
+      '--cache-dir',
+      join(dir, 'cache'),
+      '--output-dir',
+      join(dir, 'reports'),
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: scope path must be repo-relative');
+    expect(result.stderr).toContain(join(repoDir, 'docs'));
+  });
+
+  it('warns and reuses a dirty cached repo without destructive cleanup', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-dirty-cache-'));
+    tempDirs.push(dir);
+
+    const cacheDir = join(dir, 'cache');
+    const firstOutputDir = join(dir, 'reports-first');
+    await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      cacheDir,
+      '--output-dir',
+      firstOutputDir,
+    ]);
+    const firstReport = JSON.parse(
+      await readFile(join(firstOutputDir, 'discovery-report.json'), 'utf-8')
+    ) as RepoDiscoveryReport;
+    const dirtyFile = join(firstReport.repo.cachePath, 'docs/dirty.md');
+    await writeFile(dirtyFile, '# Dirty cache note\n', 'utf-8');
+
+    const secondOutputDir = join(dir, 'reports-second');
+    const { stderr } = await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      cacheDir,
+      '--output-dir',
+      secondOutputDir,
+    ]);
+    const secondReport = JSON.parse(
+      await readFile(join(secondOutputDir, 'discovery-report.json'), 'utf-8')
+    ) as RepoDiscoveryReport;
+
+    expect(stderr).toContain('Warning: Cached repo has local changes or ignored files');
+    expect(secondReport.repo).toMatchObject({
+      cloned: false,
+      existingCache: true,
+      git: {
+        dirty: true,
+      },
+      update: {
+        attempted: false,
+        successful: null,
+        skippedReason: 'dirty-cache',
+      },
+    });
+    expect(secondReport.repo.git.status).toContain('?? docs/dirty.md');
+    expect(secondReport.warnings).toContain(
+      'Cached repo has local changes or ignored files; update skipped and current checkout inspected.'
+    );
+    expect(secondReport.candidates.map((candidate) => candidate.path)).toContain('docs/dirty.md');
+    expect(await readFile(dirtyFile, 'utf-8')).toBe('# Dirty cache note\n');
+  });
+
+  it('warns and skips update when the cache contains ignored files', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-ignored-cache-'));
+    tempDirs.push(dir);
+
+    await writeFile(join(repoDir, '.gitignore'), 'generated/\n', 'utf-8');
+    await git(['add', '.gitignore'], repoDir);
+    await git(
+      [
+        '-c',
+        'user.email=tests@example.com',
+        '-c',
+        'user.name=Tests',
+        'commit',
+        '-m',
+        'Ignore generated files',
+      ],
+      repoDir
+    );
+
+    const cacheDir = join(dir, 'cache');
+    const firstOutputDir = join(dir, 'reports-first');
+    await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      cacheDir,
+      '--output-dir',
+      firstOutputDir,
+    ]);
+    const firstReport = JSON.parse(
+      await readFile(join(firstOutputDir, 'discovery-report.json'), 'utf-8')
+    ) as RepoDiscoveryReport;
+    const ignoredFile = join(firstReport.repo.cachePath, 'generated/cache.md');
+    await mkdir(dirname(ignoredFile), { recursive: true });
+    await writeFile(ignoredFile, '# Local ignored cache file\n', 'utf-8');
+
+    await mkdir(join(repoDir, 'generated'), { recursive: true });
+    await writeFile(join(repoDir, 'generated/cache.md'), '# Upstream tracked file\n', 'utf-8');
+    await git(['add', '-f', 'generated/cache.md'], repoDir);
+    await git(
+      [
+        '-c',
+        'user.email=tests@example.com',
+        '-c',
+        'user.name=Tests',
+        'commit',
+        '-m',
+        'Track generated cache file',
+      ],
+      repoDir
+    );
+
+    const secondOutputDir = join(dir, 'reports-second');
+    const { stderr } = await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      cacheDir,
+      '--output-dir',
+      secondOutputDir,
+    ]);
+    const secondReport = JSON.parse(
+      await readFile(join(secondOutputDir, 'discovery-report.json'), 'utf-8')
+    ) as RepoDiscoveryReport;
+
+    expect(stderr).toContain('Warning: Cached repo has local changes or ignored files');
+    expect(secondReport.repo).toMatchObject({
+      cloned: false,
+      existingCache: true,
+      git: {
+        dirty: true,
+      },
+      update: {
+        attempted: false,
+        successful: null,
+        skippedReason: 'dirty-cache',
+      },
+    });
+    expect(secondReport.repo.git.status).toContain('!! generated/cache.md');
+    expect(secondReport.warnings).toContain(
+      'Cached repo has local changes or ignored files; update skipped and current checkout inspected.'
+    );
+    expect(await readFile(ignoredFile, 'utf-8')).toBe('# Local ignored cache file\n');
+  });
+
+  it('warns and skips update when cached repo clean state is unknown', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-unknown-cache-state-'));
+    tempDirs.push(dir);
+
+    const cacheDir = join(dir, 'cache');
+    const firstOutputDir = join(dir, 'reports-first');
+    const first = await discoverRepo({
+      repo: repoDir,
+      cacheDir,
+      outputDir: firstOutputDir,
+    });
+    const firstCommit = first.report.repo.git.commit;
+
+    await writeFile(join(repoDir, 'docs/new.md'), '# New upstream docs\n', 'utf-8');
+    await git(['add', 'docs/new.md'], repoDir);
+    await git(
+      [
+        '-c',
+        'user.email=tests@example.com',
+        '-c',
+        'user.name=Tests',
+        'commit',
+        '-m',
+        'Add upstream docs',
+      ],
+      repoDir
+    );
+
+    const badIndexPath = join(dir, 'bad-index-dir');
+    await mkdir(badIndexPath, { recursive: true });
+    const previousGitIndexFile = process.env.GIT_INDEX_FILE;
+
+    try {
+      process.env.GIT_INDEX_FILE = badIndexPath;
+      const second = await discoverRepo({
+        repo: repoDir,
+        cacheDir,
+        outputDir: join(dir, 'reports-second'),
+      });
+
+      expect(second.report.repo.git).toMatchObject({
+        commit: firstCommit,
+        dirty: null,
+        status: [],
+      });
+      expect(second.report.repo.update).toMatchObject({
+        attempted: false,
+        successful: null,
+        skippedReason: 'unknown-cache-state',
+      });
+      expect(
+        second.report.warnings.some((warning) =>
+          warning.includes('Could not read cached repo status')
+        )
+      ).toBe(true);
+      expect(second.report.warnings).toContain(
+        'Cached repo clean state could not be confirmed; update skipped and current checkout inspected.'
+      );
+      expect(second.report.candidates.map((candidate) => candidate.path)).not.toContain(
+        'docs/new.md'
+      );
+    } finally {
+      if (previousGitIndexFile === undefined) {
+        delete process.env.GIT_INDEX_FILE;
+      } else {
+        process.env.GIT_INDEX_FILE = previousGitIndexFile;
+      }
+    }
+  });
+
+  it('warns and skips update when an existing cache remote does not match the requested repo', async () => {
+    const repoDir = await createLocalGitRepo();
+    const otherRepoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-remote-mismatch-'));
+    tempDirs.push(dir);
+
+    const cacheDir = join(dir, 'cache');
+    const firstOutputDir = join(dir, 'reports-first');
+    await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      cacheDir,
+      '--output-dir',
+      firstOutputDir,
+    ]);
+    const firstReport = JSON.parse(
+      await readFile(join(firstOutputDir, 'discovery-report.json'), 'utf-8')
+    ) as RepoDiscoveryReport;
+    await git(['remote', 'set-url', 'origin', otherRepoDir], firstReport.repo.cachePath);
+
+    const secondOutputDir = join(dir, 'reports-second');
+    const { stderr } = await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      cacheDir,
+      '--output-dir',
+      secondOutputDir,
+    ]);
+    const secondReport = JSON.parse(
+      await readFile(join(secondOutputDir, 'discovery-report.json'), 'utf-8')
+    ) as RepoDiscoveryReport;
+
+    expect(stderr).toContain('Warning: Cached repo remote does not match requested repo');
+    expect(secondReport.repo.git.remoteUrl).toBe(otherRepoDir);
+    expect(secondReport.repo.update).toMatchObject({
+      attempted: false,
+      successful: null,
+      skippedReason: 'remote-mismatch',
+    });
+    expect(secondReport.warnings).toContain(
+      'Cached repo remote does not match requested repo; update skipped and current checkout inspected.'
+    );
+  });
+
+  it('does not make unsupported source authority claims in repo discovery output', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-claims-'));
+    tempDirs.push(dir);
+
+    const outputDir = join(dir, 'reports');
+    const { stdout, stderr } = await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--scope',
+      'docs',
+      '--cache-dir',
+      join(dir, 'cache'),
       '--output-dir',
       outputDir,
     ]);
@@ -707,9 +1342,7 @@ describe('CLI compatibility behavior', () => {
     const specPath = join(configDir, 'supabase_swift_v2.yml');
     const generatedAt = new Date(manifest.generatedAt);
     const outputPaths = manifest.generatedOutputs.map((output) => output.path);
-    const outputsByPath = new Map(
-      manifest.generatedOutputs.map((output) => [output.path, output])
-    );
+    const outputsByPath = new Map(manifest.generatedOutputs.map((output) => [output.path, output]));
 
     expect(manifestText.endsWith('\n')).toBe(true);
     expect(generatedAt.toISOString()).toBe(manifest.generatedAt);
@@ -746,17 +1379,13 @@ describe('CLI compatibility behavior', () => {
     });
     expect(manifest.source.byteSize).toBe(await byteSize(specPath));
     expect(manifest.source.contentHash).toBe(await sha256File(specPath));
-    expect(outputPaths).toEqual(
-      [
-        'llm-docs/supabase-swift-v2-database-llms.txt',
-        'llm-docs/supabase-swift-v2-full-llms.txt',
-        'parsed/swift-v2-spec.json',
-      ]
-    );
+    expect(outputPaths).toEqual([
+      'llm-docs/supabase-swift-v2-database-llms.txt',
+      'llm-docs/supabase-swift-v2-full-llms.txt',
+      'parsed/swift-v2-spec.json',
+    ]);
     expect(outputsByPath.get('parsed/swift-v2-spec.json')?.kind).toBe('parsed-spec-json');
-    expect(outputsByPath.get('llm-docs/supabase-swift-v2-full-llms.txt')?.kind).toBe(
-      'llm-docs'
-    );
+    expect(outputsByPath.get('llm-docs/supabase-swift-v2-full-llms.txt')?.kind).toBe('llm-docs');
     expect(outputPaths).not.toContain('manifest.json');
 
     for (const output of manifest.generatedOutputs) {
@@ -876,15 +1505,7 @@ describe('CLI compatibility behavior', () => {
     await writeFile(sdksPath, JSON.stringify(config, null, 2), 'utf-8');
 
     const secondResult = await runCliWithExit(
-      [
-        'generate',
-        '--sdk',
-        'swift',
-        '--config-dir',
-        configDir,
-        '--output-dir',
-        outputDir,
-      ],
+      ['generate', '--sdk', 'swift', '--config-dir', configDir, '--output-dir', outputDir],
       configDir
     );
 
@@ -1111,7 +1732,11 @@ describe('CLI compatibility behavior', () => {
     );
 
     const malformedResult = await runCliWithExit(['verify', '--manifest', malformedManifestPath]);
-    const unsupportedResult = await runCliWithExit(['verify', '--manifest', unsupportedManifestPath]);
+    const unsupportedResult = await runCliWithExit([
+      'verify',
+      '--manifest',
+      unsupportedManifestPath,
+    ]);
 
     expect(malformedResult.exitCode).toBe(1);
     expect(malformedResult.stderr).toContain('malformed manifest JSON');
@@ -1246,5 +1871,4 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Validation successful!');
     expect(stdout).toContain('Version: v2');
   });
-
 });
