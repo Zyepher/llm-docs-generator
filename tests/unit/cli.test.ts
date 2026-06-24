@@ -3,7 +3,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +55,7 @@ async function createTestConfig(): Promise<string> {
               v2: {
                 displayName: 'Supabase Swift SDK v2',
                 spec: {
-                  url: 'https://example.com/supabase_swift_v2.yml',
+                  url: 'http://127.0.0.1:9/supabase_swift_v2.yml',
                   localPath: specPath,
                   format: 'openref-0.1',
                 },
@@ -67,7 +67,7 @@ async function createTestConfig(): Promise<string> {
               v1: {
                 displayName: 'Supabase Swift SDK v1',
                 spec: {
-                  url: 'https://example.com/supabase_swift_v1.yml',
+                  url: 'http://127.0.0.1:9/supabase_swift_v1.yml',
                   localPath: specPath,
                   format: 'openref-0.1',
                 },
@@ -151,6 +151,61 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Operations: 1');
     expect(stdout).toContain('Examples: 1');
     expect(stdout.trim()).not.toBe('1.0.0');
+  });
+
+  it('lists SDKs from a supplied config directory', async () => {
+    const configDir = await createTestConfig();
+
+    const { stdout } = await runCli(['list-sdks', '--config-dir', configDir]);
+
+    expect(stdout).toContain('Configured SDKs:');
+    expect(stdout).toContain('swift');
+    expect(stdout).toContain('Name: Swift');
+    expect(stdout).toContain('Versions: v2, v1');
+    expect(stdout).toContain('Total SDKs: 1');
+  });
+
+  it('generates OpenRef documentation from a local configured spec', async () => {
+    const configDir = await createTestConfig();
+    const outputDir = join(configDir, 'output');
+
+    const { stdout } = await runCli([
+      'generate',
+      '--sdk',
+      'swift',
+      '--sdk-version',
+      'v2',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(stdout).toContain('Processing 1 SDK/version pair');
+    expect(stdout).toContain('Generation complete!');
+    expect(stdout).toContain('Successful: 1');
+
+    const parsedSpec = JSON.parse(
+      await readFile(join(outputDir, 'swift/v2/parsed/swift-v2-spec.json'), 'utf-8')
+    ) as { operations: Array<{ id: string; examples: unknown[] }> };
+    expect(parsedSpec.operations).toHaveLength(1);
+    expect(parsedSpec.operations[0]?.id).toBe('select');
+    expect(parsedSpec.operations[0]?.examples).toHaveLength(1);
+
+    const fullDoc = await readFile(
+      join(outputDir, 'swift/v2/llm-docs/supabase-swift-v2-full-llms.txt'),
+      'utf-8'
+    );
+    expect(fullDoc).toContain('# Supabase Swift SDK v2 Reference');
+    expect(fullDoc).toContain('Select data');
+    expect(fullDoc).toContain('supabase.from("todos").select()');
+
+    const moduleDoc = await readFile(
+      join(outputDir, 'swift/v2/llm-docs/supabase-swift-v2-database-llms.txt'),
+      'utf-8'
+    );
+    expect(moduleDoc).toContain('Supabase Swift SDK v2 Database Documentation');
+    expect(moduleDoc).toContain('Database operations');
   });
 
   it('continues to resolve validate without --version to the latest configured SDK version', async () => {
