@@ -48,8 +48,12 @@ Current implementation:
 - Writes scoped manifests for successful configured `generate --sdk` tasks.
 - Verifies current `configured-sdk` manifests by checking the recorded
   configured source and generated output file hashes and byte sizes.
-- Current CLI commands are limited to `generate --sdk`, `verify`, `list-sdks`,
-  and `validate --sdk`.
+- Can run `discover --source <local-file-or-directory>` for explicit local,
+  bounded inspection and write `discovery-report.json` with candidate file
+  hints, hashes, traversal settings, and warnings. This command does not
+  generate docs, score authority, clone repositories, or crawl URLs.
+- Current CLI commands are limited to local `discover --source`, `generate
+  --sdk`, `verify`, `list-sdks`, and `validate --sdk`.
 - Does not yet fully implement repo discovery, website discovery, refresh,
   source verification, full next-generation manifests, or source-truth codebase
   documentation generation.
@@ -135,10 +139,13 @@ User signals:
 Agent workflow:
 
 1. Verify the path exists.
-2. Detect the format or honor the user's requested format.
-3. Run source conversion directly when a CLI mode exists, or use this as the
+2. Optionally run `llm-docs discover --source <path> --output-dir <dir>` to
+   produce a bounded local inspection report for agent review.
+3. Detect the format or honor the user's requested format.
+4. Run source conversion directly when a CLI mode exists, or use this as the
    next implementation step if only parser modules support the format.
-4. Report generated output files and source path.
+5. Report generated output files and source path. If only discovery was run,
+   report the `discovery-report.json` path and candidate count instead.
 
 Do not clone external repositories unless the user also asks for discovery or
 verification.
@@ -487,6 +494,7 @@ discovery.
 The following commands are the current regression baseline:
 
 ```bash
+llm-docs discover --source ./docs --output-dir ./reports/local-docs
 llm-docs generate --sdk swift --sdk-version v2
 llm-docs generate --sdk all --sdk-version all
 llm-docs verify --output-dir ./output/swift/v2

@@ -33,3 +33,23 @@ export type {
   VerifyGenerationManifestResult,
   WriteGenerationManifestOptions,
 } from './core/manifest.js';
+export {
+  DEFAULT_DISCOVERY_MAX_DEPTH,
+  DEFAULT_DISCOVERY_MAX_ENTRIES,
+  DEFAULT_DISCOVERY_MAX_FILES,
+  DISCOVERY_REPORT_SCHEMA_VERSION,
+  LOCAL_BOUNDED_INSPECTION_MODE,
+  discoverLocalSource,
+  discoverLocalSources,
+  isUrlLikeInput,
+} from './core/discovery.js';
+export type {
+  DiscoverLocalSourceOptions,
+  DiscoverLocalSourcesOptions,
+  DiscoverLocalSourcesResult,
+  DiscoveryCandidate,
+  DiscoveryCandidateKind,
+  DiscoveryReport,
+  DiscoverySourceType,
+  DiscoveryTraversalSettings,
+} from './core/discovery.js';

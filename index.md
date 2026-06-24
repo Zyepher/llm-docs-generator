@@ -92,18 +92,25 @@ check [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and source before promising support.
 Development commands:
 
 ```bash
+npx tsx src/cli.ts discover --source ./docs --output-dir ./reports/local-docs
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
 npx tsx src/cli.ts verify --output-dir ./output/swift/v2
 npx tsx src/cli.ts validate --sdk swift --version v2
 ```
 
-The current CLI does not yet expose bounded target inspection/discovery reports,
-`generate --source`, refresh, repo caching, source verification, or
-source-truth codebase docs generation. It writes `manifest.json` for successful configured
-`generate --sdk` tasks and verifies current configured SDK manifest source and
-output file hashes and byte sizes only. Markdown / DocC parsing exists in
-parser modules but is not wired as a current CLI command.
+The current `discover --source` command only performs local, explicit, bounded
+file inspection for a provided file or directory. It writes
+`discovery-report.json` with candidate file hints, hashes, traversal settings,
+and warnings; it does not generate docs, crawl URLs, clone repositories, score
+authority, or choose a source.
+
+The current CLI does not yet expose `generate --source`, refresh, repo caching,
+website discovery, source verification, or source-truth codebase docs
+generation. It writes `manifest.json` for successful configured `generate
+--sdk` tasks and verifies current configured SDK manifest source and output
+file hashes and byte sizes only. Markdown / DocC parsing exists in parser
+modules but is not wired as a current CLI generation command.
 
 The current CLI is implemented in:
 
@@ -188,8 +195,9 @@ agent intent/source/scope resolution
 - If the user asks for latest, verify remote state before reusing a cached clone.
 - Successful configured SDK generation currently writes a scoped manifest with
   source and output hashes. Current `verify` checks those configured SDK
-  manifest file hashes and byte sizes only; refresh, bounded inspection reports,
-  repo, and source-code verification remain planned.
+  manifest file hashes and byte sizes only. Local bounded inspection reports are
+  available through `discover --source`; refresh, repo, website, and
+  source-code verification remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL

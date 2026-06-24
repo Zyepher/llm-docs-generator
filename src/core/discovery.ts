@@ -1,0 +1,612 @@
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import type { Dirent, Stats } from 'node:fs';
+import { lstat, mkdir, opendir, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
+
+export const DISCOVERY_REPORT_SCHEMA_VERSION = '0.1.0';
+export const LOCAL_BOUNDED_INSPECTION_MODE = 'local-bounded-inspection';
+export const DEFAULT_DISCOVERY_MAX_DEPTH = 8;
+export const DEFAULT_DISCOVERY_MAX_FILES = 5000;
+export const DEFAULT_DISCOVERY_MAX_ENTRIES = 20000;
+const CONTENT_PREFIX_BYTES = 8192;
+const SKIPPED_DIRECTORY_NAMES = [
+  '.cache',
+  '.git',
+  '.next',
+  '.nuxt',
+  '.output',
+  '.turbo',
+  'build',
+  'coverage',
+  'dist',
+  'node_modules',
+  'out',
+  'target',
+  'vendor',
+] as const;
+
+const URL_LIKE_SOURCE_PATTERNS = [
+  /^[a-z][a-z0-9+.-]*:\/\//i,
+  /^git@[^:]+:/i,
+  /^github:[^/]+\/[^/]+/i,
+];
+const CANDIDATE_FILE_EXTENSIONS = new Set([
+  '.htm',
+  '.html',
+  '.json',
+  '.md',
+  '.mdx',
+  '.rst',
+  '.yaml',
+  '.yml',
+]);
+
+export type DiscoverySourceType = 'file' | 'directory';
+export type DiscoveryCandidateKind =
+  | 'docc'
+  | 'html'
+  | 'json'
+  | 'markdown'
+  | 'mdx'
+  | 'openapi-json'
+  | 'openapi-yaml'
+  | 'openref-yaml'
+  | 'rst'
+  | 'yaml'
+  | 'unknown';
+
+export interface DiscoveryTraversalSettings {
+  followSymlinks: false;
+  maxDepth: number;
+  maxEntries: number;
+  maxFiles: number;
+  skippedDirectoryNames: string[];
+  visitedEntries: number;
+  visitedFiles: number;
+  candidateCount: number;
+  truncated: boolean;
+}
+
+export interface DiscoveryCandidate {
+  path: string;
+  resolvedPath: string;
+  kind: DiscoveryCandidateKind;
+  format: string;
+  hints: string[];
+  formatHints: string[];
+  byteSize: number;
+  sha256: string;
+}
+
+export interface DiscoveryReport {
+  schemaVersion: typeof DISCOVERY_REPORT_SCHEMA_VERSION;
+  mode: typeof LOCAL_BOUNDED_INSPECTION_MODE;
+  generatedAt: string;
+  source: {
+    input: string;
+    resolvedPath: string;
+    type: DiscoverySourceType;
+  };
+  output: {
+    reportPath: string;
+  };
+  traversal: DiscoveryTraversalSettings;
+  candidates: DiscoveryCandidate[];
+  warnings: string[];
+}
+
+export interface DiscoverLocalSourcesOptions {
+  source: string;
+  outputDir?: string;
+  maxDepth?: number;
+  maxEntries?: number;
+  maxFiles?: number;
+}
+
+export interface DiscoverLocalSourcesResult {
+  report: DiscoveryReport;
+  reportPath: string;
+}
+
+export type DiscoverLocalSourceOptions = DiscoverLocalSourcesOptions;
+
+interface MutableTraversalState {
+  visitedFiles: number;
+  visitedEntries: number;
+  truncated: boolean;
+  emittedMaxFileWarning: boolean;
+  emittedMaxEntryWarning: boolean;
+}
+
+interface CandidateHint {
+  kind: DiscoveryCandidateKind;
+  format: string;
+  formatHints: string[];
+}
+
+export async function discoverLocalSources(
+  options: DiscoverLocalSourcesOptions
+): Promise<DiscoverLocalSourcesResult> {
+  validateSourceInput(options.source);
+
+  const resolvedSourcePath = resolve(options.source);
+  const sourceStats = await statSource(resolvedSourcePath);
+  const sourceType: DiscoverySourceType = sourceStats.isDirectory() ? 'directory' : 'file';
+  const maxDepth = resolveTraversalBound(
+    options.maxDepth,
+    DEFAULT_DISCOVERY_MAX_DEPTH,
+    'maxDepth',
+    true
+  );
+  const maxEntries = resolveTraversalBound(
+    options.maxEntries,
+    DEFAULT_DISCOVERY_MAX_ENTRIES,
+    'maxEntries',
+    false
+  );
+  const maxFiles = resolveTraversalBound(
+    options.maxFiles,
+    DEFAULT_DISCOVERY_MAX_FILES,
+    'maxFiles',
+    false
+  );
+  const outputDir =
+    options.outputDir === undefined
+      ? defaultOutputDirForSource(resolvedSourcePath)
+      : resolve(options.outputDir);
+  const reportPath = join(outputDir, 'discovery-report.json');
+  const candidates: DiscoveryCandidate[] = [];
+  const warnings: string[] = [];
+  const state: MutableTraversalState = {
+    visitedFiles: 0,
+    visitedEntries: 0,
+    truncated: false,
+    emittedMaxFileWarning: false,
+    emittedMaxEntryWarning: false,
+  };
+
+  if (sourceType === 'file') {
+    await inspectFile({
+      absolutePath: resolvedSourcePath,
+      relativePath: basename(resolvedSourcePath),
+      candidates,
+      warnings,
+      state,
+      maxFiles,
+      includeUnknown: true,
+    });
+  } else {
+    await traverseDirectory({
+      rootPath: resolvedSourcePath,
+      directoryPath: resolvedSourcePath,
+      depth: 0,
+      candidates,
+      warnings,
+      state,
+      maxDepth,
+      maxEntries,
+      maxFiles,
+    });
+  }
+
+  candidates.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+
+  const report: DiscoveryReport = {
+    schemaVersion: DISCOVERY_REPORT_SCHEMA_VERSION,
+    mode: LOCAL_BOUNDED_INSPECTION_MODE,
+    generatedAt: new Date().toISOString(),
+    source: {
+      input: options.source,
+      resolvedPath: resolvedSourcePath,
+      type: sourceType,
+    },
+    output: {
+      reportPath,
+    },
+    traversal: {
+      followSymlinks: false,
+      maxDepth,
+      maxEntries,
+      maxFiles,
+      skippedDirectoryNames: [...SKIPPED_DIRECTORY_NAMES],
+      visitedEntries: state.visitedEntries,
+      visitedFiles: state.visitedFiles,
+      candidateCount: candidates.length,
+      truncated: state.truncated,
+    },
+    candidates,
+    warnings,
+  };
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+
+  return { report, reportPath };
+}
+
+export async function discoverLocalSource(
+  options: DiscoverLocalSourceOptions
+): Promise<DiscoveryReport> {
+  const result = await discoverLocalSources(options);
+
+  return result.report;
+}
+
+export function isUrlLikeInput(input: string): boolean {
+  return URL_LIKE_SOURCE_PATTERNS.some((pattern) => pattern.test(input));
+}
+
+function validateSourceInput(source: string): void {
+  if (source.trim() === '') {
+    throw new Error('Source path is required.');
+  }
+
+  if (isUrlLikeInput(source.trim())) {
+    throw new Error(
+      'discover --source accepts local file or directory paths only; URL-like and git inputs are not supported'
+    );
+  }
+}
+
+async function statSource(sourcePath: string): Promise<Stats> {
+  try {
+    const sourceStats = await lstat(sourcePath);
+
+    if (sourceStats.isSymbolicLink()) {
+      throw new Error(`Source path must not be a symbolic link: ${sourcePath}`);
+    }
+
+    if (!sourceStats.isFile() && !sourceStats.isDirectory()) {
+      throw new Error(`Source path must be a local file or directory: ${sourcePath}`);
+    }
+
+    return sourceStats;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Source path must')) {
+      throw error;
+    }
+
+    throw new Error(`source path not found or cannot be read: ${sourcePath}`);
+  }
+}
+
+function defaultOutputDirForSource(sourcePath: string): string {
+  return join(dirname(sourcePath), `${basename(sourcePath)}-discovery`);
+}
+
+async function traverseDirectory(options: {
+  rootPath: string;
+  directoryPath: string;
+  depth: number;
+  candidates: DiscoveryCandidate[];
+  warnings: string[];
+  state: MutableTraversalState;
+  maxDepth: number;
+  maxEntries: number;
+  maxFiles: number;
+}): Promise<void> {
+  const {
+    rootPath,
+    directoryPath,
+    depth,
+    candidates,
+    warnings,
+    state,
+    maxDepth,
+    maxEntries,
+    maxFiles,
+  } = options;
+
+  if (state.truncated) {
+    return;
+  }
+
+  const entries = await readDirectoryEntries({
+    rootPath,
+    directoryPath,
+    warnings,
+    state,
+    maxEntries,
+  });
+
+  if (entries === undefined) {
+    return;
+  }
+
+  entries.sort((a, b) => compareStringsByCodeUnit(a.name, b.name));
+
+  for (const entry of entries) {
+    if (state.truncated) {
+      return;
+    }
+
+    const entryPath = join(directoryPath, entry.name);
+    const relativePath = toRelativePath(rootPath, entryPath);
+
+    if (entry.isSymbolicLink()) {
+      warnings.push(`Skipped symbolic link: ${relativePath}`);
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      if (
+        SKIPPED_DIRECTORY_NAMES.includes(entry.name as (typeof SKIPPED_DIRECTORY_NAMES)[number])
+      ) {
+        warnings.push(`Skipped directory by default: ${relativePath}`);
+        continue;
+      }
+
+      if (depth >= maxDepth) {
+        state.truncated = true;
+        warnings.push(`Traversal stopped at max depth ${maxDepth}: ${relativePath}`);
+        return;
+      }
+
+      await traverseDirectory({
+        rootPath,
+        directoryPath: entryPath,
+        depth: depth + 1,
+        candidates,
+        warnings,
+        state,
+        maxDepth,
+        maxEntries,
+        maxFiles,
+      });
+
+      continue;
+    }
+
+    if (entry.isFile()) {
+      await inspectFile({
+        absolutePath: entryPath,
+        relativePath,
+        candidates,
+        warnings,
+        state,
+        maxFiles,
+        includeUnknown: false,
+      });
+    }
+  }
+}
+
+async function inspectFile(options: {
+  absolutePath: string;
+  relativePath: string;
+  candidates: DiscoveryCandidate[];
+  warnings: string[];
+  state: MutableTraversalState;
+  maxFiles: number;
+  includeUnknown: boolean;
+}): Promise<void> {
+  const { absolutePath, relativePath, candidates, warnings, state, maxFiles, includeUnknown } =
+    options;
+
+  if (state.visitedFiles >= maxFiles) {
+    state.truncated = true;
+
+    if (!state.emittedMaxFileWarning) {
+      warnings.push(`Traversal maxFiles reached: ${maxFiles}`);
+      state.emittedMaxFileWarning = true;
+    }
+
+    return;
+  }
+
+  state.visitedFiles++;
+
+  if (!includeUnknown && !hasCandidateFileExtension(relativePath)) {
+    return;
+  }
+
+  try {
+    const fileInfo = await readFileInfo(absolutePath);
+    const hint = inferCandidateHint(relativePath, fileInfo.contentPrefix);
+
+    if (hint === undefined && !includeUnknown) {
+      return;
+    }
+
+    const hints = hint?.formatHints ?? [];
+
+    candidates.push({
+      path: normalizePathForReport(relativePath),
+      resolvedPath: absolutePath,
+      kind: hint?.kind ?? 'unknown',
+      format: hint?.format ?? 'unknown',
+      hints,
+      formatHints: hints,
+      byteSize: fileInfo.byteSize,
+      sha256: fileInfo.sha256,
+    });
+  } catch {
+    warnings.push(`Skipped unreadable file: ${normalizePathForReport(relativePath)}`);
+  }
+}
+
+async function readDirectoryEntries(options: {
+  rootPath: string;
+  directoryPath: string;
+  warnings: string[];
+  state: MutableTraversalState;
+  maxEntries: number;
+}): Promise<Dirent[] | undefined> {
+  const { rootPath, directoryPath, warnings, state, maxEntries } = options;
+  const entries: Dirent[] = [];
+
+  try {
+    const directory = await opendir(directoryPath);
+
+    try {
+      for await (const entry of directory) {
+        if (state.visitedEntries >= maxEntries) {
+          state.truncated = true;
+
+          if (!state.emittedMaxEntryWarning) {
+            warnings.push(`Traversal maxEntries reached: ${maxEntries}`);
+            state.emittedMaxEntryWarning = true;
+          }
+
+          return undefined;
+        }
+
+        state.visitedEntries++;
+        entries.push(entry);
+      }
+    } catch {
+      warnings.push(`Skipped unreadable directory: ${toRelativePath(rootPath, directoryPath)}`);
+      return undefined;
+    }
+  } catch {
+    warnings.push(`Skipped unreadable directory: ${toRelativePath(rootPath, directoryPath)}`);
+    return undefined;
+  }
+
+  return entries;
+}
+
+function hasCandidateFileExtension(relativePath: string): boolean {
+  return CANDIDATE_FILE_EXTENSIONS.has(extname(relativePath).toLowerCase());
+}
+
+async function readFileInfo(absolutePath: string): Promise<{
+  byteSize: number;
+  contentPrefix: string;
+  sha256: string;
+}> {
+  const hash = createHash('sha256');
+  const prefixChunks: Buffer[] = [];
+  let byteSize = 0;
+  let prefixLength = 0;
+
+  await new Promise<void>((resolvePromise, reject) => {
+    const stream = createReadStream(absolutePath);
+
+    stream.on('data', (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      byteSize += buffer.byteLength;
+      hash.update(buffer);
+
+      if (prefixLength < CONTENT_PREFIX_BYTES) {
+        const slice = buffer.subarray(0, CONTENT_PREFIX_BYTES - prefixLength);
+        prefixChunks.push(slice);
+        prefixLength += slice.byteLength;
+      }
+    });
+    stream.on('error', reject);
+    stream.on('end', resolvePromise);
+  });
+
+  return {
+    byteSize,
+    contentPrefix: Buffer.concat(prefixChunks, prefixLength).toString('utf-8'),
+    sha256: hash.digest('hex'),
+  };
+}
+
+function inferCandidateHint(
+  relativePath: string,
+  contentPrefix: string
+): CandidateHint | undefined {
+  const normalizedPath = normalizePathForReport(relativePath).toLowerCase();
+  const extension = extname(normalizedPath);
+  const fileName = basename(normalizedPath);
+  const isDoccPath = normalizedPath.split('/').some((part) => part.endsWith('.docc'));
+  const looksOpenApi = fileName.includes('openapi') || fileName.includes('swagger');
+
+  if (extension === '.md' && isDoccPath) {
+    return { kind: 'docc', format: 'markdown', formatHints: ['docc-marker', 'markdown'] };
+  }
+
+  if (extension === '.md') {
+    return { kind: 'markdown', format: 'markdown', formatHints: ['markdown'] };
+  }
+
+  if (extension === '.mdx') {
+    return { kind: 'mdx', format: 'mdx', formatHints: ['mdx'] };
+  }
+
+  if (extension === '.rst') {
+    return { kind: 'rst', format: 'rst', formatHints: ['rst'] };
+  }
+
+  if (extension === '.html' || extension === '.htm') {
+    return { kind: 'html', format: 'html', formatHints: ['html'] };
+  }
+
+  if (extension === '.yaml' || extension === '.yml') {
+    if (
+      looksOpenApi ||
+      /^openapi\s*:/m.test(contentPrefix) ||
+      /^swagger\s*:/m.test(contentPrefix)
+    ) {
+      return { kind: 'openapi-yaml', format: 'yaml', formatHints: ['openapi-yaml', 'yaml'] };
+    }
+
+    if (
+      fileName.includes('openref') ||
+      (/^info\s*:/m.test(contentPrefix) && /^functions\s*:/m.test(contentPrefix))
+    ) {
+      return { kind: 'openref-yaml', format: 'yaml', formatHints: ['openref-yaml', 'yaml'] };
+    }
+
+    return { kind: 'yaml', format: 'yaml', formatHints: ['yaml'] };
+  }
+
+  if (extension === '.json') {
+    if (
+      looksOpenApi ||
+      /"openapi"\s*:/.test(contentPrefix) ||
+      /"swagger"\s*:/.test(contentPrefix)
+    ) {
+      return { kind: 'openapi-json', format: 'json', formatHints: ['json', 'openapi-json'] };
+    }
+
+    return { kind: 'json', format: 'json', formatHints: ['json'] };
+  }
+
+  return undefined;
+}
+
+function toRelativePath(rootPath: string, targetPath: string): string {
+  const relativePath = relative(rootPath, targetPath);
+  return relativePath === '' ? '.' : normalizePathForReport(relativePath);
+}
+
+function normalizePathForReport(path: string): string {
+  return path.split(sep).join('/');
+}
+
+function compareStringsByCodeUnit(a: string, b: string): number {
+  const length = Math.min(a.length, b.length);
+
+  for (let index = 0; index < length; index++) {
+    const difference = a.charCodeAt(index) - b.charCodeAt(index);
+
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  return a.length - b.length;
+}
+
+function resolveTraversalBound(
+  value: number | undefined,
+  defaultValue: number,
+  name: string,
+  allowZero: boolean
+): number {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  if (!Number.isSafeInteger(value) || value < 0 || (!allowZero && value === 0)) {
+    const lowerBound = allowZero ? 'non-negative' : 'positive';
+    throw new Error(`${name} must be a ${lowerBound} safe integer`);
+  }
+
+  return value;
+}

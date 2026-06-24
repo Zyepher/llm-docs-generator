@@ -16,6 +16,7 @@ import packageJson from '../package.json';
 import { rm } from 'node:fs/promises';
 
 import { ConfigLoader } from './config/loader.js';
+import { discoverLocalSource } from './core/discovery.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
 import { verifyGenerationManifest, writeGenerationManifest } from './core/manifest.js';
@@ -49,6 +50,36 @@ program
   .description('Generate LLM-optimized documentation from Supabase SDK specifications')
   .version(GENERATOR_VERSION)
   .enablePositionalOptions();
+
+// ============================================================================
+// DISCOVER COMMAND
+// ============================================================================
+
+program
+  .command('discover')
+  .description('Write a bounded discovery report for an explicit local source path')
+  .requiredOption('--source <path>', 'Explicit local file or directory to inspect')
+  .option('--output-dir <dir>', 'Directory for discovery-report.json')
+  .action(async (options: { source: string; outputDir?: string }) => {
+    try {
+      const report = await discoverLocalSource(
+        options.outputDir === undefined
+          ? { source: options.source }
+          : { source: options.source, outputDir: options.outputDir }
+      );
+
+      console.log(chalk.bold('Local source discovery'));
+      console.log(`  Source: ${report.source.resolvedPath}`);
+      console.log(`  Type: ${report.source.type}`);
+      console.log(`  Candidate files: ${report.candidates.length}`);
+      console.log(`  Warnings: ${report.warnings.length}`);
+      console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Discovery failed: ${errorMsg}`));
+      process.exit(1);
+    }
+  });
 
 // ============================================================================
 // GENERATE COMMAND

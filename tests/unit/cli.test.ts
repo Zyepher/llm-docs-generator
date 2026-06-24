@@ -4,13 +4,15 @@
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
+
+import { discoverLocalSources } from '../../src/core/discovery.js';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -62,6 +64,44 @@ interface GenerationManifest {
     format: string;
   };
   generatedOutputs: ManifestFileEntry[];
+  warnings: string[];
+}
+
+interface DiscoveryCandidate {
+  path: string;
+  resolvedPath: string;
+  kind: string;
+  format: string;
+  hints: string[];
+  formatHints: string[];
+  byteSize: number;
+  sha256: string;
+}
+
+interface DiscoveryReport {
+  schemaVersion: string;
+  mode: string;
+  generatedAt: string;
+  source: {
+    input: string;
+    resolvedPath: string;
+    type: string;
+  };
+  output: {
+    reportPath: string;
+  };
+  traversal: {
+    followSymlinks: false;
+    maxDepth: number;
+    maxEntries: number;
+    maxFiles: number;
+    skippedDirectoryNames: string[];
+    visitedEntries: number;
+    visitedFiles: number;
+    candidateCount: number;
+    truncated: boolean;
+  };
+  candidates: DiscoveryCandidate[];
   warnings: string[];
 }
 
@@ -187,6 +227,11 @@ async function runCliWithExit(args: string[], cwd = repoRoot): Promise<CliResult
 async function sha256File(path: string): Promise<string> {
   const content = await readFile(path);
   return `sha256:${createHash('sha256').update(content).digest('hex')}`;
+}
+
+async function sha256FileHex(path: string): Promise<string> {
+  const content = await readFile(path);
+  return createHash('sha256').update(content).digest('hex');
 }
 
 async function byteSize(path: string): Promise<number> {
@@ -329,6 +374,285 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Versions: v2, v1');
     expect(stdout).toContain('Total SDKs: 1');
     expect(await findManifestFiles(configDir)).toEqual([]);
+  });
+
+  it('writes a bounded local discovery report with stable candidate ordering and hints', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'reports');
+    await mkdir(join(sourceDir, 'docs'), { recursive: true });
+    await mkdir(join(sourceDir, 'guide.docc'), { recursive: true });
+    await mkdir(join(sourceDir, 'spec'), { recursive: true });
+    await mkdir(join(sourceDir, 'node_modules/pkg'), { recursive: true });
+    await mkdir(join(sourceDir, 'dist'), { recursive: true });
+    await writeFile(join(sourceDir, 'docs/reference.md'), '# Reference\n', 'utf-8');
+    await writeFile(join(sourceDir, 'docs/components.mdx'), '# Components\n', 'utf-8');
+    await writeFile(join(sourceDir, 'guide.docc/Tutorial.md'), '# Tutorial\n', 'utf-8');
+    await writeFile(join(sourceDir, 'index.html'), '<h1>Home</h1>\n', 'utf-8');
+    await writeFile(join(sourceDir, 'readme.rst'), 'Readme\n======\n', 'utf-8');
+    await writeFile(join(sourceDir, 'spec/openapi.json'), '{"openapi":"3.1.0"}\n', 'utf-8');
+    await writeFile(join(sourceDir, 'spec/openref.yml'), 'functions: []\n', 'utf-8');
+    await writeFile(join(sourceDir, 'node_modules/pkg/ignored.md'), '# Ignored\n', 'utf-8');
+    await writeFile(join(sourceDir, 'dist/ignored.md'), '# Ignored\n', 'utf-8');
+
+    const { stdout } = await runCli([
+      'discover',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const reportText = await readFile(reportPath, 'utf-8');
+    const report = JSON.parse(reportText) as DiscoveryReport;
+
+    expect(stdout).toContain('Local source discovery');
+    expect(stdout).toContain('Candidate files: 7');
+    expect(stdout).toContain(`Report: ${reportPath}`);
+    expect(reportText.endsWith('\n')).toBe(true);
+    expect(new Date(report.generatedAt).toISOString()).toBe(report.generatedAt);
+    expect(report).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'local-bounded-inspection',
+      source: {
+        input: sourceDir,
+        resolvedPath: sourceDir,
+        type: 'directory',
+      },
+      output: {
+        reportPath,
+      },
+      traversal: {
+        followSymlinks: false,
+        maxDepth: 8,
+        maxEntries: 20000,
+        maxFiles: 5000,
+        candidateCount: 7,
+        truncated: false,
+      },
+    });
+    expect(report.traversal.skippedDirectoryNames).toContain('node_modules');
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual([
+      'docs/components.mdx',
+      'docs/reference.md',
+      'guide.docc/Tutorial.md',
+      'index.html',
+      'readme.rst',
+      'spec/openapi.json',
+      'spec/openref.yml',
+    ]);
+    expect(report.candidates.map((candidate) => candidate.kind)).toEqual([
+      'mdx',
+      'markdown',
+      'docc',
+      'html',
+      'rst',
+      'openapi-json',
+      'openref-yaml',
+    ]);
+    expect(report.candidates[2]?.formatHints).toEqual(['docc-marker', 'markdown']);
+    expect(report.candidates[5]?.formatHints).toEqual(['json', 'openapi-json']);
+    expect(report.candidates[6]?.formatHints).toEqual(['openref-yaml', 'yaml']);
+
+    const referencePath = join(sourceDir, 'docs/reference.md');
+    const referenceCandidate = report.candidates.find(
+      (candidate) => candidate.path === 'docs/reference.md'
+    );
+    expect(referenceCandidate?.byteSize).toBe(await byteSize(referencePath));
+    expect(referenceCandidate?.sha256).toBe(await sha256FileHex(referencePath));
+    expect(report.candidates.some((candidate) => candidate.path.includes('ignored'))).toBe(false);
+    expect(report.warnings).toContain('Skipped directory by default: dist');
+    expect(report.warnings).toContain('Skipped directory by default: node_modules');
+  });
+
+  it('supports an explicit local file source without defaulting output inside the source path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-file-'));
+    tempDirs.push(dir);
+
+    const sourcePath = join(dir, 'openapi.yaml');
+    await writeFile(sourcePath, 'openapi: 3.1.0\n', 'utf-8');
+
+    const { stdout } = await runCli(['discover', '--source', sourcePath]);
+    const reportPath = join(dir, 'openapi.yaml-discovery/discovery-report.json');
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+
+    expect(stdout).toContain('Candidate files: 1');
+    expect(stdout).toContain(`Report: ${reportPath}`);
+    expect(report.source).toMatchObject({
+      input: sourcePath,
+      resolvedPath: sourcePath,
+      type: 'file',
+    });
+    expect(report.candidates).toHaveLength(1);
+    expect(report.candidates[0]).toMatchObject({
+      path: 'openapi.yaml',
+      resolvedPath: sourcePath,
+      kind: 'openapi-yaml',
+      formatHints: ['openapi-yaml', 'yaml'],
+      byteSize: await byteSize(sourcePath),
+      sha256: await sha256FileHex(sourcePath),
+    });
+    expect(report.output.reportPath).toBe(reportPath);
+    expect(dirname(report.output.reportPath)).not.toBe(dirname(sourcePath));
+  });
+
+  it('rejects missing local discovery sources with a non-zero exit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-missing-'));
+    tempDirs.push(dir);
+    const missingPath = join(dir, 'missing-docs');
+
+    const result = await runCliWithExit(['discover', '--source', missingPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: source path not found');
+    expect(result.stderr).toContain(missingPath);
+  });
+
+  it('rejects a symbolic link as the local discovery source root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-symlink-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const linkedSource = join(dir, 'linked-source');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'guide.md'), '# Guide\n', 'utf-8');
+    await symlink(sourceDir, linkedSource, 'dir');
+
+    const result = await runCliWithExit(['discover', '--source', linkedSource]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: Source path must not be a symbolic link');
+    expect(result.stderr).toContain(linkedSource);
+  });
+
+  it.each([
+    'https://example.com/docs',
+    'http://example.com/docs',
+    'git@github.com:owner/repo.git',
+    ' https://example.com/docs ',
+  ])(
+    'rejects URL-like discovery source %s with a non-zero exit',
+    async (source) => {
+      const result = await runCliWithExit(['discover', '--source', source]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        'Discovery failed: discover --source accepts local file or directory paths only'
+      );
+    }
+  );
+
+  it('does not make unsupported source authority claims in discovery output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-claims-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'reports');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'guide.md'), '# Guide\n', 'utf-8');
+
+    const { stdout, stderr } = await runCli([
+      'discover',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    const reportText = await readFile(join(outputDir, 'discovery-report.json'), 'utf-8');
+    const combinedOutput = `${stdout}\n${stderr}\n${reportText}`;
+
+    expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(combinedOutput).not.toMatch(/\bofficial\b/i);
+    expect(combinedOutput).not.toMatch(/\bscore\b/i);
+    expect(combinedOutput).not.toMatch(/\bselected\b/i);
+  });
+
+  it('reports truncated local discovery when maxFiles bounds traversal', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-bounds-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'reports');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'a.md'), '# A\n', 'utf-8');
+    await writeFile(join(sourceDir, 'b.md'), '# B\n', 'utf-8');
+    await writeFile(join(sourceDir, 'c.md'), '# C\n', 'utf-8');
+
+    const { report, reportPath } = await discoverLocalSources({
+      source: sourceDir,
+      outputDir,
+      maxFiles: 2,
+    });
+    const reportFromDisk = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+
+    expect(report.traversal).toMatchObject({
+      maxFiles: 2,
+      visitedFiles: 2,
+      candidateCount: 2,
+      truncated: true,
+    });
+    expect(report.warnings).toContain('Traversal maxFiles reached: 2');
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual(['a.md', 'b.md']);
+    expect(reportFromDisk.traversal.truncated).toBe(true);
+    expect(reportFromDisk.warnings).toContain('Traversal maxFiles reached: 2');
+  });
+
+  it('reports truncated local discovery when maxDepth bounds nested directories', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-depth-bounds-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'reports');
+    await mkdir(join(sourceDir, 'z-nested'), { recursive: true });
+    await writeFile(join(sourceDir, 'a.md'), '# A\n', 'utf-8');
+    await writeFile(join(sourceDir, 'z-nested/deep.md'), '# Deep\n', 'utf-8');
+
+    const { report, reportPath } = await discoverLocalSources({
+      source: sourceDir,
+      outputDir,
+      maxDepth: 0,
+    });
+    const reportFromDisk = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+
+    expect(report.traversal).toMatchObject({
+      maxDepth: 0,
+      candidateCount: 1,
+      truncated: true,
+    });
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual(['a.md']);
+    expect(report.warnings).toContain('Traversal stopped at max depth 0: z-nested');
+    expect(reportFromDisk.traversal.truncated).toBe(true);
+    expect(reportFromDisk.warnings).toContain('Traversal stopped at max depth 0: z-nested');
+  });
+
+  it('reports truncated local discovery when maxEntries bounds directory fanout', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-entry-bounds-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'reports');
+    await mkdir(join(sourceDir, 'a'), { recursive: true });
+    await mkdir(join(sourceDir, 'b'), { recursive: true });
+    await mkdir(join(sourceDir, 'c'), { recursive: true });
+
+    const { report, reportPath } = await discoverLocalSources({
+      source: sourceDir,
+      outputDir,
+      maxEntries: 2,
+    });
+    const reportFromDisk = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+
+    expect(report.traversal).toMatchObject({
+      maxEntries: 2,
+      visitedEntries: 2,
+      candidateCount: 0,
+      truncated: true,
+    });
+    expect(report.warnings).toContain('Traversal maxEntries reached: 2');
+    expect(reportFromDisk.traversal.truncated).toBe(true);
+    expect(reportFromDisk.warnings).toContain('Traversal maxEntries reached: 2');
   });
 
   it('generates OpenRef documentation from a local configured spec', async () => {
@@ -922,4 +1246,5 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Validation successful!');
     expect(stdout).toContain('Version: v2');
   });
+
 });
