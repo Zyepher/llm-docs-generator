@@ -45,6 +45,7 @@ const DOUBLE_NEWLINE = '\n\n';
 export class LLMFormatter {
   private readonly versionConfig: {
     displayName: string;
+    spec: { url: string; localPath: string | null };
     output: { filenamePrefix: string };
   };
   private readonly sdkName: string;
@@ -55,17 +56,27 @@ export class LLMFormatter {
     private readonly specData: SpecData,
     private readonly config: ConfigLoader,
     sdkName: string,
-    version: string
+    version: string,
+    specPath?: string
   ) {
     // Cache version config for O(1) access
     this.versionConfig = this.config.getSDKVersionConfig(sdkName, version);
     this.sdkName = sdkName;
     this.version = version;
+    this.specPath = this.resolveSpecPath(specPath);
+  }
 
-    // Get spec path from config
-    const sdk = this.config.getSDK(sdkName);
-    const versionConfig = sdk.versions[version];
-    this.specPath = versionConfig?.spec.localPath ?? '';
+  private resolveSpecPath(specPath?: string): string {
+    if (specPath !== undefined && specPath.trim().length > 0) {
+      return specPath;
+    }
+
+    const configuredLocalPath = this.versionConfig.spec.localPath?.trim();
+    if (configuredLocalPath !== undefined && configuredLocalPath.length > 0) {
+      return configuredLocalPath;
+    }
+
+    return this.versionConfig.spec.url;
   }
 
   /**
@@ -441,8 +452,9 @@ export async function formatSpecData(
   config: ConfigLoader,
   sdkName: string,
   version: string,
-  outputDir: string
+  outputDir: string,
+  specPath?: string
 ): Promise<void> {
-  const formatter = new LLMFormatter(specData, config, sdkName, version);
+  const formatter = new LLMFormatter(specData, config, sdkName, version, specPath);
   await formatter.generateAll(outputDir);
 }
