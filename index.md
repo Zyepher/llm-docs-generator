@@ -10,7 +10,7 @@ Read this file first, then follow the links for the task you are doing.
 LLM-friendly documentation from reliable source material.
 
 The next-generation direction is to make the project an agent-aware system that
-can:
+will be able to:
 
 1. Find official documentation.
 2. Convert local documentation.
@@ -71,7 +71,9 @@ npm run test
 
 ## Intent Map
 
-Use this map to choose the correct workflow.
+Use this map to choose the intended workflow. Some workflows are target
+next-generation behavior and are not fully implemented in the current CLI yet;
+check [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and source before promising support.
 
 | User Intent | First File To Read | Workflow |
 |---|---|---|
@@ -90,8 +92,13 @@ Development commands:
 ```bash
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
-npx tsx src/cli.ts generate --source ./docs --format markdown --output-dir ./output
+npx tsx src/cli.ts validate --sdk swift --version v2
 ```
+
+The current CLI does not yet expose target-driven discovery, `generate
+--source`, manifests, refresh, repo caching, source verification, or
+source-truth codebase docs generation. Markdown / DocC parsing exists in parser
+modules but is not wired as a current CLI command.
 
 The current CLI is implemented in:
 
@@ -137,6 +144,7 @@ Utilities:
 Tests:
 
 - [tests/unit/models.test.ts](tests/unit/models.test.ts)
+- [tests/unit/cli.test.ts](tests/unit/cli.test.ts)
 
 ## Planning And Design Files
 
