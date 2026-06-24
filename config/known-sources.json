@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "Curated registry of known documentation sources for LLM optimization. Claude Code and other AI assistants can reference this list to discover and generate documentation.",
+  "description": "Non-authoritative source hint catalog for LLM documentation work. These hints are shortcuts for finding likely documentation locations, not a registry of verified sources. Agents and maintainers must verify each repository, path, version, and format before use.",
   "lastUpdated": "2025-10-17",
   "sources": [
     {
@@ -32,7 +32,7 @@
           "description": "Supabase JavaScript Client v2"
         }
       ],
-      "usage": "llm-docs generate --source apps/docs/spec/supabase_swift_v2.yml",
+      "hint": "Likely OpenRef specs live under apps/docs/spec. Verify the exact SDK/version file exists before using the current configured-SDK CLI workflow.",
       "tested": true,
       "maintainer": "Supabase"
     },
@@ -69,7 +69,7 @@
           "description": "Complete Language Guide (all chapters)"
         }
       ],
-      "usage": "llm-docs generate --source TSPL.docc/LanguageGuide --format markdown",
+      "hint": "Likely DocC-flavored Markdown lives under TSPL.docc. Verify the current repository layout before parsing files with the Markdown/DocC parser modules.",
       "tested": true,
       "maintainer": "Apple / Swift Community"
     },
@@ -101,7 +101,7 @@
           "description": "Standard library documentation"
         }
       ],
-      "usage": "llm-docs generate --source Doc --format rst",
+      "hint": "Likely reStructuredText docs live under Doc. This is a hint only; RST parsing is not implemented yet.",
       "tested": false,
       "status": "planned",
       "note": "Requires reStructuredText parser implementation",
@@ -121,7 +121,7 @@
           "description": "TypeScript handbook entry point"
         }
       ],
-      "usage": "llm-docs generate --source . --format markdown",
+      "hint": "Likely Markdown docs live at the repository root. Verify the current repository layout before use.",
       "tested": false,
       "status": "planned",
       "note": "Requires testing with current markdown parser",
@@ -145,7 +145,7 @@
           "description": "Getting Started chapter"
         }
       ],
-      "usage": "llm-docs generate --source src --format markdown",
+      "hint": "Likely Markdown book sources live under src. Verify the current repository layout before use.",
       "tested": false,
       "status": "planned",
       "note": "Requires testing with current markdown parser",
@@ -153,13 +153,12 @@
     }
   ],
   "contributing": {
-    "message": "To add a new documentation source, submit a PR with:",
+    "message": "To add or update a source hint, submit a PR with:",
     "requirements": [
-      "Add entry to this JSON file with all required fields",
-      "Add entry to README.md Known Documentation Sources table",
-      "Test generation with the new source",
-      "Provide usage example",
-      "Set tested: true only after successful generation"
+      "Add or update an entry in this JSON file with enough detail to verify the hint",
+      "Verify the repository, path, version, and format before marking tested: true",
+      "Do not treat this file as authoritative source discovery",
+      "Do not include unsupported current CLI commands as usage examples"
     ]
   }
 }

@@ -1,30 +1,30 @@
 # Contributing to llm-docs-generator
 
-Thank you for your interest in contributing! This project is designed to be a community-driven registry of documentation sources for AI coding assistants.
+Thank you for your interest in contributing! This project uses a community-maintained source hint catalog to help AI coding assistants find likely documentation locations.
 
 ## Ways to Contribute
 
-### 1. Add New Documentation Sources to the Registry
+### 1. Add or Update Source Hints
 
-The most valuable contribution is adding new documentation sources to `config/known-sources.json`.
+The most valuable contribution is improving `config/known-sources.json`. Despite the compatibility filename, this file is a non-authoritative hint catalog, not a registry of verified sources. Every hint must be checked against the current upstream repository, path, version, and format before use.
 
 #### Requirements
 
 - Documentation must be publicly accessible
-- Format must be supported (openref, markdown, rst) or you provide a parser
-- Successfully test generation before submitting
-- Include usage example
+- Format must be implemented today (`openref`, `markdown`) or marked as planned until parser and CLI support exists (for example, `restructuredtext`/RST)
+- Verify the repository, path, version, and format before submitting
+- Include a note that explains how the hint was verified
 
 #### Process
 
 1. Fork the repository
-2. Add entry to `config/known-sources.json`
-3. Test generation with your source
-4. Update `tested: true` if successful
-5. Add entry to README.md Known Sources table (if tested)
+2. Add or update an entry in `config/known-sources.json`
+3. Verify the hint against the current upstream source
+4. Update `tested: true` only after the hint is verified against upstream and supported by implemented parser/CLI behavior
+5. Update related docs only when they describe implemented behavior
 6. Submit pull request
 
-#### Registry Entry Format
+#### Hint Entry Format
 
 ```json
 {
@@ -41,7 +41,7 @@ The most valuable contribution is adding new documentation sources to `config/kn
       "description": "What this file contains"
     }
   ],
-  "usage": "llm-docs generate --source path/to/docs",
+  "hint": "Likely docs live under path/to/docs. Verify the current repository layout before use.",
   "tested": false,
   "maintainer": "Organization or Individual"
 }
@@ -52,11 +52,11 @@ The most valuable contribution is adding new documentation sources to `config/kn
 - `id`: Unique identifier (lowercase, hyphens)
 - `name`: Display name
 - `repository`: GitHub repository URL
-- `format`: Documentation format
+- `format`: Documentation format; implemented parser formats are currently `openref` and `markdown`, while planned formats such as `restructuredtext` should stay untested until parser/CLI support exists
 - `path`: Path to documentation within repo
 - `description`: Brief description
-- `usage`: Command to generate docs
-- `tested`: Boolean (set to true only after successful test)
+- `hint`: Verification-oriented note for agents and maintainers
+- `tested`: Boolean (set to true only after confirming the hint against current upstream sources and implemented parser support)
 - `maintainer`: Who maintains the original docs
 
 #### Optional Fields
@@ -143,7 +143,7 @@ Use clear, descriptive commit messages:
 
 Examples:
 ```
-Add Python documentation to known sources
+Add Python documentation source hint
 Fix markdown parser handling of nested lists
 Update README with new usage examples
 ```
@@ -174,7 +174,7 @@ Brief description of changes
 ## Testing
 - [ ] Tests added/updated
 - [ ] Manual testing completed
-- [ ] Generation tested (for registry additions)
+- [ ] Source hint verified (for hint catalog additions)
 
 ## Checklist
 - [ ] Code follows project style
@@ -183,50 +183,43 @@ Brief description of changes
 - [ ] No breaking changes (or documented)
 ```
 
-## Adding Documentation Sources - Detailed Guide
+## Adding Source Hints - Detailed Guide
 
-### Step 1: Find Documentation Source
+### Step 1: Find Candidate Documentation
 
-Identify publicly accessible documentation:
+Identify publicly accessible documentation candidates:
 - GitHub repositories with markdown/rst docs
 - OpenRef YAML specifications
 - DocC documentation
 
-### Step 2: Test Locally
+### Step 2: Verify the Hint
 
-Clone the documentation repository and test generation:
+Clone or inspect the documentation repository and confirm the current path, format, version, and maintainer. Do not assume `config/known-sources.json` is authoritative.
 
 ```bash
 # Clone docs repo
 git clone https://github.com/org/docs-repo
 cd docs-repo
 
-# Test generation
-npx tsx /path/to/llm-docs-generator/src/cli.ts generate --source ./docs --format markdown
-
-# Check output
-ls ./output/
-cat ./output/*-full-llms.txt
+# Verify the hinted docs path and format
+find ./docs -maxdepth 2 -type f | head
 ```
 
-### Step 3: Add to Registry
+The current CLI does not support source-driven generation. Do not document `llm-docs generate --source` as working behavior. Future roadmap examples must be labeled as planned target commands.
 
-Edit `config/known-sources.json` and add entry with all required fields.
+### Step 3: Add to Hint Catalog
 
-### Step 4: Update README (if tested successfully)
+Edit `config/known-sources.json` and add or update the entry with all required fields.
 
-Add row to README.md Known Documentation Sources table:
+### Step 4: Update Docs When Needed
 
-```markdown
-| **Project Name** | Format | [`/path`](https://github.com/...) | ✅ Tested | Notes |
-```
+Update README.md or other docs only when they describe implemented behavior or clearly labeled planned behavior.
 
 ### Step 5: Submit PR
 
 Include in PR description:
 - What documentation source was added
-- Screenshot or sample of generated output
-- Confirmation that generation succeeded
+- How the hint was verified
 - Any special considerations
 
 ## Questions?

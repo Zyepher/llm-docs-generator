@@ -98,7 +98,7 @@ Operators are unary, binary, or ternary...
 # Parse a single markdown file
 npx tsx test-swift-book.ts
 
-# Or use the preset (future CLI update)
+# Planned future target command; not supported by the current CLI
 llm-docs generate --preset swift-book --source ../TSPL.docc
 ```
 
