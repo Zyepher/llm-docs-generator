@@ -28,7 +28,8 @@ const program = new Command();
 program
   .name('supabase-llm-docs')
   .description('Generate LLM-optimized documentation from Supabase SDK specifications')
-  .version('1.0.0');
+  .version('1.0.0')
+  .enablePositionalOptions();
 
 // ============================================================================
 // GENERATE COMMAND
