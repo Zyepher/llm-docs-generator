@@ -50,7 +50,8 @@ Current implementation:
   configured source and generated output file hashes and byte sizes.
 - Can run `discover --source <local-file-or-directory>` for explicit local,
   bounded inspection and write `discovery-report.json` with candidate file
-  hints, hashes, traversal settings, and warnings.
+  hints, deterministic evidence categories and signals, report order, hashes,
+  traversal settings, and warnings.
 - Can run `discover --repo <git-url-or-local-git-repo>` with optional
   `--scope <path>`, `--cache-dir <dir>`, and `--output-dir <dir>` for a bounded
   repo inspection report. Repo mode clones missing repos into a stable cache
@@ -64,7 +65,12 @@ Current implementation:
 - Does not yet fully implement website discovery, refresh, source verification,
   full next-generation manifests, or source-truth codebase documentation
   generation. Repo discovery is a cache/inspection foundation only; it does not
-  generate docs, choose sources, rank candidates, or claim source truth.
+  generate docs, choose sources, score trust, infer authority, or claim source
+  truth.
+- Local and repo discovery order candidates by deterministic evidence category
+  and normalized path for agent review. This order is derived from inspected
+  path, format/kind, extension, and already-read content prefix signals; it is
+  not a source-selection or authority judgment.
 
 Target next-generation implementation:
 
@@ -437,8 +443,8 @@ Do not ask when:
   repository commands during discovery or parsing.
 - Do not silently trust stale source hints.
 - Do not silently upgrade pinned versions.
-- Do not let CLI discovery or scoring make hidden authority decisions; it must
-  produce inspectable evidence for agent review.
+- Do not let CLI discovery make hidden authority decisions; it must produce
+  inspectable deterministic evidence and ordering for agent review.
 - Do not claim source-truth codebase docs are supported unless that mode exists.
 - Do not mark official docs as source-verified unless implementation files were
   actually inspected.

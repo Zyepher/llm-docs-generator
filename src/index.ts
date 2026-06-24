@@ -49,6 +49,8 @@ export type {
   DiscoverLocalSourcesOptions,
   DiscoverLocalSourcesResult,
   DiscoveryCandidate,
+  DiscoveryCandidateEvidence,
+  DiscoveryEvidenceCategory,
   DiscoveryCandidateKind,
   DiscoveryInspection,
   DiscoveryReport,

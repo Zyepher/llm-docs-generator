@@ -102,7 +102,8 @@ npx tsx src/cli.ts validate --sdk swift --version v2
 
 The current `discover --source` command performs local, explicit, bounded file
 inspection for a provided file or directory. It writes `discovery-report.json`
-with candidate file hints, hashes, traversal settings, and warnings.
+with candidate file hints, deterministic evidence categories and signals,
+report order, hashes, traversal settings, and warnings.
 
 The current `discover --repo` command clones or reuses an explicit git repo in
 a stable cache, optionally inspects one repo-relative scope path, and writes a
@@ -118,7 +119,9 @@ writes `manifest.json` for successful configured `generate --sdk` tasks and
 verifies current configured SDK manifest source and output file hashes and byte
 sizes only. Markdown / DocC parsing exists in parser modules but is not wired
 as a current CLI generation command. Discovery reports do not generate docs,
-choose sources, rank candidates, or claim source truth.
+choose sources, score trust, infer authority, or claim source truth. Discovery
+candidates are ordered by deterministic evidence category and normalized path
+for agent review only.
 
 The current CLI is implemented in:
 

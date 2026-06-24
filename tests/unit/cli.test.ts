@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { discoverLocalSources } from '../../src/core/discovery.js';
+import { discoverLocalSource, discoverLocalSources } from '../../src/core/discovery.js';
 import { discoverRepo } from '../../src/core/repo-discovery.js';
 
 const execFileAsync = promisify(execFile);
@@ -75,6 +75,11 @@ interface DiscoveryCandidate {
   format: string;
   hints: string[];
   formatHints: string[];
+  evidence: {
+    category: string;
+    signals: string[];
+  };
+  order: number;
   byteSize: number;
   sha256: string;
 }
@@ -474,6 +479,8 @@ describe('CLI compatibility behavior', () => {
     await writeFile(join(sourceDir, 'guide.docc/Tutorial.md'), '# Tutorial\n', 'utf-8');
     await writeFile(join(sourceDir, 'index.html'), '<h1>Home</h1>\n', 'utf-8');
     await writeFile(join(sourceDir, 'readme.rst'), 'Readme\n======\n', 'utf-8');
+    await writeFile(join(sourceDir, 'package.json'), '{"name":"fixture"}\n', 'utf-8');
+    await writeFile(join(sourceDir, 'settings.yaml'), 'enabled: true\n', 'utf-8');
     await writeFile(join(sourceDir, 'spec/openapi.json'), '{"openapi":"3.1.0"}\n', 'utf-8');
     await writeFile(join(sourceDir, 'spec/openref.yml'), 'functions: []\n', 'utf-8');
     await writeFile(join(sourceDir, 'node_modules/pkg/ignored.md'), '# Ignored\n', 'utf-8');
@@ -483,14 +490,20 @@ describe('CLI compatibility behavior', () => {
     const reportPath = join(outputDir, 'discovery-report.json');
     const reportText = await readFile(reportPath, 'utf-8');
     const report = JSON.parse(reportText) as DiscoveryReport;
+    const unknownFile = join(sourceDir, 'notes.txt');
+    await writeFile(unknownFile, 'plain notes\n', 'utf-8');
+    const unknownReport = await discoverLocalSource({
+      source: unknownFile,
+      outputDir: join(dir, 'unknown-report'),
+    });
 
     expect(stdout).toContain('Local source discovery');
-    expect(stdout).toContain('Candidate files: 7');
+    expect(stdout).toContain('Candidate files: 9');
     expect(stdout).toContain(`Report: ${reportPath}`);
     expect(reportText.endsWith('\n')).toBe(true);
     expect(new Date(report.generatedAt).toISOString()).toBe(report.generatedAt);
     expect(report).toMatchObject({
-      schemaVersion: '0.1.0',
+      schemaVersion: '0.2.0',
       mode: 'local-bounded-inspection',
       source: {
         input: sourceDir,
@@ -505,32 +518,63 @@ describe('CLI compatibility behavior', () => {
         maxDepth: 8,
         maxEntries: 20000,
         maxFiles: 5000,
-        candidateCount: 7,
+        candidateCount: 9,
         truncated: false,
       },
     });
     expect(report.traversal.skippedDirectoryNames).toContain('node_modules');
     expect(report.candidates.map((candidate) => candidate.path)).toEqual([
+      'spec/openapi.json',
+      'spec/openref.yml',
       'docs/components.mdx',
       'docs/reference.md',
       'guide.docc/Tutorial.md',
-      'index.html',
       'readme.rst',
-      'spec/openapi.json',
-      'spec/openref.yml',
+      'index.html',
+      'package.json',
+      'settings.yaml',
     ]);
     expect(report.candidates.map((candidate) => candidate.kind)).toEqual([
+      'openapi-json',
+      'openref-yaml',
       'mdx',
       'markdown',
       'docc',
-      'html',
       'rst',
-      'openapi-json',
-      'openref-yaml',
+      'html',
+      'json',
+      'yaml',
     ]);
-    expect(report.candidates[2]?.formatHints).toEqual(['docc-marker', 'markdown']);
-    expect(report.candidates[5]?.formatHints).toEqual(['json', 'openapi-json']);
-    expect(report.candidates[6]?.formatHints).toEqual(['openref-yaml', 'yaml']);
+    expect(report.candidates.map((candidate) => candidate.order)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9,
+    ]);
+    expect(report.candidates.map((candidate) => candidate.evidence.category)).toEqual([
+      'machine-readable-spec',
+      'machine-readable-spec',
+      'structured-doc-source',
+      'structured-doc-source',
+      'structured-doc-source',
+      'structured-doc-source',
+      'rendered-html',
+      'generic-data',
+      'generic-data',
+    ]);
+    expect(report.candidates[0]?.formatHints).toEqual(['json', 'openapi-json']);
+    expect(report.candidates[0]?.evidence.signals).toContain('content:openapi-field');
+    expect(report.candidates[0]?.evidence.signals).toContain('path:openapi-or-swagger-name');
+    expect(report.candidates[1]?.formatHints).toEqual(['openref-yaml', 'yaml']);
+    expect(report.candidates[1]?.evidence.signals).toContain('content:functions-field');
+    expect(report.candidates[4]?.formatHints).toEqual(['docc-marker', 'markdown']);
+    expect(report.candidates[7]?.evidence.signals).toContain('kind:json');
+    expect(report.candidates[8]?.evidence.signals).toContain('kind:yaml');
+    expect(unknownReport.candidates[0]).toMatchObject({
+      path: 'notes.txt',
+      kind: 'unknown',
+      evidence: {
+        category: 'unknown',
+      },
+      order: 1,
+    });
 
     const referencePath = join(sourceDir, 'docs/reference.md');
     const referenceCandidate = report.candidates.find(
@@ -567,9 +611,14 @@ describe('CLI compatibility behavior', () => {
       resolvedPath: sourcePath,
       kind: 'openapi-yaml',
       formatHints: ['openapi-yaml', 'yaml'],
+      evidence: {
+        category: 'machine-readable-spec',
+      },
+      order: 1,
       byteSize: await byteSize(sourcePath),
       sha256: await sha256FileHex(sourcePath),
     });
+    expect(report.candidates[0]?.evidence.signals).toContain('content:openapi-field');
     expect(report.output.reportPath).toBe(reportPath);
     expect(dirname(report.output.reportPath)).not.toBe(dirname(sourcePath));
   });
@@ -667,7 +716,7 @@ describe('CLI compatibility behavior', () => {
     expect(reportText.endsWith('\n')).toBe(true);
     expect(new Date(report.generatedAt).toISOString()).toBe(report.generatedAt);
     expect(report).toMatchObject({
-      schemaVersion: '0.1.0',
+      schemaVersion: '0.2.0',
       mode: 'repo-bounded-inspection',
       repo: {
         input: repoDir,
@@ -704,10 +753,17 @@ describe('CLI compatibility behavior', () => {
     expect(report.repo.git.commit).toMatch(/^[0-9a-f]{40}$/);
     expect(report.warnings).toContain('Skipped directory by default: .git');
     expect(report.candidates.map((candidate) => candidate.path)).toEqual([
+      'docs/openapi.json',
       'README.md',
       'docs/guide.md',
-      'docs/openapi.json',
     ]);
+    expect(report.candidates.map((candidate) => candidate.order)).toEqual([1, 2, 3]);
+    expect(report.candidates.map((candidate) => candidate.evidence.category)).toEqual([
+      'machine-readable-spec',
+      'structured-doc-source',
+      'structured-doc-source',
+    ]);
+    expect(report.candidates[0]?.evidence.signals).toContain('content:openapi-field');
     expect(report.candidates[0]?.resolvedPath.startsWith(report.repo.cachePath)).toBe(true);
   });
 
@@ -739,8 +795,13 @@ describe('CLI compatibility behavior', () => {
     });
     expect(report.scope.resolvedPath).toBe(join(report.repo.cachePath, 'docs'));
     expect(report.candidates.map((candidate) => candidate.path)).toEqual([
-      'guide.md',
       'openapi.json',
+      'guide.md',
+    ]);
+    expect(report.candidates.map((candidate) => candidate.order)).toEqual([1, 2]);
+    expect(report.candidates.map((candidate) => candidate.evidence.category)).toEqual([
+      'machine-readable-spec',
+      'structured-doc-source',
     ]);
   });
 
@@ -1212,7 +1273,7 @@ describe('CLI compatibility behavior', () => {
     const outputDir = join(dir, 'reports');
     await mkdir(sourceDir, { recursive: true });
     await writeFile(join(sourceDir, 'a.md'), '# A\n', 'utf-8');
-    await writeFile(join(sourceDir, 'b.md'), '# B\n', 'utf-8');
+    await writeFile(join(sourceDir, 'b-openapi.json'), '{"openapi":"3.1.0"}\n', 'utf-8');
     await writeFile(join(sourceDir, 'c.md'), '# C\n', 'utf-8');
 
     const { report, reportPath } = await discoverLocalSources({
@@ -1229,7 +1290,15 @@ describe('CLI compatibility behavior', () => {
       truncated: true,
     });
     expect(report.warnings).toContain('Traversal maxFiles reached: 2');
-    expect(report.candidates.map((candidate) => candidate.path)).toEqual(['a.md', 'b.md']);
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual([
+      'b-openapi.json',
+      'a.md',
+    ]);
+    expect(report.candidates.map((candidate) => candidate.order)).toEqual([1, 2]);
+    expect(report.candidates.map((candidate) => candidate.evidence.category)).toEqual([
+      'machine-readable-spec',
+      'structured-doc-source',
+    ]);
     expect(reportFromDisk.traversal.truncated).toBe(true);
     expect(reportFromDisk.warnings).toContain('Traversal maxFiles reached: 2');
   });
