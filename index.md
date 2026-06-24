@@ -93,24 +93,32 @@ Development commands:
 
 ```bash
 npx tsx src/cli.ts discover --source ./docs --output-dir ./reports/local-docs
+npx tsx src/cli.ts discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
 npx tsx src/cli.ts verify --output-dir ./output/swift/v2
 npx tsx src/cli.ts validate --sdk swift --version v2
 ```
 
-The current `discover --source` command only performs local, explicit, bounded
-file inspection for a provided file or directory. It writes
-`discovery-report.json` with candidate file hints, hashes, traversal settings,
-and warnings; it does not generate docs, crawl URLs, clone repositories, score
-authority, or choose a source.
+The current `discover --source` command performs local, explicit, bounded file
+inspection for a provided file or directory. It writes `discovery-report.json`
+with candidate file hints, hashes, traversal settings, and warnings.
 
-The current CLI does not yet expose `generate --source`, refresh, repo caching,
-website discovery, source verification, or source-truth codebase docs
-generation. It writes `manifest.json` for successful configured `generate
---sdk` tasks and verifies current configured SDK manifest source and output
-file hashes and byte sizes only. Markdown / DocC parsing exists in parser
-modules but is not wired as a current CLI generation command.
+The current `discover --repo` command clones or reuses an explicit git repo in
+a stable cache, optionally inspects one repo-relative scope path, and writes a
+repo discovery report with cache path, commit, dirty state, traversal settings,
+candidates, and warnings. For clean matching caches it fetches remote refs but
+does not pull or mutate the checked-out commit, and it does not run repo
+scripts. Ignored local files in the cache are treated as dirty cache contents,
+so fetches are skipped before any update step can risk those files.
+
+The current CLI does not yet expose `generate --source`, refresh, website
+discovery, source verification, or source-truth codebase docs generation. It
+writes `manifest.json` for successful configured `generate --sdk` tasks and
+verifies current configured SDK manifest source and output file hashes and byte
+sizes only. Markdown / DocC parsing exists in parser modules but is not wired
+as a current CLI generation command. Discovery reports do not generate docs,
+choose sources, rank candidates, or claim source truth.
 
 The current CLI is implemented in:
 
@@ -196,8 +204,9 @@ agent intent/source/scope resolution
 - Successful configured SDK generation currently writes a scoped manifest with
   source and output hashes. Current `verify` checks those configured SDK
   manifest file hashes and byte sizes only. Local bounded inspection reports are
-  available through `discover --source`; refresh, repo, website, and
-  source-code verification remain planned.
+  available through `discover --source`, and repo cache/inspection reports are
+  available through `discover --repo`; refresh, website, source-code
+  verification, and source-truth codebase docs remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL
@@ -208,7 +217,7 @@ agent intent/source/scope resolution
   - content hash
   - parser and formatter
   - generated files
-  - warnings and confidence score
+  - warnings
 
 ## Agent Crawl Order
 

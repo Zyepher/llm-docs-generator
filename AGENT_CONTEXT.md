@@ -50,13 +50,21 @@ Current implementation:
   configured source and generated output file hashes and byte sizes.
 - Can run `discover --source <local-file-or-directory>` for explicit local,
   bounded inspection and write `discovery-report.json` with candidate file
-  hints, hashes, traversal settings, and warnings. This command does not
-  generate docs, score authority, clone repositories, or crawl URLs.
-- Current CLI commands are limited to local `discover --source`, `generate
-  --sdk`, `verify`, `list-sdks`, and `validate --sdk`.
-- Does not yet fully implement repo discovery, website discovery, refresh,
-  source verification, full next-generation manifests, or source-truth codebase
-  documentation generation.
+  hints, hashes, traversal settings, and warnings.
+- Can run `discover --repo <git-url-or-local-git-repo>` with optional
+  `--scope <path>`, `--cache-dir <dir>`, and `--output-dir <dir>` for a bounded
+  repo inspection report. Repo mode clones missing repos into a stable cache
+  outside the active workspace by default, reuses existing caches
+  non-destructively, fetches remote refs for clean matching caches without
+  pulling into the checkout, records commit and dirty state when available,
+  treats ignored local files as dirty cache contents, and inspects only the
+  requested repo-relative scope path.
+- Current CLI commands are limited to local/repo `discover`, `generate --sdk`,
+  `verify`, `list-sdks`, and `validate --sdk`.
+- Does not yet fully implement website discovery, refresh, source verification,
+  full next-generation manifests, or source-truth codebase documentation
+  generation. Repo discovery is a cache/inspection foundation only; it does not
+  generate docs, choose sources, rank candidates, or claim source truth.
 
 Target next-generation implementation:
 
@@ -164,7 +172,8 @@ User signals:
 
 Agent workflow:
 
-1. Use the repo exploration workflow to clone or update the repository cache.
+1. Use the repo exploration workflow or `llm-docs discover --repo <repo>` to
+   clone or fetch the repository cache and write a bounded inspection report.
 2. Resolve the intended version:
    - If user says latest, compare the cached clone with the remote default
      branch or latest stable release, depending on project conventions.
@@ -191,8 +200,9 @@ Agent workflow:
 Important current-state rule:
 
 If source-truth codebase docs mode is not implemented yet, do not claim this
-project can generate accurate docs from code. Tell the user the mode is planned
-and identify the missing implementation.
+project can generate accurate docs from code. A repo discovery report is only
+inspectable evidence for agent review. Tell the user the generation mode is
+planned and identify the missing implementation.
 
 ### Intent 4: Refresh Or Verify Existing Generated Docs
 
@@ -255,8 +265,11 @@ Rules:
    cache directory.
 4. Fetch remote refs before deciding whether it is current.
 5. Never discard local changes in a cached checkout.
-6. If the cached checkout is dirty, avoid destructive updates; use a fresh clone
-   or separate worktree.
+6. If the cached checkout has local changes or ignored files, avoid destructive
+   updates. The current `discover --repo` command warns and inspects what is
+   present; clean matching caches fetch remote refs but do not pull into the
+   checkout. An agent may choose a separate cache or worktree outside this CLI
+   command when it needs a clean comparison.
 7. Store source provenance in the generated manifest.
 8. Do not clone external repos into this project's active workspace by default.
 
@@ -383,14 +396,15 @@ Record at minimum:
 - content hash
 - parser and formatter used
 - generated output paths
-- warnings, skipped candidates, and confidence score
+- warnings and skipped candidates
 
 The current configured SDK generation path writes a scoped
 `manifest.json` with configured source details, hashes, parser and formatter
 metadata, and generated file hashes. The current `verify` command checks those
 configured SDK manifest file hashes and byte sizes only; it does not perform
-refresh, discovery, repo, or source-code verification. Future implementations
-should extend manifest coverage to the broader provenance fields above.
+refresh, discovery report validation, repo freshness verification, or
+source-code verification. Future implementations should extend manifest
+coverage to the broader provenance fields above.
 
 ## Clarifying Questions
 
@@ -400,7 +414,8 @@ result.
 Ask when:
 
 - A product name maps to multiple official repos.
-- Multiple docs candidates have similar scores.
+- Multiple docs candidates have similar evidence and the CLI report does not
+  make the choice obvious.
 - The user requested "latest" but the project has multiple release channels.
 - The user requested a major version with ambiguous tags.
 - The target requires authentication and local credentials are unavailable.
@@ -495,6 +510,7 @@ The following commands are the current regression baseline:
 
 ```bash
 llm-docs discover --source ./docs --output-dir ./reports/local-docs
+llm-docs discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
 llm-docs generate --sdk swift --sdk-version v2
 llm-docs generate --sdk all --sdk-version all
 llm-docs verify --output-dir ./output/swift/v2

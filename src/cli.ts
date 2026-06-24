@@ -17,6 +17,7 @@ import { rm } from 'node:fs/promises';
 
 import { ConfigLoader } from './config/loader.js';
 import { discoverLocalSource } from './core/discovery.js';
+import { discoverRepo } from './core/repo-discovery.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
 import { verifyGenerationManifest, writeGenerationManifest } from './core/manifest.js';
@@ -57,29 +58,96 @@ program
 
 program
   .command('discover')
-  .description('Write a bounded discovery report for an explicit local source path')
-  .requiredOption('--source <path>', 'Explicit local file or directory to inspect')
+  .description('Write a bounded discovery report for an explicit local source or repo')
+  .option('--source <path>', 'Explicit local file or directory to inspect')
+  .option(
+    '--repo <git-url-or-local-git-repo>',
+    'Explicit git URL or local git repository to inspect'
+  )
+  .option('--scope <path>', 'Repo-relative path to inspect in repo mode')
+  .option('--cache-dir <dir>', 'Directory for cached repo clones')
   .option('--output-dir <dir>', 'Directory for discovery-report.json')
-  .action(async (options: { source: string; outputDir?: string }) => {
-    try {
-      const report = await discoverLocalSource(
-        options.outputDir === undefined
-          ? { source: options.source }
-          : { source: options.source, outputDir: options.outputDir }
-      );
+  .action(
+    async (options: {
+      source?: string;
+      repo?: string;
+      scope?: string;
+      cacheDir?: string;
+      outputDir?: string;
+    }) => {
+      try {
+        if (
+          (options.source === undefined && options.repo === undefined) ||
+          (options.source !== undefined && options.repo !== undefined)
+        ) {
+          throw new Error('discover requires exactly one of --source or --repo.');
+        }
 
-      console.log(chalk.bold('Local source discovery'));
-      console.log(`  Source: ${report.source.resolvedPath}`);
-      console.log(`  Type: ${report.source.type}`);
-      console.log(`  Candidate files: ${report.candidates.length}`);
-      console.log(`  Warnings: ${report.warnings.length}`);
-      console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(chalk.red(`Discovery failed: ${errorMsg}`));
-      process.exit(1);
+        if (options.source !== undefined) {
+          if (options.scope !== undefined || options.cacheDir !== undefined) {
+            throw new Error('discover --scope and --cache-dir are only supported with --repo.');
+          }
+
+          const report = await discoverLocalSource(
+            options.outputDir === undefined
+              ? { source: options.source }
+              : { source: options.source, outputDir: options.outputDir }
+          );
+
+          console.log(chalk.bold('Local source discovery'));
+          console.log(`  Source: ${report.source.resolvedPath}`);
+          console.log(`  Type: ${report.source.type}`);
+          console.log(`  Candidate files: ${report.candidates.length}`);
+          console.log(`  Warnings: ${report.warnings.length}`);
+          console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
+
+          return;
+        }
+
+        const repoInput = options.repo;
+
+        if (repoInput === undefined) {
+          throw new Error('discover requires --repo.');
+        }
+
+        const repoOptions: Parameters<typeof discoverRepo>[0] = { repo: repoInput };
+
+        if (options.scope !== undefined) {
+          repoOptions.scope = options.scope;
+        }
+
+        if (options.cacheDir !== undefined) {
+          repoOptions.cacheDir = options.cacheDir;
+        }
+
+        if (options.outputDir !== undefined) {
+          repoOptions.outputDir = options.outputDir;
+        }
+
+        const { report } = await discoverRepo(repoOptions);
+
+        console.log(chalk.bold('Repo discovery'));
+        console.log(`  Repo: ${report.repo.normalizedInput}`);
+        console.log(`  Cache: ${report.repo.cachePath}`);
+        console.log(`  Scope: ${report.scope.path}`);
+        console.log(`  Commit: ${report.repo.git.commit ?? 'unknown'}`);
+        console.log(
+          `  Dirty: ${report.repo.git.dirty === null ? 'unknown' : String(report.repo.git.dirty)}`
+        );
+        console.log(`  Candidate files: ${report.candidates.length}`);
+        console.log(`  Warnings: ${report.warnings.length}`);
+        console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
+
+        for (const warning of report.warnings) {
+          console.error(chalk.yellow(`Warning: ${warning}`));
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(chalk.red(`Discovery failed: ${errorMsg}`));
+        process.exit(1);
+      }
     }
-  });
+  );
 
 // ============================================================================
 // GENERATE COMMAND
