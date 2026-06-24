@@ -4,7 +4,7 @@ import type { Dirent, Stats } from 'node:fs';
 import { lstat, mkdir, opendir, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 
-export const DISCOVERY_REPORT_SCHEMA_VERSION = '0.1.0';
+export const DISCOVERY_REPORT_SCHEMA_VERSION = '0.2.0';
 export const LOCAL_BOUNDED_INSPECTION_MODE = 'local-bounded-inspection';
 export const DEFAULT_DISCOVERY_MAX_DEPTH = 8;
 export const DEFAULT_DISCOVERY_MAX_FILES = 5000;
@@ -55,6 +55,17 @@ export type DiscoveryCandidateKind =
   | 'rst'
   | 'yaml'
   | 'unknown';
+export type DiscoveryEvidenceCategory =
+  | 'machine-readable-spec'
+  | 'structured-doc-source'
+  | 'rendered-html'
+  | 'generic-data'
+  | 'unknown';
+
+export interface DiscoveryCandidateEvidence {
+  category: DiscoveryEvidenceCategory;
+  signals: string[];
+}
 
 export interface DiscoveryTraversalSettings {
   followSymlinks: false;
@@ -75,6 +86,8 @@ export interface DiscoveryCandidate {
   format: string;
   hints: string[];
   formatHints: string[];
+  evidence: DiscoveryCandidateEvidence;
+  order: number;
   byteSize: number;
   sha256: string;
 }
@@ -134,7 +147,16 @@ interface CandidateHint {
   kind: DiscoveryCandidateKind;
   format: string;
   formatHints: string[];
+  evidenceSignals: string[];
 }
+
+const DISCOVERY_EVIDENCE_CATEGORY_ORDER: Record<DiscoveryEvidenceCategory, number> = {
+  'machine-readable-spec': 0,
+  'structured-doc-source': 1,
+  'rendered-html': 2,
+  'generic-data': 3,
+  unknown: 4,
+};
 
 export async function discoverLocalSources(
   options: DiscoverLocalSourcesOptions
@@ -225,7 +247,7 @@ export async function inspectLocalSource(
     });
   }
 
-  candidates.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+  sortCandidatesForReport(candidates);
 
   return {
     source: {
@@ -434,14 +456,25 @@ async function inspectFile(options: {
     }
 
     const hints = hint?.formatHints ?? [];
+    const pathForReport = normalizePathForReport(relativePath);
+    const kind = hint?.kind ?? 'unknown';
+    const format = hint?.format ?? 'unknown';
 
     candidates.push({
-      path: normalizePathForReport(relativePath),
+      path: pathForReport,
       resolvedPath: absolutePath,
-      kind: hint?.kind ?? 'unknown',
-      format: hint?.format ?? 'unknown',
+      kind,
+      format,
       hints,
       formatHints: hints,
+      evidence: buildCandidateEvidence({
+        path: pathForReport,
+        kind,
+        format,
+        formatHints: hints,
+        detectionSignals: hint?.evidenceSignals ?? [],
+      }),
+      order: 0,
       byteSize: fileInfo.byteSize,
       sha256: fileInfo.sha256,
     });
@@ -541,57 +574,165 @@ function inferCandidateHint(
   const looksOpenApi = fileName.includes('openapi') || fileName.includes('swagger');
 
   if (extension === '.md' && isDoccPath) {
-    return { kind: 'docc', format: 'markdown', formatHints: ['docc-marker', 'markdown'] };
+    return {
+      kind: 'docc',
+      format: 'markdown',
+      formatHints: ['docc-marker', 'markdown'],
+      evidenceSignals: ['path:docc-container'],
+    };
   }
 
   if (extension === '.md') {
-    return { kind: 'markdown', format: 'markdown', formatHints: ['markdown'] };
+    return {
+      kind: 'markdown',
+      format: 'markdown',
+      formatHints: ['markdown'],
+      evidenceSignals: [],
+    };
   }
 
   if (extension === '.mdx') {
-    return { kind: 'mdx', format: 'mdx', formatHints: ['mdx'] };
+    return { kind: 'mdx', format: 'mdx', formatHints: ['mdx'], evidenceSignals: [] };
   }
 
   if (extension === '.rst') {
-    return { kind: 'rst', format: 'rst', formatHints: ['rst'] };
+    return { kind: 'rst', format: 'rst', formatHints: ['rst'], evidenceSignals: [] };
   }
 
   if (extension === '.html' || extension === '.htm') {
-    return { kind: 'html', format: 'html', formatHints: ['html'] };
+    return { kind: 'html', format: 'html', formatHints: ['html'], evidenceSignals: [] };
   }
 
   if (extension === '.yaml' || extension === '.yml') {
-    if (
-      looksOpenApi ||
-      /^openapi\s*:/m.test(contentPrefix) ||
-      /^swagger\s*:/m.test(contentPrefix)
-    ) {
-      return { kind: 'openapi-yaml', format: 'yaml', formatHints: ['openapi-yaml', 'yaml'] };
+    const hasOpenApiMarker = /^openapi\s*:/m.test(contentPrefix);
+    const hasSwaggerMarker = /^swagger\s*:/m.test(contentPrefix);
+
+    if (looksOpenApi || hasOpenApiMarker || hasSwaggerMarker) {
+      return {
+        kind: 'openapi-yaml',
+        format: 'yaml',
+        formatHints: ['openapi-yaml', 'yaml'],
+        evidenceSignals: [
+          ...(looksOpenApi ? ['path:openapi-or-swagger-name'] : []),
+          ...(hasOpenApiMarker ? ['content:openapi-field'] : []),
+          ...(hasSwaggerMarker ? ['content:swagger-field'] : []),
+        ],
+      };
     }
 
-    if (
-      fileName.includes('openref') ||
-      (/^info\s*:/m.test(contentPrefix) && /^functions\s*:/m.test(contentPrefix))
-    ) {
-      return { kind: 'openref-yaml', format: 'yaml', formatHints: ['openref-yaml', 'yaml'] };
+    const hasOpenRefName = fileName.includes('openref');
+    const hasInfoField = /^info\s*:/m.test(contentPrefix);
+    const hasFunctionsField = /^functions\s*:/m.test(contentPrefix);
+
+    if (hasOpenRefName || (hasInfoField && hasFunctionsField)) {
+      return {
+        kind: 'openref-yaml',
+        format: 'yaml',
+        formatHints: ['openref-yaml', 'yaml'],
+        evidenceSignals: [
+          ...(hasOpenRefName ? ['path:openref-name'] : []),
+          ...(hasInfoField ? ['content:info-field'] : []),
+          ...(hasFunctionsField ? ['content:functions-field'] : []),
+        ],
+      };
     }
 
-    return { kind: 'yaml', format: 'yaml', formatHints: ['yaml'] };
+    return { kind: 'yaml', format: 'yaml', formatHints: ['yaml'], evidenceSignals: [] };
   }
 
   if (extension === '.json') {
-    if (
-      looksOpenApi ||
-      /"openapi"\s*:/.test(contentPrefix) ||
-      /"swagger"\s*:/.test(contentPrefix)
-    ) {
-      return { kind: 'openapi-json', format: 'json', formatHints: ['json', 'openapi-json'] };
+    const hasOpenApiMarker = /"openapi"\s*:/.test(contentPrefix);
+    const hasSwaggerMarker = /"swagger"\s*:/.test(contentPrefix);
+
+    if (looksOpenApi || hasOpenApiMarker || hasSwaggerMarker) {
+      return {
+        kind: 'openapi-json',
+        format: 'json',
+        formatHints: ['json', 'openapi-json'],
+        evidenceSignals: [
+          ...(looksOpenApi ? ['path:openapi-or-swagger-name'] : []),
+          ...(hasOpenApiMarker ? ['content:openapi-field'] : []),
+          ...(hasSwaggerMarker ? ['content:swagger-field'] : []),
+        ],
+      };
     }
 
-    return { kind: 'json', format: 'json', formatHints: ['json'] };
+    return { kind: 'json', format: 'json', formatHints: ['json'], evidenceSignals: [] };
   }
 
   return undefined;
+}
+
+function buildCandidateEvidence(options: {
+  path: string;
+  kind: DiscoveryCandidateKind;
+  format: string;
+  formatHints: string[];
+  detectionSignals: string[];
+}): DiscoveryCandidateEvidence {
+  const { path, kind, format, formatHints, detectionSignals } = options;
+  const extension = extname(path).toLowerCase();
+  const category = evidenceCategoryForKind(kind);
+  const signals = new Set<string>();
+
+  signals.add(`kind:${kind}`);
+  signals.add(`format:${format}`);
+
+  if (extension !== '') {
+    signals.add(`extension:${extension}`);
+  }
+
+  for (const formatHint of formatHints) {
+    signals.add(`format-hint:${formatHint}`);
+  }
+
+  for (const signal of detectionSignals) {
+    signals.add(signal);
+  }
+
+  return {
+    category,
+    signals: [...signals].sort(compareStringsByCodeUnit),
+  };
+}
+
+function evidenceCategoryForKind(kind: DiscoveryCandidateKind): DiscoveryEvidenceCategory {
+  switch (kind) {
+    case 'openapi-json':
+    case 'openapi-yaml':
+    case 'openref-yaml':
+      return 'machine-readable-spec';
+    case 'docc':
+    case 'markdown':
+    case 'mdx':
+    case 'rst':
+      return 'structured-doc-source';
+    case 'html':
+      return 'rendered-html';
+    case 'json':
+    case 'yaml':
+      return 'generic-data';
+    case 'unknown':
+      return 'unknown';
+  }
+}
+
+function sortCandidatesForReport(candidates: DiscoveryCandidate[]): void {
+  candidates.sort((a, b) => {
+    const categoryDifference =
+      DISCOVERY_EVIDENCE_CATEGORY_ORDER[a.evidence.category] -
+      DISCOVERY_EVIDENCE_CATEGORY_ORDER[b.evidence.category];
+
+    if (categoryDifference !== 0) {
+      return categoryDifference;
+    }
+
+    return compareStringsByCodeUnit(a.path, b.path);
+  });
+
+  candidates.forEach((candidate, index) => {
+    candidate.order = index + 1;
+  });
 }
 
 function toRelativePath(rootPath: string, targetPath: string): string {

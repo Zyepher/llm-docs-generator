@@ -160,18 +160,20 @@ Current discovery scope:
 
 - `llm-docs discover --source <path>` accepts an explicit local file or
   directory, writes `discovery-report.json`, and reports candidate file hints,
-  byte sizes, hashes, traversal bounds, skipped generated directories, and
-  warnings.
+  deterministic evidence categories and signals, report order, byte sizes,
+  hashes, traversal bounds, skipped generated directories, and warnings.
 - `llm-docs discover --repo <git-url-or-local-git-repo>` clones or reuses an
   explicit git repo in a cache, optionally inspects repo-relative
   `--scope <path>`, and writes `discovery-report.json` with repo input, cache
   path, commit, dirty state, traversal settings, candidates, and warnings.
 
-Discovery does not generate docs, crawl websites, choose candidates, rank
-candidates, claim source truth, or implement source-truth codebase docs
-generation. Repo cache handling is non-destructive; clean matching caches fetch
-remote refs without pulling into the checkout, and cached checkouts with local
-changes or ignored files are warned about and inspected as present.
+Discovery does not generate docs, crawl websites, choose candidates, score
+trust, infer authority, claim source truth, or implement source-truth codebase
+docs generation. It orders candidates by deterministic evidence category and
+normalized path for agent review only. Repo cache handling is non-destructive;
+clean matching caches fetch remote refs without pulling into the checkout, and
+cached checkouts with local changes or ignored files are warned about and
+inspected as present.
 
 ## Files Modified/Created
 
