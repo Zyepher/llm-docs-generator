@@ -18,7 +18,7 @@ import { rm } from 'node:fs/promises';
 import { ConfigLoader } from './config/loader.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
-import { writeGenerationManifest } from './core/manifest.js';
+import { verifyGenerationManifest, writeGenerationManifest } from './core/manifest.js';
 import { fetchSpec } from './utils/fetcher.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
@@ -224,6 +224,57 @@ program
       }
     }
   );
+
+// ============================================================================
+// VERIFY COMMAND
+// ============================================================================
+
+program
+  .command('verify')
+  .description('Verify an existing configured SDK manifest by hash and byte size')
+  .option('--manifest <path>', 'Path to manifest.json')
+  .option('--output-dir <dir>', 'Output directory containing manifest.json')
+  .option('-v, --verbose', 'Enable verbose logging', false)
+  .action(async (options: { manifest?: string; outputDir?: string; verbose: boolean }) => {
+    const manifestOptionCount =
+      (options.manifest === undefined ? 0 : 1) + (options.outputDir === undefined ? 0 : 1);
+
+    if (manifestOptionCount !== 1) {
+      console.error(chalk.red('Error: provide exactly one of --manifest or --output-dir'));
+      process.exit(1);
+    }
+
+    const manifestPath =
+      options.manifest === undefined ? `${options.outputDir}/manifest.json` : options.manifest;
+
+    try {
+      const result = await verifyGenerationManifest({ manifestPath });
+
+      console.log(chalk.bold('Manifest verification'));
+      console.log(`  Manifest: ${result.manifestPath}`);
+      console.log(`  Checked files: ${result.checkedFiles}`);
+      console.log(`  Failures: ${result.failures.length}`);
+
+      if (result.failures.length > 0) {
+        for (const failure of result.failures) {
+          console.error(chalk.red(`  - ${failure}`));
+        }
+
+        process.exit(1);
+      }
+
+      console.log(chalk.green('Verification passed'));
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Verification failed: ${errorMsg}`));
+
+      if (options.verbose && error instanceof Error && error.stack !== undefined) {
+        console.error(chalk.gray(error.stack));
+      }
+
+      process.exit(1);
+    }
+  });
 
 // ============================================================================
 // LIST-SDKS COMMAND

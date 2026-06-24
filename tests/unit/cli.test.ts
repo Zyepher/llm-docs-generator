@@ -220,6 +220,29 @@ async function findManifestFiles(root: string): Promise<string[]> {
   return found.sort(compareStringsByCodeUnit);
 }
 
+async function generateSwiftFixture(): Promise<{ configDir: string; outputDir: string; manifestPath: string }> {
+  const configDir = await createTestConfig();
+  const outputDir = join(configDir, 'output');
+
+  await runCli([
+    'generate',
+    '--sdk',
+    'swift',
+    '--sdk-version',
+    'v2',
+    '--config-dir',
+    configDir,
+    '--output-dir',
+    outputDir,
+  ]);
+
+  return {
+    configDir,
+    outputDir: join(outputDir, 'swift/v2'),
+    manifestPath: join(outputDir, 'swift/v2/manifest.json'),
+  };
+}
+
 function compareStringsByCodeUnit(a: string, b: string): number {
   const length = Math.min(a.length, b.length);
 
@@ -593,6 +616,301 @@ describe('CLI compatibility behavior', () => {
     );
     expect(fullDoc).toContain('<!-- Generated from: config/supabase_swift_v2.yml -->');
     expect(fullDoc).not.toContain('<!-- Generated from:  -->');
+  });
+
+  it('verifies a generated configured SDK manifest by output directory', async () => {
+    const { outputDir } = await generateSwiftFixture();
+
+    const result = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 4');
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
+  });
+
+  it('requires exactly one verify manifest location option', async () => {
+    const missingResult = await runCliWithExit(['verify']);
+    const duplicateResult = await runCliWithExit([
+      'verify',
+      '--manifest',
+      'manifest.json',
+      '--output-dir',
+      'output',
+    ]);
+
+    expect(missingResult.exitCode).toBe(1);
+    expect(missingResult.stderr).toContain('provide exactly one of --manifest or --output-dir');
+    expect(duplicateResult.exitCode).toBe(1);
+    expect(duplicateResult.stderr).toContain('provide exactly one of --manifest or --output-dir');
+  });
+
+  it('reports a modified generated output hash mismatch', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const outputPath = join(dirname(manifestPath), manifest.generatedOutputs[0]?.path ?? '');
+    await writeFile(outputPath, 'changed output with the same manifest\n', 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Failures:');
+    expect(result.stderr).toContain('hash mismatch');
+  });
+
+  it('reports a missing generated output', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const outputPath = join(dirname(manifestPath), manifest.generatedOutputs[0]?.path ?? '');
+    await rm(outputPath, { force: true });
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('missing file');
+    expect(result.stderr).toContain(manifest.generatedOutputs[0]?.path);
+  });
+
+  it('verifies a relative source path from the manifest directory across cwd changes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const sourcePath = join(outputDir, 'config/source.yml');
+    const generatedPath = join(outputDir, 'llm-docs/output.txt');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await mkdir(dirname(sourcePath), { recursive: true });
+    await mkdir(dirname(generatedPath), { recursive: true });
+    await writeFile(sourcePath, testSpecYaml, 'utf-8');
+    await writeFile(generatedPath, 'generated docs\n', 'utf-8');
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'configured-sdk',
+          source: {
+            resolvedSpecPath: 'config/source.yml',
+            byteSize: await byteSize(sourcePath),
+            contentHash: await sha256File(sourcePath),
+          },
+          generatedOutputs: [
+            {
+              path: 'llm-docs/output.txt',
+              kind: 'llm-docs',
+              byteSize: await byteSize(generatedPath),
+              hash: await sha256File(generatedPath),
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const passResult = await runCli(['verify', '--manifest', manifestPath], repoRoot);
+
+    expect(passResult.stdout).toContain('Checked files: 2');
+    expect(passResult.stdout).toContain('Failures: 0');
+
+    await writeFile(sourcePath, `${testSpecYaml}# drift\n`, 'utf-8');
+
+    const driftResult = await runCliWithExit(['verify', '--manifest', manifestPath], repoRoot);
+
+    expect(driftResult.exitCode).toBe(1);
+    expect(driftResult.stdout).toContain('Checked files: 2');
+    expect(driftResult.stderr).toContain('source:');
+    expect(driftResult.stderr).toContain('hash mismatch');
+  });
+
+  it('does not fall back to cwd for missing relative source paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const sourcePath = join(outputDir, 'config/source.yml');
+    const cwdSourcePath = join(dir, 'cwd/config/source.yml');
+    const generatedPath = join(outputDir, 'llm-docs/output.txt');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await mkdir(dirname(sourcePath), { recursive: true });
+    await mkdir(dirname(cwdSourcePath), { recursive: true });
+    await mkdir(dirname(generatedPath), { recursive: true });
+    await writeFile(sourcePath, testSpecYaml, 'utf-8');
+    await writeFile(cwdSourcePath, testSpecYaml, 'utf-8');
+    await writeFile(generatedPath, 'generated docs\n', 'utf-8');
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'configured-sdk',
+          source: {
+            resolvedSpecPath: 'config/source.yml',
+            byteSize: await byteSize(sourcePath),
+            contentHash: await sha256File(sourcePath),
+          },
+          generatedOutputs: [
+            {
+              path: 'llm-docs/output.txt',
+              kind: 'llm-docs',
+              byteSize: await byteSize(generatedPath),
+              hash: await sha256File(generatedPath),
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+    await rm(sourcePath, { force: true });
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath], join(dir, 'cwd'));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`missing file at ${sourcePath}`);
+  });
+
+  it('reports malformed and unsupported manifests', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
+    tempDirs.push(dir);
+    const malformedManifestPath = join(dir, 'malformed.json');
+    const unsupportedManifestPath = join(dir, 'unsupported.json');
+
+    await writeFile(malformedManifestPath, '{', 'utf-8');
+    await writeFile(
+      unsupportedManifestPath,
+      JSON.stringify({ schemaVersion: '99.0.0', mode: 'configured-sdk' }),
+      'utf-8'
+    );
+
+    const malformedResult = await runCliWithExit(['verify', '--manifest', malformedManifestPath]);
+    const unsupportedResult = await runCliWithExit(['verify', '--manifest', unsupportedManifestPath]);
+
+    expect(malformedResult.exitCode).toBe(1);
+    expect(malformedResult.stderr).toContain('malformed manifest JSON');
+    expect(unsupportedResult.exitCode).toBe(1);
+    expect(unsupportedResult.stderr).toContain('unsupported manifest schemaVersion');
+  });
+
+  it('reports unsupported manifest modes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
+    tempDirs.push(dir);
+    const manifestPath = join(dir, 'unsupported-mode.json');
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ schemaVersion: '0.1.0', mode: 'repo-source' }),
+      'utf-8'
+    );
+
+    const unsupportedModeResult = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(unsupportedModeResult.exitCode).toBe(1);
+    expect(unsupportedModeResult.stderr).toContain('unsupported manifest mode');
+  });
+
+  it('rejects absolute and escaping generated output paths before checking files', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.yml');
+    const manifestPath = join(dir, 'manifest.json');
+
+    await writeFile(sourcePath, testSpecYaml, 'utf-8');
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'configured-sdk',
+          source: {
+            resolvedSpecPath: sourcePath,
+            byteSize: await byteSize(sourcePath),
+            contentHash: await sha256File(sourcePath),
+          },
+          generatedOutputs: [
+            {
+              path: join(dir, 'absolute-output.txt'),
+              kind: 'llm-docs',
+              byteSize: 0,
+              hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+            },
+            {
+              path: '../outside-output.txt',
+              kind: 'llm-docs',
+              byteSize: 0,
+              hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('path must be relative');
+    expect(result.stderr).toContain('path escapes manifest directory');
+  });
+
+  it('rejects invalid generated output kinds before checking files', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.yml');
+    const outputPath = join(dir, 'llm-docs/output.txt');
+    const manifestPath = join(dir, 'manifest.json');
+
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(sourcePath, testSpecYaml, 'utf-8');
+    await writeFile(outputPath, 'generated docs\n', 'utf-8');
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'configured-sdk',
+          source: {
+            resolvedSpecPath: sourcePath,
+            byteSize: await byteSize(sourcePath),
+            contentHash: await sha256File(sourcePath),
+          },
+          generatedOutputs: [
+            {
+              path: 'llm-docs/output.txt',
+              kind: 'repo-source',
+              byteSize: await byteSize(outputPath),
+              hash: await sha256File(outputPath),
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('kind must be parsed-spec-json or llm-docs');
+  });
+
+  it('does not claim repo or source-code verification', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+
+    const result = await runCli(['verify', '--manifest', manifestPath]);
+    const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+
+    expect(output).not.toContain('repo');
+    expect(output).not.toContain('source-code');
+    expect(output).not.toContain('source code');
   });
 
   it('continues to resolve validate without --version to the latest configured SDK version', async () => {

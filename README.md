@@ -5,7 +5,8 @@
 The current CLI is a compatibility implementation for configured Supabase
 OpenRef specs. It can list configured SDKs, generate LLM-optimized text from
 those configured specs, write a scoped generation manifest, and validate a
-configured SDK/version pair.
+configured SDK/version pair. It can also verify the current configured SDK
+manifest's recorded file hashes and byte sizes.
 
 The next-generation roadmap is broader: humans should be able to tell an AI
 agent what docs they need, and the agent should use `llm-docs` to find the right
@@ -32,9 +33,11 @@ An AI agent needs something different:
 - a way to verify whether the docs are stale later
 
 The current implementation covers the OpenRef conversion foundation and writes
-a scoped manifest for successful configured SDK generation. Discovery, source
-verification, refresh, and source-truth codebase docs are planned
-next-generation capabilities, not current CLI behavior.
+a scoped manifest for successful configured SDK generation. The current
+`verify` command checks only that manifest's configured source and generated
+output files by hash and byte size. Discovery, refresh, repo provenance, and
+source-code verification are planned next-generation capabilities, not current
+CLI behavior.
 
 ## What It Produces
 
@@ -61,8 +64,11 @@ hash, generated files, warnings, and confidence score.
 The current configured SDK generation path writes
 `<output-dir>/<sdk>/<resolvedVersion>/manifest.json` with the configured source,
 resolved spec path, source hash, parser and formatter metadata, and generated
-file hashes. Discovery reports, stale-source verification, repo provenance, and
-source-code verification are not implemented yet.
+file hashes. `llm-docs verify --manifest <path>` or
+`llm-docs verify --output-dir <dir>` verifies those recorded hashes and sizes
+for current `configured-sdk` manifests. Discovery reports, stale-source
+verification, refresh, repo provenance, and source-code verification are not
+implemented yet.
 
 ## How You Use It
 
@@ -71,6 +77,7 @@ Today, use the compatibility CLI directly for configured Supabase SDK specs:
 ```bash
 llm-docs list-sdks
 llm-docs generate --sdk swift --sdk-version v2 --output-dir ./output
+llm-docs verify --output-dir ./output/swift/v2
 llm-docs validate --sdk swift --version v2
 ```
 
@@ -122,6 +129,8 @@ Current CLI capabilities:
 - list configured SDKs from `config/sdks.json`
 - generate LLM-optimized text from configured OpenRef YAML specs
 - write `manifest.json` for each successful configured SDK/version generation
+- verify current configured SDK manifests by recorded source/output hashes and
+  byte sizes
 - validate a configured OpenRef SDK/version pair
 - preserve the existing Supabase/OpenRef command surface while the next-gen
   resolver is built
@@ -178,6 +187,8 @@ A skill can tell an AI agent how to search.
 - implemented now: OpenRef and Markdown/DocC parser modules
 - implemented now: LLM-oriented formatters
 - implemented now: scoped manifests for successful configured SDK generation
+- implemented now: hash and byte-size verification for current configured SDK
+  manifests
 - planned: a source discovery pipeline
 - planned: repo caching
 - planned: version/freshness checks beyond configured SDK versions

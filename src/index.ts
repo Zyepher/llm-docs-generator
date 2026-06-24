@@ -27,3 +27,9 @@ export type { OutputConfig } from './config/schemas.js';
 // Utils exports
 export { fetchSpec, isSpecCached, clearSpecCache } from './utils/fetcher.js';
 export { Logger, LogLevel } from './utils/logger.js';
+export { verifyGenerationManifest, writeGenerationManifest } from './core/manifest.js';
+export type {
+  VerifyGenerationManifestOptions,
+  VerifyGenerationManifestResult,
+  WriteGenerationManifestOptions,
+} from './core/manifest.js';

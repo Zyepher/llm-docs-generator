@@ -92,14 +92,16 @@ Development commands:
 ```bash
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
+npx tsx src/cli.ts verify --output-dir ./output/swift/v2
 npx tsx src/cli.ts validate --sdk swift --version v2
 ```
 
 The current CLI does not yet expose target-driven discovery, `generate
 --source`, refresh, repo caching, source verification, or source-truth codebase
 docs generation. It writes `manifest.json` for successful configured
-`generate --sdk` tasks only. Markdown / DocC parsing exists in parser modules
-but is not wired as a current CLI command.
+`generate --sdk` tasks and verifies current configured SDK manifest source and
+output file hashes and byte sizes only. Markdown / DocC parsing exists in
+parser modules but is not wired as a current CLI command.
 
 The current CLI is implemented in:
 
@@ -182,7 +184,9 @@ target resolver
   silently upgrade.
 - If the user asks for latest, verify remote state before reusing a cached clone.
 - Successful configured SDK generation currently writes a scoped manifest with
-  source and output hashes.
+  source and output hashes. Current `verify` checks those configured SDK
+  manifest file hashes and byte sizes only; refresh, discovery, repo, and
+  source-code verification remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL
