@@ -322,7 +322,7 @@ Prefer sources in this order:
 5. Source-truth codebase docs generation, only when explicitly requested or
    when no docs exist and the feature is implemented.
 
-Never prefer stale registry hints over verified current sources.
+Never prefer stale source hints over verified current sources.
 When official docs and source code disagree on implementation-verifiable facts,
 preserve the official docs as context but mark the conflict and prefer source
 code for API signatures, config defaults, routes, exported types, and runtime
@@ -377,7 +377,7 @@ Do not ask when:
 
 - Do not execute package scripts, docs build scripts, examples, or arbitrary
   repository commands during discovery or parsing.
-- Do not silently trust stale registry entries.
+- Do not silently trust stale source hints.
 - Do not silently upgrade pinned versions.
 - Do not claim source-truth codebase docs are supported unless that mode exists.
 - Do not mark official docs as source-verified unless implementation files were

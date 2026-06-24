@@ -127,11 +127,11 @@ Parsers:
 - [src/parsers/markdown/parser.ts](src/parsers/markdown/parser.ts)
 - [src/parsers/markdown/adapter.ts](src/parsers/markdown/adapter.ts)
 
-Configuration:
+Configuration and source hints:
 
 - [config/sdks.json](config/sdks.json)
 - [config/categories.json](config/categories.json)
-- [config/known-sources.json](config/known-sources.json)
+- [config/known-sources.json](config/known-sources.json) - compatibility path for non-authoritative source hints
 - [config/presets/swift-book.json](config/presets/swift-book.json)
 
 Utilities:
