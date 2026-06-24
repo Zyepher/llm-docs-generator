@@ -120,7 +120,13 @@ program
             );
 
             // Format for LLM using resolved version
-            const formatter = new LLMFormatter(parsedData, config, sdkName, resolvedVersion);
+            const formatter = new LLMFormatter(
+              parsedData,
+              config,
+              sdkName,
+              resolvedVersion,
+              specPath
+            );
             await formatter.generateAll(outputDir);
 
             spinner.succeed(chalk.green(`Completed ${sdkName} ${resolvedVersion}`));
