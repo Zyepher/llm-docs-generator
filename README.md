@@ -1,49 +1,17 @@
 # llm-docs-generator
 
-`llm-docs-generator` is a tool for giving AI agents better documentation context.
+`llm-docs-generator` builds local, agent-ready documentation packs from explicit
+documentation sources, repositories, websites, and existing manifests.
 
-The current CLI is a compatibility implementation for configured Supabase
-OpenRef specs. It can list configured SDKs, generate LLM-optimized text from
-those configured specs, write a scoped generation manifest, and validate a
-configured SDK/version pair. It can also verify the current configured SDK
-manifest's recorded file hashes and byte sizes.
-
-The next-generation roadmap is broader: humans should be able to tell an AI
-agent what docs they need, and the agent should resolve intent, source, scope,
-version, and path before calling `llm-docs`. The CLI is the deterministic,
-scriptable capability layer that ingests explicit sources, performs bounded
-inspection, turns selected documentation into structured Markdown, and records
-where every piece came from.
-
-## The Problem
-
-Official docs are written for humans in a browser.
-
-They are often split across many pages, mixed with navigation UI, hidden behind
-generated sites, duplicated across versions, and hard to cite back to a precise
-source. They may be correct, but they are not shaped like stable working memory
-for an AI agent.
-
-An AI agent needs something different:
-
-- clean Markdown files
-- stable sections
-- preserved code examples
-- version-aware output
-- source links and provenance
-- a manifest that says what was generated from where
-- a way to verify whether the docs are stale later
-
-The current implementation covers the OpenRef conversion foundation and writes
-a scoped manifest for successful configured SDK generation. The current
-`verify` command checks only that manifest's configured source and generated
-output files by hash and byte size. Discovery, refresh, repo provenance, and
-source-code verification are planned next-generation capabilities, not current
-CLI behavior.
+The AI agent is the intelligent planner. It investigates the user's request,
+resolves intent, source, scope, version, and path, and decides which workflow to
+run. The `llm-docs` CLI is the deterministic capability layer: it inspects
+explicit sources, normalizes documentation, preserves structure, writes
+provenance, validates output, and reports honest failures.
 
 ## What It Produces
 
-A target next-generation documentation pack should look like this:
+A generated docs pack is local, structured, version-aware, and inspectable:
 
 ```text
 tailwindcss-v3-agent-docs/
@@ -57,24 +25,87 @@ tailwindcss-v3-agent-docs/
   discovery-report.json
   source/
     selected-source.ref.json
+    candidate-summary.json
 ```
 
-The Markdown files are for the AI agent to read. The manifest is for trust. In
-the target design, it records the selected source, version, commit or content
-hash, generated files, warnings, and confidence score.
+The Markdown files are for the AI agent to read. The JSON files are for trust:
+they record source URLs or paths, repo commits, tags, content hashes, parser and
+formatter versions, freshness checks, warnings, generated files, and any
+source-code verification coverage.
 
-The current configured SDK generation path writes
-`<output-dir>/<sdk>/<resolvedVersion>/manifest.json` with the configured source,
-resolved spec path, source hash, parser and formatter metadata, and generated
-file hashes. `llm-docs verify --manifest <path>` or
-`llm-docs verify --output-dir <dir>` verifies those recorded hashes and sizes
-for current `configured-sdk` manifests. Discovery reports, stale-source
-verification, refresh, repo provenance, and source-code verification are not
-implemented yet.
+## Core Workflow
 
-## How You Use It
+Humans prompt their AI agent naturally:
 
-Today, use the compatibility CLI directly for configured Supabase SDK specs:
+```text
+Generate agent-optimized docs for Tailwind CSS. Stay on Tailwind 3.
+```
+
+The agent resolves the source and scope, then calls deterministic CLI commands:
+
+```bash
+llm-docs discover --repo https://github.com/tailwindlabs/tailwindcss --version 3 --output-dir ./reports/tailwind-v3
+llm-docs generate --source ./reports/tailwind-v3/discovery-report.json --output-dir ./tailwindcss-v3-agent-docs
+llm-docs verify --manifest ./tailwindcss-v3-agent-docs/manifest.json
+```
+
+The CLI never silently decides that a source is authoritative. Discovery and
+scoring produce inspectable reports for the agent to review. Generation uses an
+explicit source, explicit candidate, or explicit manifest.
+
+## Capabilities
+
+`llm-docs` supports the full next-generation docs-pack workflow:
+
+- deterministic inspection of explicit local paths, repository URLs, docs URLs,
+  and prior manifests
+- external repo caching under a stable cache directory instead of the active
+  workspace
+- bounded website inspection from provided URLs, including `llms.txt`,
+  `sitemap.xml`, canonical links, source links, and allowed crawl scope
+- candidate reports with first-party evidence, structure, relevance, freshness,
+  parseability, warnings, and skipped paths
+- parsers for OpenRef, OpenAPI/Swagger, Markdown, MDX, RST, DocC, and HTML
+  fallback extraction
+- agent-optimized Markdown output with stable section IDs and semantic chunks
+- manifests with source provenance, content hashes, generated file hashes,
+  parser/formatter metadata, freshness state, and warnings
+- refresh and verify workflows for existing generated docs
+- optional source-code verification when the agent requests it and the matching
+  implementation source is available
+- explicit source-truth codebase docs generation when the user asks to document
+  implementation behavior rather than existing docs
+- bundled agent context and host setup helpers so AI agents can discover the
+  installed CLI from other workspaces
+
+## Command Model
+
+Use `llm-docs capabilities --json` when an agent needs the implemented command
+surface in machine-readable form.
+
+Common commands:
+
+```bash
+llm-docs capabilities --json
+
+llm-docs discover --source ./docs --output-dir ./reports/local-docs
+llm-docs discover --repo https://github.com/supabase/supabase --scope apps/docs --output-dir ./reports/supabase
+llm-docs discover --url https://supabase.com/docs/reference/swift --scope same-origin --output-dir ./reports/supabase-swift
+
+llm-docs generate --source ./docs --format markdown --output-dir ./agent-docs
+llm-docs generate --source ./openapi.yaml --format openapi --output-dir ./api-agent-docs
+llm-docs generate --source ./reports/supabase/discovery-report.json --candidate apps/docs/spec/supabase_swift_v2.yml --output-dir ./supabase-swift-docs
+
+llm-docs verify --manifest ./supabase-swift-docs/manifest.json
+llm-docs refresh --manifest ./supabase-swift-docs/manifest.json
+llm-docs diff --manifest ./supabase-swift-docs/manifest.json --since previous
+
+llm-docs agent context
+llm-docs agent install codex
+llm-docs agent doctor
+```
+
+Compatibility commands remain available for configured Supabase/OpenRef specs:
 
 ```bash
 llm-docs list-sdks
@@ -83,147 +114,87 @@ llm-docs verify --output-dir ./output/swift/v2
 llm-docs validate --sdk swift --version v2
 ```
 
-The target agent workflow is prompt-driven: you talk to your AI agent naturally
-and tell it to use `llm-docs`.
+## Agent Boundary
 
-Target next-generation examples:
+The CLI is not a magical source-of-truth resolver. It does not make hidden
+source-specific guesses or silently upgrade the user's version intent.
 
-```text
-Use `llm-docs` to generate agent-optimized docs for Tailwind CSS.
-Stay on Tailwind 3.
+The agent is responsible for:
+
+- interpreting natural-language user requests
+- deciding whether the user wants official docs, local docs, repo docs,
+  source-code verification, or source-truth codebase docs
+- resolving ambiguous product names, packages, release lines, and candidate
+  sources
+- selecting a source or candidate from CLI reports
+- asking the user when the choice materially changes the result
+
+The CLI is responsible for:
+
+- validating explicit inputs
+- inspecting provided sources within explicit bounds
+- parsing and normalizing supported formats
+- preserving headings, examples, semantic structure, and stable IDs
+- writing Markdown packs, indexes, manifests, discovery reports, source refs,
+  freshness metadata, and failure reports
+- verifying generated outputs against recorded hashes, commits, and source
+  metadata
+- failing clearly when a requested source, format, parser, permission, or mode
+  cannot be used
+
+## Source Priority
+
+When several explicit candidates exist, the agent should prefer:
+
+1. First-party machine-readable specs: OpenAPI, Swagger, OpenRef.
+2. First-party docs source: Markdown, MDX, RST, DocC.
+3. First-party `llms.txt` and linked Markdown.
+4. First-party rendered docs pages via sitemap or canonical URLs.
+5. Implementation source files only when the user asks for source-truth
+   codebase docs or source-code verification.
+
+The CLI records evidence; the agent owns the final source-selection judgment.
+
+## Freshness And Verification
+
+Every generated pack can be checked later:
+
+```bash
+llm-docs verify --manifest ./docs-pack/manifest.json
+llm-docs refresh --manifest ./docs-pack/manifest.json
 ```
 
-```text
-Resolve the official Supabase Swift docs URL, then use `llm-docs` to inspect
-that URL within scope and create local Markdown docs my agent can use.
-```
+Verification checks manifest shape, source identity, source path existence,
+content hashes, repo commit or tag, generated file hashes, parser compatibility,
+and recorded warnings. Refresh preserves pinned versions and only updates when
+the explicit source has changed or the agent chooses a new source.
+
+## Source-Truth Codebase Docs
+
+When a user asks to document implementation behavior, the agent can choose the
+source-truth codebase docs workflow. In that mode, `llm-docs` analyzes the
+selected source files, public exports, routes, config, tests, examples, and
+behavior constraints, then writes docs with file-level provenance.
+
+This mode is explicit. It is not used just because a repository has source code.
+If existing official docs and implementation facts disagree, generated output
+preserves the official-doc context, cites the conflicting implementation files,
+and marks the conflict in the manifest.
+
+## Failure Reports
+
+Failed discovery or generation still writes useful artifacts when an output
+directory is provided:
 
 ```text
-Use `llm-docs` to generate docs for https://github.com/supabase/supabase.
-If the existing docs are incomplete, use the source code as truth and generate
-or verify the missing sections with source-file provenance.
+output/
+  discovery-report.json
+  failure.json
 ```
 
-```text
-Use `llm-docs` to convert the official Supabase Swift docs, but verify API
-signatures and behavior against the source code.
-```
-
-```text
-Use `llm-docs` to check whether the generated docs in ./docs/generated are stale.
-Do not upgrade pinned versions.
-```
-
-```text
-Use `llm-docs` to turn this local docs folder into an agent-readable docs pack:
-./docs
-```
-
-The intended human interface is the prompt. The current CLI is the conversion
-tool your agent can use for the implemented compatibility workflow.
-
-## What the CLI Actually Does
-
-`llm-docs` currently provides the repeatable compatibility workflow.
-
-Current CLI capabilities:
-
-- list configured SDKs from `config/sdks.json`
-- generate LLM-optimized text from configured OpenRef YAML specs
-- write `manifest.json` for each successful configured SDK/version generation
-- verify current configured SDK manifests by recorded source/output hashes and
-  byte sizes
-- validate a configured OpenRef SDK/version pair
-- preserve the existing Supabase/OpenRef command surface while the next-gen
-  input normalizer and inspection reports are built
-
-Current library/parser capabilities:
-
-- parse OpenRef YAML into the legacy model and the shared DocNode model
-- parse local Markdown / DocC-style files through the parser modules
-- format parsed docs into LLM-friendly text
-
-Planned next-generation capabilities:
-
-- inspect explicit docs, source repos, specs, sitemaps, `llms.txt`, and linked
-  documentation sources within bounded scope
-- crawl or extract relevant documentation pages from provided URLs and allowed
-  scope
-- clone and cache repos when the agent provides or approves the source repo
-- produce explainable candidate scores and reports for agent review
-- preserve version intent, such as "Tailwind 3" instead of silently choosing
-  Tailwind 4
-- parse additional structured sources such as OpenAPI, MDX, RST, and HTML
-- convert selected sources into agent-optimized Markdown packs
-- extend manifests to cover inspected sources, repo commits, refresh, and
-  verification
-- generate source-truth codebase docs only after that explicit mode exists
-- fact-check official docs against source code only after source verification is
-  implemented
-
-The point is not to replace official docs. The point is to convert official docs
-into a local, structured, verifiable form that an AI agent can use well.
-
-## Why This Is Better Than Just Browsing
-
-Browsing is temporary. A generated docs pack is durable.
-
-Without this tool, an agent may:
-
-- read the wrong version
-- miss pages hidden behind navigation
-- mix official docs with community posts
-- forget where a claim came from
-- repeat expensive discovery work
-- keep using stale context
-
-With the target next-generation implementation, the agent gets source material
-that is structured, local, versioned, refreshable, and backed by inspectable CLI
-reports.
-
-## Why This Is More Than a Skill
-
-A skill can tell an AI agent how to search.
-
-`llm-docs-generator` gives the agent machinery that is being built in layers:
-
-- implemented now: a CLI it can run for configured OpenRef specs
-- implemented now: OpenRef and Markdown/DocC parser modules
-- implemented now: LLM-oriented formatters
-- implemented now: scoped manifests for successful configured SDK generation
-- implemented now: hash and byte-size verification for current configured SDK
-  manifests
-- planned: bounded source inspection and discovery reports
-- planned: repo caching
-- planned: version/freshness checks beyond configured SDK versions
-- planned: discovered-source and verification manifest expansion
-- planned: stale-doc verification
-
-The skill helps the agent decide what to do. For implemented workflows, the CLI
-does deterministic conversion, verification, and artifact writing over explicit
-inputs; bounded inspection reports are planned next-generation work.
-
-## Typical Use Cases
-
-Use the current CLI when:
-
-- you need the configured Supabase/OpenRef compatibility workflow
-- you want to list, generate, or validate configured SDK specs
-- you are extending the parser/formatter foundation toward the next-gen plan
-
-The target next-generation product is intended for:
-
-- you want your agent to work from official docs, but in local Markdown
-- you need docs pinned to a specific major version
-- a repo has docs scattered across a monorepo
-- you want to regenerate docs only when the source changed
-- you need a manifest showing where generated docs came from
-- you want official docs checked against implementation source code
-- existing docs are incomplete and you want source-truth codebase docs
-
-Do not use it as a generic summarizer. The goal is not to make docs shorter at
-all costs. The goal is to preserve source facts and examples while removing the
-browser-shaped noise that makes docs hard for agents to use.
+Failures explain what was checked, what was skipped, which permissions or
+formats were missing, and what the agent can try next. The tool does not invent
+low-confidence documentation to make a run appear successful.
 
 ## Agent Setup
 
@@ -233,33 +204,35 @@ Install the CLI where your AI agent can run shell commands:
 npm install -g llm-docs-generator
 ```
 
-Bundled agent setup commands are planned but not implemented yet:
+Install bundled agent context for a supported host:
 
 ```bash
 llm-docs agent install codex
 llm-docs agent doctor
 ```
 
-Until those commands exist, prompts like "use `llm-docs` for this" require the
-agent to read `AGENT_CONTEXT.md` and verify current CLI support before running
-commands.
+`agent doctor` checks that the binary is on `PATH`, bundled skills are
+available, host skill installation is writable, and installed skill versions
+match the CLI.
 
 ## For Contributors
 
-The product architecture and edge cases are in `NEXT_GEN_PLAN.html`.
+Read these files before making changes:
 
-Agent-facing routing rules are in `AGENT_CONTEXT.md`.
-
-The crawl map for humans and agents is in `index.md`.
+- `NEXT_GEN_PLAN.html` for the completed product architecture
+- `AGENT_CONTEXT.md` for the agent intent router and hard rules
+- `index.md` for the repository crawl map
+- `IMPLEMENTATION.md` for implementation notes
 
 Useful development commands:
 
 ```bash
 npm install
 npm run type-check
-npm run test
+npm test
 npm run build
 ```
 
-Good agent documentation is not just shorter documentation. It is verified,
-structured, refreshable, and honest about where it came from.
+Good agent documentation is not just shorter documentation. It is structured,
+refreshable, verified where requested, and honest about where every claim came
+from.
