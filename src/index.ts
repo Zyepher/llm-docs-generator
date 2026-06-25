@@ -122,3 +122,26 @@ export type {
   WebsiteInspectedResource,
   WebsiteResourceRole,
 } from './core/website-discovery.js';
+export {
+  DEFAULT_SOURCE_TRUTH_MAX_DEPTH,
+  DEFAULT_SOURCE_TRUTH_MAX_ENTRIES,
+  DEFAULT_SOURCE_TRUTH_MAX_FILES,
+  DEFAULT_SOURCE_TRUTH_MAX_FILE_BYTES,
+  SOURCE_TRUTH_INSPECTION_MODE,
+  SOURCE_TRUTH_REPORT_SCHEMA_VERSION,
+  inspectSourceTruth,
+} from './core/source-truth.js';
+export type {
+  InspectSourceTruthOptions,
+  SourceTruthFact,
+  SourceTruthFactKind,
+  SourceTruthFileEvidence,
+  SourceTruthFileStatus,
+  SourceTruthInspectionReport,
+  SourceTruthLineRange,
+  SourceTruthProvenance,
+  SourceTruthSkipReason,
+  SourceTruthSourceType,
+  SourceTruthSymbolKind,
+  SourceTruthTraversalSettings,
+} from './core/source-truth.js';

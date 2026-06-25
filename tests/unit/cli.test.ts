@@ -4,7 +4,17 @@
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -17,6 +27,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { discoverLocalSource, discoverLocalSources } from '../../src/core/discovery.js';
 import { discoverRepo } from '../../src/core/repo-discovery.js';
+import type { SourceTruthInspectionReport } from '../../src/core/source-truth.js';
 import { discoverWebsite } from '../../src/core/website-discovery.js';
 
 const execFileAsync = promisify(execFile);
@@ -815,6 +826,77 @@ describe('CLI compatibility behavior', () => {
     expect(combinedOutput).not.toMatch(/\bofficial\b/i);
     expect(combinedOutput).not.toMatch(/\bscore\b/i);
     expect(combinedOutput).not.toMatch(/\bselected\b/i);
+  });
+
+  it('prints a deterministic source-truth evidence report as JSON for an explicit local source', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-source-truth-cli-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      ['export const value = 1;', 'export function makeValue() {', '  return value;', '}', ''].join(
+        '\n'
+      ),
+      'utf-8'
+    );
+
+    const { stdout, stderr } = await runCli(['source-truth', 'inspect', '--source', sourceDir]);
+    const report = JSON.parse(stdout) as SourceTruthInspectionReport;
+
+    expect(stdout.endsWith('\n')).toBe(true);
+    expect(report).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'source-truth-local-evidence',
+      source: {
+        input: sourceDir,
+        resolvedPath: sourceDir,
+        type: 'directory',
+      },
+      traversal: {
+        followSymlinks: false,
+        inspectedFiles: 1,
+        skippedFiles: 0,
+        truncated: false,
+      },
+      warnings: [],
+    });
+    expect(report.files.map((file) => file.path)).toEqual(['index.ts']);
+    expect(report.facts.map((fact) => ({
+      kind: fact.kind,
+      symbolKind: fact.symbolKind,
+      name: fact.name,
+      exportedName: fact.exportedName,
+      provenance: fact.provenance,
+    }))).toEqual([
+      {
+        kind: 'exported-symbol',
+        symbolKind: 'value',
+        name: 'value',
+        exportedName: 'value',
+        provenance: {
+          path: 'index.ts',
+          lineRange: { start: 1, end: 1 },
+        },
+      },
+      {
+        kind: 'exported-symbol',
+        symbolKind: 'function',
+        name: 'makeValue',
+        exportedName: 'makeValue',
+        provenance: {
+          path: 'index.ts',
+          lineRange: { start: 2, end: 4 },
+        },
+      },
+    ]);
+    expect(stdout).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(stdout).not.toMatch(/\bofficial\b/i);
+    expect(stdout).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(stdout).not.toMatch(/\bverified\b/i);
+    expect(stdout).not.toMatch(/\bsummary\b/i);
+    expect(stderr).not.toContain('Source-truth inspection failed');
   });
 
   it('writes a bounded website discovery report from an explicit URL and same-origin well-known resources', async () => {

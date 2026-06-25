@@ -95,6 +95,7 @@ Development commands:
 npx tsx src/cli.ts discover --source ./docs --output-dir ./reports/local-docs
 npx tsx src/cli.ts discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
 npx tsx src/cli.ts discover --url https://example.com/docs --output-dir ./reports/website
+npx tsx src/cli.ts source-truth inspect --source ./src
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
 npx tsx src/cli.ts verify --output-dir ./output/swift/v2
@@ -120,6 +121,14 @@ explicit HTTP(S) URL. It fetches only the explicit URL, same-origin root
 or fetch linked candidates. It writes a website discovery report with inspected
 resources, response status/content type/byte counts, crawl policy, extracted
 candidate URLs, evidence/provenance, and warnings.
+
+The current `source-truth inspect --source` command accepts one explicit local
+file or directory and prints a deterministic JSON evidence report to stdout. It
+uses bounded traversal, skips common dependency/build directories, does not
+follow symlinks, records hashes for inspected supported files, and extracts
+conservative top-level TypeScript/JavaScript export facts with normalized source
+paths and line ranges. It does not generate docs, verify claims, infer runtime
+behavior, decide task fit, summarize behavior, or select authoritative sources.
 
 The current CLI does not yet expose `generate --source`, refresh, source
 verification, or source-truth codebase docs generation. It writes
@@ -163,6 +172,7 @@ Core model and formatting:
 - [src/core/manifest.ts](src/core/manifest.ts)
 - [src/core/detector.ts](src/core/detector.ts)
 - [src/core/website-discovery.ts](src/core/website-discovery.ts)
+- [src/core/source-truth.ts](src/core/source-truth.ts)
 
 Parsers:
 
@@ -239,8 +249,10 @@ agent intent/source/scope resolution
   manifest file hashes and byte sizes only. Local bounded inspection reports are
   available through `discover --source`, and repo cache/inspection reports are
   available through `discover --repo`. Bounded explicit URL inspection reports
-  are available through `discover --url`; broader crawling, refresh, source-code
-  verification, and source-truth codebase docs remain planned.
+  are available through `discover --url`; bounded local TypeScript/JavaScript
+  export evidence reports are available through `source-truth inspect --source`.
+  Broader crawling, refresh, source-code verification, and source-truth codebase
+  docs generation remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL

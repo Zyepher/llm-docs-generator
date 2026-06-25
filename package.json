@@ -39,7 +39,7 @@
   ],
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean --minify",
+    "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean --minify --external typescript",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -61,6 +61,7 @@
     "js-yaml": "^4.1.0",
     "marked": "^11.1.1",
     "ora": "^8.0.1",
+    "typescript": "^5.3.3",
     "undici": "^6.6.2",
     "zod": "^3.22.4"
   },
@@ -76,7 +77,6 @@
     "prettier": "^3.2.5",
     "tsup": "^8.0.2",
     "tsx": "^4.7.1",
-    "typescript": "^5.3.3",
     "vitest": "^1.2.2"
   }
 }
