@@ -30,6 +30,19 @@ const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'html',
 ]);
 const SOURCE_DOCS_RESOLVED_FORMATS = new Set(['markdown', 'openapi', 'openref', 'rst', 'html']);
+export const SOURCE_DOCS_SWIFT_BOOK_PRESET_NAME = 'swift-book';
+export const SOURCE_DOCS_SWIFT_BOOK_PRESET_METADATA = {
+  sourceSelection: 'explicit-local-source-required',
+  sourceVerification: 'not-performed',
+  sourceTruthClaim: 'not-claimed',
+} as const;
+export const SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS = [
+  'Requires an explicit local --source path.',
+  'Does not select or infer source paths.',
+  'Does not clone repositories or refresh caches.',
+  'Does not perform source-code verification.',
+  'Does not claim source truth.',
+] as const;
 
 export type GeneratedOutputKind = 'parsed-spec-json' | 'llm-docs';
 
@@ -285,6 +298,7 @@ async function verifySourceDocsManifest(
   const source = manifest.source;
   const sourceFiles = manifest.sourceFiles;
   const generatedOutputs = manifest.generatedOutputs;
+  const preset = manifest.preset;
 
   if (!isObjectRecord(source)) {
     failures.push('malformed manifest: missing source object');
@@ -366,7 +380,11 @@ async function verifySourceDocsManifest(
     }
   }
 
-  if (isNonEmptyString(sourcePath) && isAbsolute(sourcePath) && isSourceDocsSourceType(sourceType)) {
+  if (
+    isNonEmptyString(sourcePath) &&
+    isAbsolute(sourcePath) &&
+    isSourceDocsSourceType(sourceType)
+  ) {
     pathTypeChecks.push({
       label: 'source',
       path: sourcePath,
@@ -384,7 +402,9 @@ async function verifySourceDocsManifest(
   });
 
   if (sourceType === 'file' && sourceFileEntries.length !== 1) {
-    failures.push('malformed manifest: file source manifests must contain exactly one sourceFiles entry');
+    failures.push(
+      'malformed manifest: file source manifests must contain exactly one sourceFiles entry'
+    );
   }
 
   if (
@@ -433,6 +453,7 @@ async function verifySourceDocsManifest(
     rejectSymlinks: true,
     allowedKinds: SOURCE_DOCS_GENERATED_OUTPUT_KINDS,
   });
+  validateSourceDocsPresetMetadata(preset, failures);
 
   if (failures.length === 0) {
     for (const check of pathTypeChecks) {
@@ -512,7 +533,10 @@ function validateGeneratedOutputs(options: {
       failures.push(
         `malformed manifest: ${label}.estimatedTokenCount must be a non-negative integer`
       );
-    } else if ('estimatedTokenCount' in output && !isNonNegativeInteger(outputEstimatedTokenCount)) {
+    } else if (
+      'estimatedTokenCount' in output &&
+      !isNonNegativeInteger(outputEstimatedTokenCount)
+    ) {
       failures.push(
         `malformed manifest: ${label}.estimatedTokenCount must be a non-negative integer${
           requireTextMetadata ? '' : ' when present'
@@ -528,8 +552,7 @@ function validateGeneratedOutputs(options: {
       isNonNegativeInteger(outputByteSize) &&
       isSha256Hash(outputHash) &&
       (!requireTextMetadata ||
-        (isNonNegativeInteger(outputLineCount) &&
-          isNonNegativeInteger(outputEstimatedTokenCount)))
+        (isNonNegativeInteger(outputLineCount) && isNonNegativeInteger(outputEstimatedTokenCount)))
     ) {
       const expectedLineCount = requireTextMetadata ? (outputLineCount as number) : undefined;
       const expectedEstimatedTokenCount = requireTextMetadata
@@ -561,6 +584,136 @@ function validateGeneratedOutputs(options: {
   }
 }
 
+function validateSourceDocsPresetMetadata(preset: unknown, failures: string[]): void {
+  for (const failure of validateSourceDocsPresetContract(preset)) {
+    failures.push(`malformed manifest: ${failure}`);
+  }
+}
+
+export function validateSourceDocsPresetContract(preset: unknown): string[] {
+  const failures: string[] = [];
+
+  if (preset === undefined) {
+    return failures;
+  }
+
+  if (!isObjectRecord(preset)) {
+    failures.push('preset must be an object when present');
+    return failures;
+  }
+
+  if (preset.name !== SOURCE_DOCS_SWIFT_BOOK_PRESET_NAME) {
+    failures.push(`preset.name must be ${SOURCE_DOCS_SWIFT_BOOK_PRESET_NAME}`);
+  }
+
+  if (!isNonEmptyString(preset.configPath)) {
+    failures.push('preset.configPath must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(preset.displayName)) {
+    failures.push('preset.displayName must be a non-empty string');
+  }
+
+  const defaults = preset.defaults;
+  if (!isObjectRecord(defaults)) {
+    failures.push('preset.defaults must be an object');
+  } else {
+    if (defaults.format !== 'markdown') {
+      failures.push('preset.defaults.format must be markdown');
+    }
+
+    if (!isNonEmptyString(defaults.filenamePrefix)) {
+      failures.push('preset.defaults.filenamePrefix must be a non-empty string');
+    }
+
+    if (!isNonEmptyString(defaults.title)) {
+      failures.push('preset.defaults.title must be a non-empty string');
+    }
+
+    if (!isNonEmptyString(defaults.systemPrompt)) {
+      failures.push('preset.defaults.systemPrompt must be a non-empty string');
+    } else {
+      const unsupportedPromptClaims = findUnsupportedPresetPromptClaims(defaults.systemPrompt);
+
+      if (unsupportedPromptClaims.length > 0) {
+        failures.push(
+          `preset.defaults.systemPrompt must not claim ${formatList(unsupportedPromptClaims)}`
+        );
+      }
+    }
+
+    if (
+      'outputFormats' in defaults &&
+      (!Array.isArray(defaults.outputFormats) ||
+        !defaults.outputFormats.every((format) => isNonEmptyString(format)))
+    ) {
+      failures.push(
+        'preset.defaults.outputFormats must be an array of non-empty strings when present'
+      );
+    }
+  }
+
+  const metadata = preset.metadata;
+  if (!isObjectRecord(metadata)) {
+    failures.push('preset.metadata must be an object');
+  } else {
+    for (const [field, expectedValue] of Object.entries(SOURCE_DOCS_SWIFT_BOOK_PRESET_METADATA)) {
+      if (metadata[field] !== expectedValue) {
+        failures.push(`preset.metadata.${field} must be ${expectedValue}`);
+      }
+    }
+  }
+
+  if (!Array.isArray(preset.limitations)) {
+    failures.push('preset.limitations must be an array');
+    return failures;
+  }
+
+  if (!preset.limitations.every((limitation) => isNonEmptyString(limitation))) {
+    failures.push('preset.limitations must contain only non-empty strings');
+    return failures;
+  }
+
+  for (const limitation of SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS) {
+    if (!preset.limitations.includes(limitation)) {
+      failures.push(`preset.limitations must include "${limitation}"`);
+    }
+  }
+
+  return failures;
+}
+
+function findUnsupportedPresetPromptClaims(prompt: string): string[] {
+  const normalizedPrompt = prompt.toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const claims: string[] = [];
+
+  if (/\b(complete|completeness|comprehensive)\b/.test(normalizedPrompt)) {
+    claims.push('completeness');
+  }
+
+  if (/\bsource truth\b/.test(normalizedPrompt)) {
+    claims.push('source truth');
+  }
+
+  if (/\b(verified|verification|validated|validation)\b/.test(normalizedPrompt)) {
+    claims.push('source verification');
+  }
+
+  if (/\b(authoritative|authority|official)\b/.test(normalizedPrompt)) {
+    claims.push('authority or official status');
+  }
+
+  return claims;
+}
+
+function formatList(values: string[]): string {
+  if (values.length <= 1) {
+    return values[0] ?? '';
+  }
+
+  return `${values.slice(0, -1).join(', ')} or ${values[values.length - 1]}`;
+}
+
 interface SourceFileEntry {
   path: string;
   resolvedPath: string;
@@ -577,14 +730,8 @@ function validateSourceFiles(options: {
   failures: string[];
   fileChecks: FileCheck[];
 }): SourceFileEntry[] {
-  const {
-    sourceFiles,
-    sourcePath,
-    sourceType,
-    sourceResolvedFormat,
-    failures,
-    fileChecks,
-  } = options;
+  const { sourceFiles, sourcePath, sourceType, sourceResolvedFormat, failures, fileChecks } =
+    options;
   const sourceFileEntries: SourceFileEntry[] = [];
   const sourceRoot =
     isNonEmptyString(sourcePath) && isAbsolute(sourcePath) ? sourcePath : undefined;
@@ -618,9 +765,7 @@ function validateSourceFiles(options: {
       sourceType === 'directory' &&
       !isInsideDirectory(sourceRoot, resolve(sourceRoot, sourceFilePath))
     ) {
-      failures.push(
-        `malformed manifest: ${label}.path escapes source root: ${sourceFilePath}`
-      );
+      failures.push(`malformed manifest: ${label}.path escapes source root: ${sourceFilePath}`);
     }
 
     if (!isNonEmptyString(sourceFileResolvedPath)) {
@@ -678,9 +823,7 @@ function validateSourceFiles(options: {
       SOURCE_DOCS_RESOLVED_FORMATS.has(sourceResolvedFormat) &&
       sourceFileFormat !== sourceResolvedFormat
     ) {
-      failures.push(
-        `malformed manifest: ${label}.format must match source.resolvedFormat`
-      );
+      failures.push(`malformed manifest: ${label}.format must match source.resolvedFormat`);
     }
 
     if (
@@ -828,8 +971,7 @@ async function verifyFile(check: FileCheck, failures: string[]): Promise<void> {
     }
 
     actual =
-      check.expectedLineCount === undefined &&
-      check.expectedEstimatedTokenCount === undefined
+      check.expectedLineCount === undefined && check.expectedEstimatedTokenCount === undefined
         ? await describeFile(check.path)
         : await describeGeneratedTextOutput(check.path);
   } catch (error) {
@@ -854,10 +996,7 @@ async function verifyFile(check: FileCheck, failures: string[]): Promise<void> {
     );
   }
 
-  if (
-    check.expectedLineCount !== undefined &&
-    actual.lineCount !== check.expectedLineCount
-  ) {
+  if (check.expectedLineCount !== undefined && actual.lineCount !== check.expectedLineCount) {
     failures.push(
       `${check.label}: line count mismatch (expected ${check.expectedLineCount}, actual ${String(
         actual.lineCount
@@ -937,7 +1076,9 @@ async function verifyNoSymlinkPathComponent(options: {
   } catch (error) {
     if (isFileNotFoundError(error)) {
       failures.push(
-        isLeaf ? `${label}: missing file at ${targetPath}` : `${label}: missing path component at ${path}`
+        isLeaf
+          ? `${label}: missing file at ${targetPath}`
+          : `${label}: missing path component at ${path}`
       );
       return false;
     }
@@ -1044,10 +1185,7 @@ function isInsideDirectory(parentDir: string, childPath: string): boolean {
 }
 
 function isFileNotFoundError(error: unknown): boolean {
-  return (
-    isObjectRecord(error) &&
-    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-  );
+  return isObjectRecord(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR');
 }
 
 function errorMessage(error: unknown): string {

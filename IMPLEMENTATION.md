@@ -135,8 +135,8 @@ Operators are unary, binary, or ternary...
 # Parse a single markdown file
 npx tsx test-swift-book.ts
 
-# Planned future target command; not supported by the current CLI
-llm-docs generate --preset swift-book --source ../TSPL.docc
+# Deterministic preset defaults over an explicit local source path
+llm-docs generate --source ../TSPL.docc --preset swift-book --output-dir ./swift-book-agent-docs
 ```
 
 ### For Supabase (OpenRef - Backward Compatible)
@@ -223,15 +223,16 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Deterministic configured SDK `generate --format` / `--preset` handling:
       `--format openref` and `--format openref-0.1` are accepted for the
       existing `generate --sdk` OpenRef compatibility path; unsupported
-      configured-SDK `--format` values and all `--preset` requests fail
+      configured-SDK `--format` values and `--preset` with `--sdk` fail
       honestly before generation
 - [x] Explicit local source docs generation through
       `generate --source <local-file-or-directory> --output-dir <dir>` with
       parser hints for `auto`, `markdown`, `mdx`, `openapi`, `openref`, `rst`,
       and `html`, source provenance manifest writing, URL/discovery-report
       rejection, and `--sdk` mutual exclusion
-- [ ] Supported `--preset` generation
-- [ ] Directory parsing for full swift-book (all chapters)
+- [x] Supported scoped `--preset swift-book` generation over explicit local
+      Markdown/DocC sources only; no source path inference or source truth claim
+- [x] Recursive directory parsing for swift-book-style Markdown/DocC chapters
 - [x] Opt-in JSONL export format for explicit local source docs semantic chunks
 - [x] OpenAPI 3.x / Swagger 2.0 parser foundation for explicit local JSON/YAML
       files
@@ -297,14 +298,15 @@ Current capabilities contract scope:
   `discover --url`, `source-truth inspect --source`,
   `source-truth generate --source --output-dir`, read-only `agent context`,
   explicit local `generate --source` with parser hints and optional
-  `--chunks jsonl`, configured
+  `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
   `--format openref-0.1`, configured SDK `verify`, `list-sdks`, and
   `validate --sdk`.
-- Planned/unsupported entries include `generate --preset`, `refresh`,
-  source-code verification for official docs, broad website crawling,
-  automatic source selection, framework/route understanding, behavior-level
-  generation from source code, `agent install codex`, and `agent doctor`.
+- Planned/unsupported entries include additional `generate --preset` names,
+  `refresh`, source-code verification for official docs, broad website
+  crawling, automatic source selection, framework/route understanding,
+  behavior-level generation from source code, `agent install codex`, and
+  `agent doctor`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `manifest.json`, `failure.json`, source docs under `llm-docs/`, configured
@@ -378,8 +380,10 @@ Current explicit local source docs generation scope:
 
 - `llm-docs generate --source <local-file-or-directory> --output-dir <dir>`
   accepts only explicit local file or directory paths.
-- `--sdk` and `--source` are mutually exclusive. `--preset` remains
-  unsupported and fails before output work.
+- `--sdk` and `--source` are mutually exclusive. `--preset swift-book` is
+  supported only with an explicit local `--source`; unknown presets, presets
+  without `--source`, presets with `--sdk`, and preset-incompatible explicit
+  formats fail before output work.
 - URL-like sources, missing paths, symlinked source roots, discovery reports,
   and candidate/discovery report auto-selection are rejected honestly. Source
   mode never fetches network resources and does not consume discovery reports
@@ -390,6 +394,11 @@ Current explicit local source docs generation scope:
 - Source mode parses through the existing parser registry, formats through
   `UniversalFormatter`, writes generated docs under `llm-docs/`, and writes a
   root `manifest.json` only after successful parsing and formatting.
+- `--preset swift-book` sets deterministic Markdown defaults, `swift-book`
+  filename prefix, title, neutral source-derived system prompt, and
+  non-authoritative preset metadata in the manifest. It does not infer or
+  append `TSPL.docc`, select sources, clone/cache repositories, refresh, verify
+  source code, claim completeness, or claim source truth.
 - `--chunks jsonl` is an opt-in source-mode-only export. When requested, source
   mode chunks the already parsed DocNode tree with `chunkDocNode` and writes
   one semantic chunk JSON object per line to `chunks/semantic-chunks.jsonl`.

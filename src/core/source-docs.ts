@@ -3,11 +3,7 @@ import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-import {
-  chunkDocNode,
-  type SemanticChunk,
-  type SemanticChunkWarning,
-} from './chunker.js';
+import { chunkDocNode, type SemanticChunk, type SemanticChunkWarning } from './chunker.js';
 import { detectFormat, getParserForFormat } from './detector.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import { createDocNode, DocNodeType, type DocNode } from './models.js';
@@ -59,11 +55,35 @@ export interface SourceDocsGeneratorMetadata {
   cliName?: string;
 }
 
+export interface SourceDocsPresetMetadata {
+  name: string;
+  configPath: string;
+  displayName: string;
+  description?: string;
+  defaults: {
+    format: string;
+    filenamePrefix: string;
+    title: string;
+    systemPrompt: string;
+    outputFormats?: string[];
+  };
+  metadata?: Record<string, unknown>;
+  limitations: string[];
+}
+
+export interface SourceDocsOutputDefaults {
+  filenamePrefix?: string;
+  title?: string;
+  systemPrompt?: string;
+}
+
 export interface GenerateSourceDocsOptions {
   source: string;
   outputDir: string;
   format?: string;
   chunks?: string;
+  output?: SourceDocsOutputDefaults;
+  preset?: SourceDocsPresetMetadata;
   generator: SourceDocsGeneratorMetadata;
 }
 
@@ -116,6 +136,7 @@ export interface SourceDocsManifest {
     format: typeof SOURCE_DOCS_FORMATTER_FORMAT;
   };
   generatedOutputs: SourceDocsGeneratedOutput[];
+  preset?: SourceDocsPresetMetadata;
   warnings: string[];
 }
 
@@ -186,16 +207,17 @@ export async function generateSourceDocs(
     const warnings = [...preparedSource.warnings, ...collectDocNodeWarnings(root)];
     const outputPaths = await formatDocNode(root, {
       outputDir: llmDocsDir,
-      filenamePrefix: filenamePrefixForSource(source.resolvedPath, source.type),
-      title: root.title,
-      systemPrompt: `This is a local source documentation pack generated from ${source.resolvedPath}.`,
+      filenamePrefix:
+        options.output?.filenamePrefix ?? filenamePrefixForSource(source.resolvedPath, source.type),
+      title: options.output?.title ?? root.title,
+      systemPrompt:
+        options.output?.systemPrompt ??
+        `This is a local source documentation pack generated from ${source.resolvedPath}.`,
       includeMetadata: false,
     });
     const generatedOutputs = await describeGeneratedOutputs(outputDir, outputPaths);
     const chunkOutput =
-      chunksFormat === 'jsonl'
-        ? await writeSemanticChunksJsonl(outputDir, root)
-        : undefined;
+      chunksFormat === 'jsonl' ? await writeSemanticChunksJsonl(outputDir, root) : undefined;
     if (chunkOutput !== undefined) {
       generatedOutputs.push(chunkOutput);
       generatedOutputs.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
@@ -208,6 +230,7 @@ export async function generateSourceDocs(
       generator: options.generator,
       sourceFiles: preparedSource.sourceFiles,
       generatedOutputs,
+      ...(options.preset === undefined ? {} : { preset: options.preset }),
       warnings,
     });
 
@@ -283,7 +306,9 @@ function parseSourceDocsFormatHint(format: string | undefined): ParsedFormatHint
   return { manifestValue, parserHint: manifestValue as FormatType };
 }
 
-function parseSourceDocsChunksFormat(chunks: string | undefined): SourceDocsChunksFormat | undefined {
+function parseSourceDocsChunksFormat(
+  chunks: string | undefined
+): SourceDocsChunksFormat | undefined {
   if (chunks === undefined) {
     return undefined;
   }
@@ -784,6 +809,7 @@ function buildSourceDocsManifest(options: {
   generator: SourceDocsGeneratorMetadata;
   sourceFiles: BoundedSourceFile[];
   generatedOutputs: SourceDocsGeneratedOutput[];
+  preset?: SourceDocsPresetMetadata;
   warnings: string[];
 }): SourceDocsManifest {
   const sourceFiles: SourceDocsFileManifestEntry[] = options.sourceFiles.map((file) => ({
@@ -828,6 +854,7 @@ function buildSourceDocsManifest(options: {
       format: SOURCE_DOCS_FORMATTER_FORMAT,
     },
     generatedOutputs: options.generatedOutputs,
+    ...(options.preset === undefined ? {} : { preset: options.preset }),
     warnings: [...new Set(options.warnings)].sort(compareStringsByCodeUnit),
   };
 }
