@@ -50,6 +50,8 @@ interface ManifestFileEntry {
   kind: string;
   byteSize: number;
   hash: string;
+  lineCount?: number;
+  estimatedTokenCount?: number;
 }
 
 interface GenerationManifest {
@@ -492,6 +494,24 @@ async function sha256FileHex(path: string): Promise<string> {
 async function byteSize(path: string): Promise<number> {
   const fileStats = await stat(path);
   return fileStats.size;
+}
+
+function countTextLines(text: string): number {
+  if (text.length === 0) {
+    return 0;
+  }
+
+  const newlineCount = [...text].filter((character) => character === '\n').length;
+
+  return text.endsWith('\n') ? newlineCount : newlineCount + 1;
+}
+
+function estimateTextTokens(text: string): number {
+  if (text.length === 0) {
+    return 0;
+  }
+
+  return Math.ceil(Array.from(text).length / 4);
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -3128,8 +3148,11 @@ describe('CLI compatibility behavior', () => {
       expect(output.path.includes('\\')).toBe(false);
 
       const actualPath = join(dirname(manifestPath), output.path);
+      const text = await readFile(actualPath, 'utf-8');
       expect(output.byteSize).toBe(await byteSize(actualPath));
       expect(output.hash).toBe(await sha256File(actualPath));
+      expect(output.lineCount).toBe(countTextLines(text));
+      expect(output.estimatedTokenCount).toBe(estimateTextTokens(text));
     }
   });
 
@@ -3583,6 +3606,66 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('Checked files: 0');
     expect(result.stderr).toContain('kind must be parsed-spec-json or llm-docs');
+  });
+
+  it('rejects invalid optional generated output RAG metadata before checking files', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.yml');
+    const outputPath = join(dir, 'llm-docs/output.txt');
+    const manifestPath = join(dir, 'manifest.json');
+
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(sourcePath, testSpecYaml, 'utf-8');
+    await writeFile(outputPath, 'generated docs\n', 'utf-8');
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'configured-sdk',
+          source: {
+            resolvedSpecPath: sourcePath,
+            byteSize: await byteSize(sourcePath),
+            contentHash: await sha256File(sourcePath),
+          },
+          generatedOutputs: [
+            {
+              path: 'llm-docs/output.txt',
+              kind: 'llm-docs',
+              byteSize: await byteSize(outputPath),
+              hash: await sha256File(outputPath),
+              lineCount: -1,
+              estimatedTokenCount: -1,
+            },
+            {
+              path: 'llm-docs/output.txt',
+              kind: 'llm-docs',
+              byteSize: await byteSize(outputPath),
+              hash: await sha256File(outputPath),
+              lineCount: 1.5,
+              estimatedTokenCount: 2.5,
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('output[0].lineCount must be a non-negative integer');
+    expect(result.stderr).toContain(
+      'output[0].estimatedTokenCount must be a non-negative integer'
+    );
+    expect(result.stderr).toContain('output[1].lineCount must be a non-negative integer');
+    expect(result.stderr).toContain(
+      'output[1].estimatedTokenCount must be a non-negative integer'
+    );
   });
 
   it('does not claim repo or source-code verification', async () => {

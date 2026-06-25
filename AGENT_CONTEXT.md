@@ -68,9 +68,13 @@ Current implementation:
   counts, and warnings for oversized indivisible blocks or malformed tree
   shapes.
 - Has early multi-format architecture.
-- Writes scoped manifests for successful configured `generate --sdk` tasks.
+- Writes scoped manifests for successful configured `generate --sdk` tasks,
+  including generated output hashes, byte sizes, line counts, and deterministic
+  estimated token counts.
 - Verifies current `configured-sdk` manifests by checking the recorded
-  configured source and generated output file hashes and byte sizes.
+  configured source and generated output file hashes and byte sizes. Optional
+  generated output line counts and estimated token counts are shape-validated
+  when present, but are not recomputed by verification yet.
 - Can run `discover --source <local-file-or-directory>` for explicit local,
   bounded inspection and write `discovery-report.json` with candidate file
   hints, deterministic evidence categories and signals, report order, hashes,
@@ -106,11 +110,13 @@ Current implementation:
   selection, or choose task fit.
 - Can run `source-truth generate --source <local-file-or-directory>
   --output-dir <dir>` to write an evidence-bound Markdown file, the raw
-  evidence report, and a manifest. The command reuses `inspectSourceTruth`,
-  accepts only an explicit local source path, and fails with `failure.json`
-  referencing `source-truth-report.json` when no extractable export or
-  package/config facts or path-based context facts are found. It rejects output
-  directories that are the source path or inside the source path.
+  evidence report, and a manifest with generated output hashes, byte sizes, line
+  counts, and deterministic estimated token counts. The command reuses
+  `inspectSourceTruth`, accepts only an explicit local source path, and fails
+  with `failure.json` referencing `source-truth-report.json` when no
+  extractable export or package/config facts or path-based context facts are
+  found. It rejects output directories that are the source path or inside the
+  source path.
 - Can run `capabilities --json` to print a deterministic, machine-readable
   contract of implemented commands and planned/unsupported capabilities for
   agents. The contract has schema version `0.1.0`, package name/version
@@ -133,10 +139,12 @@ Current implementation:
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or behavior-level source documentation from
   code. Semantic chunking exists as a library capability for existing DocNode IR
-  only; current configured SDK generation, manifests, and discovery reports do
-  not yet consume or publish semantic chunk records. Discovery modes are
-  inspection foundations only; they do not generate docs, choose sources,
-  assign trust scores, infer authority, or claim source truth.
+  only; current configured SDK and source-truth docs manifests include partial
+  generated-output RAG metadata only (`lineCount` and `estimatedTokenCount`) and
+  do not consume or publish semantic chunk records. Discovery reports do not yet
+  include this generated-output metadata. Discovery modes are inspection
+  foundations only; they do not generate docs, choose sources, assign trust
+  scores, infer authority, or claim source truth.
 - Local and repo discovery order candidates by deterministic evidence category
   and normalized path for agent review. Website discovery orders extracted
   candidate URLs by deterministic observation order and aggregates evidence from
@@ -516,11 +524,13 @@ Record at minimum:
 
 The current configured SDK generation path writes a scoped
 `manifest.json` with configured source details, hashes, parser and formatter
-metadata, and generated file hashes. The current `verify` command checks those
-configured SDK manifest file hashes and byte sizes only; it does not perform
-refresh, discovery report validation, repo freshness verification, or
-source-code verification. Future implementations should extend manifest
-coverage to the broader provenance fields above.
+metadata, generated file hashes, byte sizes, line counts, and deterministic
+estimated token counts. The current `verify` command checks configured SDK
+manifest file hashes and byte sizes, and rejects malformed optional generated
+output line/token metadata when present; it does not recompute line or token
+counts yet, or perform refresh, discovery report validation, repo freshness
+verification, or source-code verification. Future implementations should extend
+manifest coverage to the broader provenance fields above.
 
 ## Clarifying Questions
 

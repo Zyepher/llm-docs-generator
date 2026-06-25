@@ -7,6 +7,8 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
+import { describeGeneratedTextOutput } from './generated-output-metadata.js';
+
 const HASH_PREFIX = 'sha256:';
 
 export const MANIFEST_SCHEMA_VERSION = '0.1.0';
@@ -45,6 +47,13 @@ export interface GeneratedOutputInput {
   kind: GeneratedOutputKind;
 }
 
+export interface GeneratedOutputManifestEntry extends GeneratedOutputInput {
+  byteSize: number;
+  hash: string;
+  lineCount: number;
+  estimatedTokenCount: number;
+}
+
 export interface WriteGenerationManifestOptions {
   manifestPath: string;
   generatedAt: Date;
@@ -77,18 +86,20 @@ export async function writeGenerationManifest(
   const manifestDir = dirname(options.manifestPath);
   const sourceFile = await describeFile(options.source.resolvedSpecPath);
 
-  const generatedOutputs = (
+  const generatedOutputs: GeneratedOutputManifestEntry[] = (
     await Promise.all(
       options.generatedOutputs
         .filter((output) => output.path !== options.manifestPath)
         .map(async (output) => {
-          const file = await describeFile(output.path);
+          const file = await describeGeneratedTextOutput(output.path);
 
           return {
             path: toManifestRelativePath(manifestDir, output.path),
             kind: output.kind,
             byteSize: file.byteSize,
             hash: file.hash,
+            lineCount: file.lineCount,
+            estimatedTokenCount: file.estimatedTokenCount,
           };
         })
     )
@@ -236,6 +247,8 @@ export async function verifyManifestFile(
     const outputKind = output.kind;
     const outputByteSize = output.byteSize;
     const outputHash = output.hash;
+    const outputLineCount = output.lineCount;
+    const outputEstimatedTokenCount = output.estimatedTokenCount;
     const label = `output[${index}]`;
 
     if (!isNonEmptyString(outputPath)) {
@@ -256,6 +269,21 @@ export async function verifyManifestFile(
 
     if (!isSha256Hash(outputHash)) {
       failures.push(`malformed manifest: ${label}.hash must be a sha256 hash`);
+    }
+
+    if ('lineCount' in output && !isNonNegativeInteger(outputLineCount)) {
+      failures.push(
+        `malformed manifest: ${label}.lineCount must be a non-negative integer when present`
+      );
+    }
+
+    if (
+      'estimatedTokenCount' in output &&
+      !isNonNegativeInteger(outputEstimatedTokenCount)
+    ) {
+      failures.push(
+        `malformed manifest: ${label}.estimatedTokenCount must be a non-negative integer when present`
+      );
     }
 
     if (
