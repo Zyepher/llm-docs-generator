@@ -3066,29 +3066,85 @@ describe('CLI compatibility behavior', () => {
 
     const parsedSpec = JSON.parse(
       await readFile(join(outputDir, 'swift/v2/parsed/swift-v2-spec.json'), 'utf-8')
-    ) as { operations: Array<{ id: string; examples: unknown[] }> };
+    ) as {
+      info: {
+        id: string;
+        title: string;
+        description: string;
+      };
+      operations: Array<{
+        id: string;
+        title: string;
+        description: string;
+        notes: string;
+        examples: Array<{
+          id: string;
+          name: string;
+          code: string;
+          description: string;
+          dataSql: string;
+          response: string;
+          isSpotlight: boolean;
+        }>;
+        overwriteParams: unknown[];
+      }>;
+    };
+    expect(parsedSpec.info).toMatchObject({
+      id: 'swift',
+      title: 'Supabase Swift SDK',
+      description: 'Test fixture',
+    });
     expect(parsedSpec.operations).toHaveLength(1);
-    expect(parsedSpec.operations[0]?.id).toBe('select');
-    expect(parsedSpec.operations[0]?.examples).toHaveLength(1);
+    expect(parsedSpec.operations[0]).toMatchObject({
+      id: 'select',
+      title: 'Select data',
+      description: 'Read rows',
+      notes: '',
+      overwriteParams: [],
+    });
+    expect(parsedSpec.operations[0]?.examples).toEqual([
+      {
+        id: 'select-basic',
+        name: 'Basic select',
+        code: 'supabase.from("todos").select()',
+        description: '',
+        dataSql: '',
+        response: '',
+        isSpotlight: false,
+      },
+    ]);
 
     const fullDoc = await readFile(
       join(outputDir, 'swift/v2/llm-docs/supabase-swift-v2-full-llms.txt'),
       'utf-8'
+    );
+    expect(fullDoc).toContain(
+      '<SYSTEM>This is the complete developer documentation for Supabase Swift SDK v2.</SYSTEM>'
     );
     expect(fullDoc).toContain('# Supabase Swift SDK v2 Reference');
     expect(fullDoc).toContain(
       `<!-- Generated from: ${join(configDir, 'supabase_swift_v2.yml')} -->`
     );
     expect(fullDoc).not.toContain('<!-- Generated from:  -->');
-    expect(fullDoc).toContain('Select data');
+    expect(fullDoc).toContain('<!-- SDK: swift, Version: v2, Generated: ');
+    expect(fullDoc).toContain('## 1. Database');
+    expect(fullDoc).toContain('### 1.1. Select data');
+    expect(fullDoc).toContain('#### 1.1.1. Basic select');
+    expect(fullDoc).toContain('Read rows');
     expect(fullDoc).toContain('supabase.from("todos").select()');
 
     const moduleDoc = await readFile(
       join(outputDir, 'swift/v2/llm-docs/supabase-swift-v2-database-llms.txt'),
       'utf-8'
     );
-    expect(moduleDoc).toContain('Supabase Swift SDK v2 Database Documentation');
+    expect(moduleDoc).toContain(
+      '<SYSTEM>Database operations for Supabase Swift SDK v2.</SYSTEM>'
+    );
+    expect(moduleDoc).toContain('# Supabase Swift SDK v2 Database Documentation');
     expect(moduleDoc).toContain('Database operations');
+    expect(moduleDoc).toContain('# 1. Select data');
+    expect(moduleDoc).toContain('## 1.1. Basic select');
+    expect(moduleDoc).toContain('supabase.from("todos").select()');
 
     const manifestPath = join(outputDir, 'swift/v2/manifest.json');
     const manifestText = await readFile(manifestPath, 'utf-8');
@@ -3133,6 +3189,7 @@ describe('CLI compatibility behavior', () => {
     });
     expect(manifest.source.byteSize).toBe(await byteSize(specPath));
     expect(manifest.source.contentHash).toBe(await sha256File(specPath));
+    expect(outputPaths).toEqual([...outputPaths].sort(compareStringsByCodeUnit));
     expect(outputPaths).toEqual([
       'llm-docs/supabase-swift-v2-database-llms.txt',
       'llm-docs/supabase-swift-v2-full-llms.txt',

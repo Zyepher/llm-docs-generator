@@ -247,7 +247,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
-- [ ] OpenRef backward compatibility tests
+- [x] OpenRef backward compatibility tests
 
 Current discovery scope:
 
