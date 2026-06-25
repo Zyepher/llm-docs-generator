@@ -7,7 +7,7 @@
   <meta name="agent-purpose" content="Use this plan to implement discovery, extraction, conversion, verification, manifests, and agent skill routing for llm-docs-generator." />
   <meta name="agent-entrypoint" content="#agent-implementation-map" />
   <title>Next-Gen AI Agent Docs Pack Plan</title>
-  <script type="application/json" id="agent-implementation-map">{"goal":"AI agents use llm-docs as a deterministic CLI capability layer for local Markdown docs packs with provenance.","humanFlow":"Human prompts agent; agent resolves intent/source/scope/version/path, then calls CLI with explicit inputs.","corePipeline":["agent resolves target and scope","CLI inspects explicit sources within bounded scope","CLI reports candidates for agent review","parse/format Markdown pack","optionally verify claims against source code","write manifest","verify or refresh"],"sourcePriority":["machine-readable specs","first-party docs source","llms.txt links","rendered HTML fallback","source-truth codebase docs only when requested"],"modes":["official docs","local docs","repo docs","official docs verified against source code","source-truth codebase docs","verify stale output"],"mustBuild":["input normalizer","repo cache","bounded discovery reporter","candidate scoring report","agent-markdown formatter","source verification overlay","manifest writer","compatibility test baseline","agent skill installer"],"mustAvoid":["stale registry trust","hidden source authority decisions","source-specific guessing","unverified implementation summaries","executing repo scripts","token leaks","mixing products in monorepos"],"readOrder":["problem","architecture","operating-model","agent-intent","source-priority","scoring","manifest","outputs","boundaries","roadmap"]}</script>
+  <script type="application/json" id="agent-implementation-map">{"goal":"AI agents use llm-docs as a deterministic CLI capability layer for local Markdown docs packs with provenance.","humanFlow":"Human prompts agent; agent resolves intent/source/scope/version/path, then calls CLI with explicit inputs.","corePipeline":["agent resolves target and scope","CLI inspects explicit sources within bounded scope","CLI reports candidates for agent review","agent selects explicit source/candidate or documented automation flag","parse/format Markdown pack","optionally verify claims against source code","write manifest","verify or refresh"],"sourceEvidenceCategories":["machine-readable specs","first-party docs source","llms.txt links","rendered HTML fallback","source-truth codebase docs only when requested"],"modes":["official docs","local docs","repo docs","official docs verified against source code","source-truth codebase docs","verify stale output"],"mustBuild":["input normalizer","repo cache","bounded discovery reporter","candidate evidence report","agent-markdown formatter","source verification overlay","manifest writer","compatibility test baseline","agent skill installer"],"mustAvoid":["stale registry trust","hidden source authority decisions","source-specific guessing","unverified implementation summaries","executing repo scripts","token leaks","mixing products in monorepos"],"readOrder":["problem","architecture","operating-model","agent-intent","source-evidence","candidate-evidence","manifest","outputs","boundaries","roadmap"]}</script>
   <style>:root{color-scheme:dark;--bg:#000;--text:#f7f7f7;--muted:#a8a8a8;--subtle:#747474;--cyan:#64d2ff;--green:#88d18a;--amber:#ffd166;--red:#ff7b7b;--radius-xl:34px;--radius-lg:26px;--radius-pill:999px;--max:1080px;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}html{scroll-behavior:smooth;background:var(--bg)}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);line-height:1.55}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}.shell{width:min(var(--max),calc(100% - 40px));margin:0 auto}.topbar{position:sticky;top:0;z-index:20;backdrop-filter:blur(16px);background:rgba(0,0,0,0.9);border-bottom:1px solid rgba(255,255,255,0.07)}.topbar-inner{width:min(var(--max),calc(100% - 40px));margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:28px;min-height:64px}.brand{display:flex;align-items:center;min-width:0}.brand h1{margin:0;font-size:15px;line-height:1.1;letter-spacing:0}.brand p{margin:4px 0 0;color:var(--muted);font-size:12px}.nav{display:flex;align-items:center;gap:18px;flex-wrap:nowrap;justify-content:flex-end;overflow-x:auto;scrollbar-width:none;white-space:nowrap}.nav::-webkit-scrollbar{display:none}.nav-link{color:var(--muted);font-size:13px;font-weight:650;letter-spacing:0;line-height:1}.nav-link:hover{color:var(--text);text-decoration:none}.pill{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:7px 12px;border-radius:var(--radius-pill);border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.045);color:#e9e9e9;font-size:13px;white-space:nowrap}.pill.blue{border-color:rgba(120,168,255,0.38);background:rgba(255,255,255,0.035);color:#cfe0ff}.pill.green{border-color:rgba(136,209,138,0.36);background:rgba(255,255,255,0.035);color:#d8f4d9}.pill.amber{border-color:rgba(255,209,102,0.34);background:rgba(255,255,255,0.035);color:#fff2cc}.pill.red{border-color:rgba(255,123,123,0.36);background:rgba(255,255,255,0.035);color:#ffe0e0}.pill.purple{border-color:rgba(187,167,255,0.34);background:rgba(255,255,255,0.035);color:#eee8ff}.hero{padding:74px 0 42px}.hero-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}.hero-card,.panel,.feature,.edge,.command,.diagram-box{border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.035);box-shadow:none}.hero-card{border-radius:var(--radius-xl);padding:clamp(28px,5vw,56px);min-height:auto;display:flex;flex-direction:column;justify-content:space-between;gap:34px}.eyebrow{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:28px}.hero h2{margin:0;max-width:none;font-size:clamp(30px,3.6vw,44px);line-height:1.08;letter-spacing:0}.hero-copy{max-width:none;margin:24px 0 0;color:#d4d4d4;font-size:clamp(15px,1.5vw,17px)}.hero-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:34px}.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border-radius:var(--radius-pill);border:1px solid rgba(255,255,255,0.16);background:#f7f7f7;color:#050505;font-weight:700;font-size:14px}.button.secondary{color:#f7f7f7;background:rgba(255,255,255,0.06)}.side-card{border-radius:0;background:transparent;border:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;min-height:auto}.status-card{border-radius:26px;background:rgba(0,0,0,0.42);border:1px solid rgba(255,255,255,0.1);padding:18px}.status-card h3,.panel h3,.feature h3,.edge h3,.command h3,.diagram-box h3{margin:0 0 10px;font-size:17px;letter-spacing:0}.status-card p,.feature p,.edge p,.command p,.diagram-box p{margin:0;color:var(--muted);font-size:14px}.status-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid rgba(255,255,255,0.08);color:var(--muted);font-size:14px}.status-row:first-of-type{border-top:0}.dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 18px rgba(136,209,138,0.74);flex:0 0 auto}.dot.amber{background:var(--amber);box-shadow:0 0 18px rgba(255,209,102,0.64)}.dot.red{background:var(--red);box-shadow:0 0 18px rgba(255,123,123,0.64)}section{padding:38px 0}.section-head{display:flex;align-items:start;justify-content:flex-start;flex-direction:column;gap:18px;margin-bottom:18px;max-width:none}.section-head h2{margin:0;max-width:none;font-size:clamp(28px,4vw,46px);line-height:1;letter-spacing:0}.section-head p{margin:0;max-width:none;color:var(--muted);font-size:15px}.panel{border:0;border-radius:0;padding:0;background:transparent}.grid-2{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;max-width:none}.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}.feature,.edge,.command,.diagram-box{border-radius:var(--radius-lg);padding:20px;background:rgba(255,255,255,0.035);box-shadow:none}.feature strong,.edge strong{color:#fff}.tag-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.mt{margin-top:16px}.mt-lg{margin-top:18px}.diagram{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:10px;margin-top:16px}.node{min-height:108px;padding:16px;border-radius:24px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);display:flex;flex-direction:column;justify-content:space-between}.node span{color:var(--muted);font-size:12px}.node b{display:block;margin-top:8px;font-size:16px;line-height:1.2}.flow{display:grid;grid-template-columns:1fr;gap:12px}.flow-line{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;align-items:start;padding:16px;border-radius:24px;background:rgba(255,255,255,0.035);border:1px solid rgba(255,255,255,0.09)}.flow-line .label{display:inline-flex;align-items:center;width:fit-content;border-radius:var(--radius-pill);padding:8px 12px;border:1px solid rgba(120,168,255,0.38);background:rgba(120,168,255,0.1);color:#dce8ff;font-weight:700;font-size:13px}.flow-line p{margin:0;color:#d0d0d0}pre{margin:14px 0 0;padding:18px;overflow-x:auto;border-radius:22px;border:1px solid rgba(255,255,255,0.1);background:#030303;color:#f2f2f2;font-size:13px;line-height:1.55}code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}.table-wrap{overflow-x:auto;border-radius:24px;border:1px solid rgba(255,255,255,0.1);margin-top:16px}table{width:100%;min-width:760px;border-collapse:collapse;background:rgba(255,255,255,0.025)}th,td{padding:14px 16px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.08);vertical-align:top;font-size:14px}th{color:#fff;background:rgba(255,255,255,0.045)}td{color:#cfcfcf}tr:last-child td{border-bottom:0}.timeline{display:grid;gap:14px}.phase{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;padding:18px;border-radius:26px;background:rgba(255,255,255,0.035);border:1px solid rgba(255,255,255,0.09)}.phase-number{align-self:start;display:inline-flex;justify-content:center;width:fit-content;padding:8px 12px;border-radius:var(--radius-pill);color:#050505;background:#f7f7f7;font-size:13px;font-weight:800}.phase h3{margin:0 0 8px;font-size:19px}.phase p{margin:0 0 12px;color:var(--muted)}ul{margin:12px 0 0;padding-left:20px;color:#d0d0d0}li+li{margin-top:8px}.callout{border-radius:var(--radius-lg);padding:20px;background:rgba(255,209,102,0.08);border:1px solid rgba(255,209,102,0.25);color:#fff1c2;margin-top:16px}.callout strong{color:#fff}.metric-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:16px}.metric{min-height:130px;padding:16px;border-radius:24px;background:rgba(255,255,255,0.035);border:1px solid rgba(255,255,255,0.09)}.metric b{display:block;font-size:28px;line-height:1;margin-bottom:10px;color:#fff}.metric span{display:block;color:var(--muted);font-size:13px;line-height:1.35}.footer{padding:42px 0 70px;color:var(--subtle);font-size:13px}@media (max-width:940px){.hero-grid,.grid-3,.side-card,.diagram,.metric-grid{grid-template-columns:1fr}.section-head{align-items:start;flex-direction:column}.flow-line,.phase{grid-template-columns:1fr}.hero-card,.side-card{min-height:auto}}@media (max-width:700px){.topbar-inner{align-items:flex-start;flex-direction:column;padding:16px 0}.nav{width:100%;justify-content:flex-start}.hero{padding-top:38px}.shell,.topbar-inner{width:min(100% - 24px,var(--max))}}</style>
 </head>
 <body>
@@ -221,10 +221,10 @@
             <div class="flow-line">
               <span class="label">Candidate Report</span>
               <p>
-                Produces transparent scores for observed candidates. Machine-readable specs rank highest,
-                followed by first-party markdown or MDX, then docs source trees, then crawled webpages as a
-                fallback. The report explains evidence for agent review rather than acting as hidden
-                authority.
+                Produces a candidate evidence report for observed candidates. The CLI records factual
+                signals such as file type, path, metadata, source URL, hash, freshness, parseability, and
+                explicit user-provided scope, then deterministically orders the report for agent review
+                without deciding source truth or authority.
               </p>
             </div>
             <div class="flow-line">
@@ -274,10 +274,10 @@
             <div class="flow-line">
               <span class="label">2. Resolve Source Scope</span>
               <p>
-                The agent resolves authority and scope before generation. For repo inputs, use the repo
-                directly. For website inputs, the CLI can inspect canonical links, footer links, GitHub
-                links, llms.txt, sitemap.xml, and package metadata within the requested scope and report
-                the evidence back to the agent.
+                The agent resolves scope, version, source intent, and candidate suitability before
+                generation. For repo inputs, use the repo directly. For website inputs, the CLI can inspect
+                canonical links, footer links, GitHub links, llms.txt, sitemap.xml, and package metadata
+                within the requested scope and report the evidence back to the agent.
               </p>
             </div>
             <div class="flow-line">
@@ -285,15 +285,16 @@
               <p>
                 Clone or update repositories in <code>~/.explore/repos/&lt;owner&gt;__&lt;repo&gt;</code>.
                 Never clone into the active workspace by default. Inspect README, package files, docs
-                folders, config files, and framework metadata before scoring candidates.
+                folders, config files, and framework metadata before reporting candidates.
               </p>
             </div>
             <div class="flow-line">
               <span class="label">4. Report Candidates</span>
               <p>
-                Give every observed docs source a score based on first-party evidence, structure, relevance,
-                freshness, and parseability. Generate only from an explicit source or an agent-approved
-                candidate, and otherwise produce a decision report.
+                Give every observed docs source a factual evidence record based on first-party signals,
+                structure, relevance, freshness, parseability, and explicit scope. Generate only from a
+                user-provided source, an agent-provided candidate, or a documented automation flag; otherwise
+                produce an evidence report for agent inspection.
               </p>
             </div>
             <div class="flow-line">
@@ -332,15 +333,18 @@ Manifest path   -> verify/refresh exact prior source</code></pre>
           </article>
 
           <article class="feature">
-            <h3>Confidence Policy</h3>
+            <h3>Evidence Policy</h3>
             <p>
-              The system should avoid acting certain when inspection is weak. Confidence controls the
-              discovery report and whether the agent can safely proceed, ask, or fail.
+              The system should avoid acting certain when inspection is weak. The CLI reports factual
+              evidence and deterministic ordering; the agent inspects candidates in light of the user task,
+              project context, version constraints, and source intent. If none is the authoritative source
+              for the task, the agent continues investigation, chooses another explicit source, or asks the
+              user.
             </p>
-            <pre><code>score >= 80: report preferred candidate; generate only with explicit selection or automation flag
-score 60-79: show top candidates; agent asks or requires --yes
-score 40-59: write discovery report; do not generate by default
-score < 40: fail with "no reliable docs source found"</code></pre>
+            <pre><code>explicit source/candidate supplied: generate or validate that exact input
+candidate evidence report only: do not generate by default
+multiple plausible candidates: agent reviews source intent, version, and project context
+no authoritative task source: agent investigates another explicit source or asks the user</code></pre>
           </article>
         </div>
       </div>
@@ -529,18 +533,18 @@ ambiguous release lines  -> ask before generating</code></pre>
         <div class="grid-2">
           <article class="command">
             <h3>Discover A GitHub Repo</h3>
-            <p>Clone or update the repo cache, inspect files within scope, score observed candidates, and write a discovery report for agent review.</p>
+            <p>Clone or update the repo cache, inspect files within scope, and write a candidate evidence report for agent review.</p>
             <pre><code>llm-docs discover https://github.com/supabase/supabase
 llm-docs discover supabase/supabase --sdk swift
 llm-docs discover supabase/supabase --format openref</code></pre>
           </article>
 
           <article class="command">
-            <h3>Generate From A Target</h3>
-            <p>Use an agent-supplied target and scope, parse the selected source, and write an agent-readable Markdown pack plus manifest.</p>
-            <pre><code>llm-docs generate --target supabase/supabase --sdk swift
-llm-docs generate --target https://github.com/swiftlang/swift-book
-llm-docs generate --target https://xaround.co/community-guidelines</code></pre>
+            <h3>Generate From Selected Source</h3>
+            <p>Use an agent-supplied source, candidate, or manifest, then write an agent-readable Markdown pack plus manifest.</p>
+            <pre><code>llm-docs generate --source ./reports/supabase/discovery-report.json --candidate apps/docs/spec/supabase_swift_v2.yml
+llm-docs generate --source ~/.explore/repos/swiftlang__swift-book/TSPL.docc --format markdown
+llm-docs generate --source https://xaround.co/community-guidelines --format html</code></pre>
           </article>
 
           <article class="command">
@@ -694,19 +698,19 @@ capabilities:
       </div>
     </section>
 
-    <section id="source-priority">
+    <section id="source-evidence">
       <div class="shell">
         <div class="section-head">
-          <h2>Source Priority Model</h2>
-          <p>When many possible sources exist, report the most structured first-party evidence for agent review.</p>
+          <h2>Source Evidence Categories</h2>
+          <p>When many possible sources exist, report factual evidence categories for agent review.</p>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Rank</th>
-                <th>Source Type</th>
-                <th>Why It Wins</th>
+                <th>Review Order</th>
+                <th>Source Evidence Type</th>
+                <th>Useful Because</th>
                 <th>Parser</th>
               </tr>
             </thead>
@@ -747,55 +751,47 @@ capabilities:
       </div>
     </section>
 
-    <section id="scoring">
+    <section id="candidate-evidence">
       <div class="shell">
         <div class="section-head">
-          <h2>Candidate Scoring</h2>
-          <p>A predictable score makes discovery explainable and prevents old registry entries from winning blindly.</p>
+          <h2>Candidate Evidence</h2>
+          <p>Deterministic evidence reports make discovery explainable without turning the CLI into an authority engine.</p>
         </div>
         <div class="panel">
           <div class="metric-grid">
             <div class="metric">
-              <b>30</b>
+              <b>Source</b>
               <span>First-party evidence: official repo, official docs domain, canonical source links, package metadata match.</span>
             </div>
             <div class="metric">
-              <b>25</b>
-              <span>Structure: OpenAPI/OpenRef/spec files score higher than loose markdown or extracted HTML.</span>
+              <b>Shape</b>
+              <span>Structure: OpenAPI/OpenRef/spec files, source markdown or MDX, extracted HTML, and parse boundaries.</span>
             </div>
             <div class="metric">
-              <b>20</b>
+              <b>Scope</b>
               <span>Relevance: requested SDK, language, version, product, or docs section is explicitly matched.</span>
             </div>
             <div class="metric">
-              <b>15</b>
+              <b>Fresh</b>
               <span>Freshness: recent commits, current version tags, non-archived repo, successful HEAD checks.</span>
             </div>
             <div class="metric">
-              <b>10</b>
+              <b>Parse</b>
               <span>Parseability: parser succeeds, headings are coherent, examples are preserved, token count is manageable.</span>
             </div>
           </div>
 
-          <pre><code>candidateScore =
-  sourceEvidenceScore
-  + structureScore
-  + relevanceScore
-  + freshnessScore
-  + parseabilityScore
-  - penalties
-
-penalties:
-  - generated/vendor/build directory: -20
-  - deprecated or archived docs: -20
-  - HTML page pretending to be a spec: -30
-  - source requires unavailable auth: -40
-  - parser succeeds but extracts mostly navigation: -25</code></pre>
+          <pre><code>candidate evidence:
+  - source kind, URL or path, repo commit, content hash
+  - explicit scope, requested version, matched product or SDK
+  - file type, metadata, source links, freshness signals
+  - parser result, warnings, skipped generated/vendor/build paths
+  - deterministic report order and non-authoritative evidence summary</code></pre>
 
           <div class="callout">
-            <strong>Important:</strong> registry hints should add only a small positive signal after the
-            hinted path is verified. They should never outrank fresher, first-party evidence observed
-            during bounded inspection.
+            <strong>Important:</strong> registry hints are factual starting points after the hinted path is
+            verified. They are not source truth, and they must not override fresher first-party evidence
+            or the agent's task-specific judgment.
           </div>
         </div>
       </div>
@@ -805,7 +801,7 @@ penalties:
       <div class="shell">
         <div class="section-head">
           <h2>Edge Cases And Required Behavior</h2>
-          <p>The tool should fail explicitly when confidence is low, not produce false authority.</p>
+          <p>The tool should fail explicitly when evidence is incomplete, not produce false authority.</p>
         </div>
         <div class="grid-2">
           <article class="edge">
@@ -840,10 +836,11 @@ penalties:
           <article class="edge">
             <h3>Multiple Candidate Docs</h3>
             <p>
-              Score candidates and show a ranked report. If the top two are close, ask for confirmation
-              or generate separate outputs with explicit labels.
+              Report factual evidence for each candidate in deterministic order. The agent inspects the
+              user task, project context, version constraints, and source intent; if no candidate is
+              authoritative, it continues investigation, chooses another explicit source, or asks the user.
             </p>
-            <div class="tag-row"><span class="pill">Ranked choices</span><span class="pill">Possible prompt</span></div>
+            <div class="tag-row"><span class="pill">Evidence order</span><span class="pill">Possible prompt</span></div>
           </article>
 
           <article class="edge">
@@ -965,7 +962,7 @@ penalties:
     "reportedCandidate": {
       "path": "apps/docs/spec/supabase_swift_v2.yml",
       "format": "openref",
-      "score": 0.94,
+      "evidence": ["openref", "requested Swift SDK v2", "first-party path"],
       "reason": "Machine-readable OpenRef spec matching requested Swift SDK v2"
     },
     "selectedBy": "agent"
@@ -1055,7 +1052,7 @@ failure:
               <li>Accept GitHub repo URLs, docs website URLs, local paths, and existing manifests.</li>
               <li>Clone or update GitHub repos in a stable external cache.</li>
               <li>Discover OpenAPI, Swagger, OpenRef, markdown, MDX, DocC, RST, llms.txt, and sitemap candidates.</li>
-              <li>Score observed candidates and report preferred matches for agent review.</li>
+              <li>List, group, filter, and deterministically order observed candidates using factual evidence signals for agent review.</li>
               <li>Generate agent-optimized Markdown plus manifest, discovery report, and failure report.</li>
               <li>Support source-code verification of official docs when the source repo is available and the user asks for source-truth confidence.</li>
               <li>Distinguish repo docs conversion from source-truth codebase docs generation, and fail clearly if the requested mode is not implemented.</li>
@@ -1123,7 +1120,7 @@ failure:
                 <li>Add <code>llm-docs discover &lt;repo&gt;</code>.</li>
                 <li>Clone or update repos under <code>~/.explore/repos</code>.</li>
                 <li>Search for docs directories, specs, markdown, MDX, DocC, and OpenAPI files.</li>
-                <li>Write ranked discovery reports.</li>
+                <li>Write candidate evidence reports.</li>
               </ul>
             </div>
           </article>
@@ -1167,7 +1164,7 @@ failure:
                 <li>Verify existing documentation claims against source code and flag conflicts where the implementation disagrees.</li>
                 <li>Allow official-docs generation to request source-code verification for API and behavior claims without switching the whole run to code-only docs.</li>
                 <li>Record every source file used for each generated section.</li>
-                <li>Refuse unverified summaries when generator confidence is low.</li>
+                <li>Refuse unverified summaries when evidence is incomplete or source verification is missing.</li>
               </ul>
             </div>
           </article>

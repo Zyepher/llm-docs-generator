@@ -45,7 +45,10 @@ Current implementation:
 - Can parse configured OpenRef YAML specs.
 - Can parse explicit local OpenAPI 3.x and Swagger 2.0 JSON/YAML files through
   parser modules and convert them to the shared DocNode IR.
-- Can parse local Markdown / DocC-style sources through parser modules.
+- Can parse local Markdown / MDX / DocC-style sources through parser modules.
+  MDX is handled as Markdown parser/library support with deterministic cleanup
+  outside fenced code; it does not evaluate JSX, execute imports, or add
+  source-specific documentation rules.
 - Can format parsed docs into LLM-friendly text.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks.
@@ -75,8 +78,8 @@ Current implementation:
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or source-truth codebase documentation
   generation. Discovery modes are inspection foundations only; they do not
-  generate docs, choose sources, score trust, infer authority, or claim source
-  truth.
+  generate docs, choose sources, assign trust scores, infer authority, or claim
+  source truth.
 - Local and repo discovery order candidates by deterministic evidence category
   and normalized path for agent review. Website discovery orders extracted
   candidate URLs by deterministic observation order and aggregates evidence from
@@ -262,6 +265,19 @@ For future worker or reviewer prompts that touch CLI source ingestion,
 discovery-like inspection, manifests, freshness, provenance, or docs contracts,
 include an explicit reminder to align with the Product Boundary above.
 
+Reviewers must flag:
+
+- CLI behavior or docs that imply discovery decides authority, correctness,
+  source truth, or task fit.
+- Candidate reports described as trust scoring, preferred-source selection, or
+  hidden source-specific guessing instead of factual evidence reports.
+- Generation from a top or first ordered candidate unless the user or agent
+  supplies that candidate explicitly, or a documented automation flag requires
+  it.
+- Claims that source-truth codebase docs, source verification, manifests,
+  freshness, or discovery are implemented when code, tests, CLI behavior, and
+  docs do not all agree.
+
 ## Repo Exploration Workflow
 
 Use a repo-explorer skill or equivalent workflow when the target repository is
@@ -377,10 +393,11 @@ LLM docs for Tailwind CSS," the installed skill is what should tell the agent to
 investigate source and scope, then call the globally available `llm-docs` CLI
 with explicit inputs. The CLI then performs the deterministic work.
 
-## Source Selection Priority
+## Source Evidence Categories
 
-The agent should prefer sources in this order, using CLI reports as evidence
-rather than hidden authority decisions:
+The agent should review sources in this order, using CLI reports as evidence
+rather than hidden authority decisions. This is agent guidance, not CLI
+permission to decide source truth or task fit:
 
 1. First-party machine-readable specs: OpenAPI, Swagger, OpenRef.
 2. First-party docs source: Markdown, MDX, RST, DocC.
@@ -431,8 +448,8 @@ result.
 Ask when:
 
 - A product name maps to multiple official repos.
-- Multiple docs candidates have similar evidence and the CLI report does not
-  make the choice obvious.
+- Multiple docs candidates have similar evidence and the agent cannot resolve
+  source intent, version, or task fit from the report.
 - The user requested "latest" but the project has multiple release channels.
 - The user requested a major version with ambiguous tags.
 - The target requires authentication and local credentials are unavailable.
@@ -456,6 +473,9 @@ Do not ask when:
 - Do not silently upgrade pinned versions.
 - Do not let CLI discovery make hidden authority decisions; it must produce
   inspectable deterministic evidence and ordering for agent review.
+- Do not generate from a top or first ordered candidate unless the user or
+  agent has explicitly selected that candidate or a documented automation flag
+  requires it.
 - Do not claim source-truth codebase docs are supported unless that mode exists.
 - Do not mark official docs as source-verified unless implementation files were
   actually inspected.

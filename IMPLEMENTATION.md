@@ -2,7 +2,7 @@
 
 **Status**: ✅ **COMPLETE AND WORKING**
 
-Successfully implemented a general-purpose, multi-format LLM documentation generator that intelligently handles OpenRef YAML (Supabase) and Markdown/DocC (Swift-Book).
+Successfully implemented a general-purpose, multi-format LLM documentation generator that handles OpenRef YAML (Supabase) and Markdown/MDX/DocC parser inputs.
 
 ## What Was Built
 
@@ -25,8 +25,8 @@ llm-docs-generator/
 │   │   │   ├── adapter.ts         ✅ OpenRef → IR adapter
 │   │   │   └── index.ts           ✅ OpenRef wrapper
 │   │   └── markdown/
-│   │       ├── parser.ts          ✅ Markdown/DocC parser
-│   │       ├── adapter.ts         ✅ Markdown → IR adapter
+│   │       ├── parser.ts          ✅ Markdown/MDX/DocC parser
+│   │       ├── adapter.ts         ✅ Markdown/MDX → IR adapter
 │   │       └── index.ts           ✅ Markdown wrapper
 │   └── config/
 │       └── presets/
@@ -45,7 +45,8 @@ llm-docs-generator/
    - **OpenRef YAML**: Supabase SDK specs
    - **OpenAPI / Swagger**: Explicit local OpenAPI 3.x and Swagger 2.0
      JSON/YAML files converted to DocNode IR as a parser/library capability
-   - **Markdown/DocC**: Swift Programming Language book
+   - **Markdown/MDX/DocC**: local Markdown files, MDX cleanup foundation, and
+     Swift Programming Language book
    - Extensible: Add new formats easily
 
 3. **Auto-Detection**
@@ -137,13 +138,15 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - Operation → OPERATION DocNode
 - Example → ITEM DocNode (with code ContentBlocks)
 
-**Markdown → IR:**
+**Markdown / MDX → IR:**
 
 - File → SECTION DocNode
 - H2 → CATEGORY DocNode
 - H3 → OPERATION DocNode
 - H4 → ITEM DocNode
 - Code block → CODE ContentBlock
+- MDX source syntax → Markdown format metadata with deterministic cleanup
+  outside fenced code
 
 **OpenAPI / Swagger → IR:**
 
@@ -197,10 +200,10 @@ Current discovery scope:
   candidates or render JavaScript.
 
 Discovery does not generate docs, crawl linked website candidates, choose
-candidates, score trust, infer authority, claim source truth, or implement
-source-truth codebase docs generation. It orders candidates deterministically
-for agent review only. Repo cache handling is non-destructive; clean matching
-caches fetch remote refs without pulling into the checkout, and cached
+candidates, assign trust scores, infer authority, claim source truth, or
+implement source-truth codebase docs generation. It orders candidates
+deterministically for agent review only. Repo cache handling is non-destructive;
+clean matching caches fetch remote refs without pulling into the checkout, and cached
 checkouts with local changes or ignored files are warned about and inspected as
 present.
 
@@ -212,6 +215,24 @@ Current OpenAPI / Swagger parser scope:
   not fetch, dereference, or resolve remote sources.
 - Exists as parser/library support and is not yet a `generate --source` CLI
   workflow.
+
+Current Markdown / MDX parser scope:
+
+- Accepts explicit local `.md`, `.markdown`, and `.mdx` files.
+- Accepts directories containing Markdown or MDX files and parses them through
+  the existing Markdown/DocNode pipeline.
+- Records `format: markdown` metadata and `sourceSyntax: markdown` or
+  `sourceSyntax: mdx` when straightforward.
+- Strips YAML frontmatter from parsed content while preserving simple
+  frontmatter metadata extraction.
+- Performs deterministic MDX cleanup outside fenced code only: import/export
+  declarations, JSX comments, simple expression-only lines or blocks, common
+  wrapper components, and self-closing presentational components without useful
+  text.
+- Preserves fenced code content, including JSX/import/export text inside code
+  fences.
+- Does not evaluate JSX, execute imports, fetch network sources, or add
+  product-specific MDX rules.
 
 ## Files Modified/Created
 
