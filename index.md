@@ -125,10 +125,11 @@ The current CLI does not yet expose `generate --source`, refresh, source
 verification, or source-truth codebase docs generation. It writes
 `manifest.json` for successful configured `generate --sdk` tasks and verifies
 current configured SDK manifest source and output file hashes and byte sizes
-only. Markdown / DocC parsing exists in parser modules but is not wired as a
-current CLI generation command. Discovery reports do not generate docs, choose
-sources, score trust, infer authority, or claim source truth. Discovery
-candidates are ordered deterministically for agent review only.
+only. Markdown / DocC and OpenAPI 3.x / Swagger 2.0 parsing exist in parser
+modules but are not wired as current CLI generation commands. Discovery reports
+do not generate docs, choose sources, score trust, infer authority, or claim
+source truth. Discovery candidates are ordered deterministically for agent
+review only.
 
 The current CLI is implemented in:
 
@@ -155,6 +156,7 @@ Parsers:
 - [src/parsers/openref/index.ts](src/parsers/openref/index.ts)
 - [src/parsers/openref/parser.ts](src/parsers/openref/parser.ts)
 - [src/parsers/openref/adapter.ts](src/parsers/openref/adapter.ts)
+- [src/parsers/openapi/index.ts](src/parsers/openapi/index.ts)
 - [src/parsers/markdown/index.ts](src/parsers/markdown/index.ts)
 - [src/parsers/markdown/parser.ts](src/parsers/markdown/parser.ts)
 - [src/parsers/markdown/adapter.ts](src/parsers/markdown/adapter.ts)

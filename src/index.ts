@@ -4,7 +4,24 @@
 
 // Core exports
 export { OpenRefParser, parseOpenRefSpec, getParserStats } from './parsers/openref/parser.js';
+export { OpenApiFormatParser, openApiParser, parseOpenApiFile } from './parsers/openapi/index.js';
 export { LLMFormatter, formatSpecData } from './core/formatter.js';
+export {
+  detectFormat,
+  FormatDetector,
+  getFormatDetector,
+  getParserForFormat,
+} from './core/detector.js';
+export { BaseParser, FormatType, ParserError } from './parsers/base.js';
+export type {
+  Parser,
+  ValidationError,
+  ValidationResult,
+  ValidationWarning,
+} from './parsers/base.js';
+export type { ApiVersionInfo } from './parsers/openapi/index.js';
+export { ContentBlockType, DocNodeType, createContentBlock, createDocNode } from './core/models.js';
+export type { ContentBlock, DocNode } from './core/models.js';
 export type { Example } from './core/models.js';
 export type { Operation } from './core/models.js';
 export type { SpecInfo } from './core/models.js';

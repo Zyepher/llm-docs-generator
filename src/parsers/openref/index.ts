@@ -7,6 +7,7 @@
 
 import { BaseParser, FormatType } from '../base.js';
 import type { DocNode } from '../../core/models.js';
+import { load as yamlLoad } from 'js-yaml';
 import { OpenRefParser } from './parser.js';
 import { openRefToDocNode } from './adapter.js';
 
@@ -22,7 +23,8 @@ export class OpenRefFormatParser extends BaseParser {
   /**
    * Detect if source is an OpenRef YAML file
    *
-   * Performance: O(1) file extension + O(k) content sniffing (k = 100 bytes)
+   * Performance: O(n) YAML parse after an O(1) extension check so OpenRef and
+   * OpenAPI YAML are distinguished by document shape.
    */
   async detect(sourcePath: string): Promise<boolean> {
     // Check file extension
@@ -36,16 +38,17 @@ export class OpenRefFormatParser extends BaseParser {
       return false;
     }
 
-    // Sniff content for OpenRef structure
+    // Sniff parsed content for OpenRef structure. OpenAPI also commonly uses
+    // YAML plus an info object, so do not classify by extension or info alone.
     try {
-      const head = await this.readFileHead(sourcePath, 200);
+      const content = await this.readFile(sourcePath);
+      const parsed = yamlLoad(content);
 
-      // Look for OpenRef-specific markers
-      const hasInfo = head.includes('info:');
-      const hasFunctions = head.includes('functions:');
-      const hasId = head.includes('id:');
+      if (!isRecord(parsed) || typeof parsed.openapi === 'string' || parsed.swagger !== undefined) {
+        return false;
+      }
 
-      return hasInfo || hasFunctions || hasId;
+      return Array.isArray(parsed.functions);
     } catch {
       return false;
     }
@@ -93,3 +96,7 @@ export const openRefParser = new OpenRefFormatParser();
 export { OpenRefParser } from './parser.js';
 export { openRefToDocNode, convertOperation, convertExample } from './adapter.js';
 export type { SpecData, Operation, Example, SpecInfo } from '../../core/models.js';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
