@@ -117,6 +117,18 @@ Current implementation:
   extractable export or package/config facts or path-based context facts are
   found. It rejects output directories that are the source path or inside the
   source path.
+- Can run `generate --source <local-file-or-directory> --output-dir <dir>` for
+  deterministic local source docs generation through the registered parser and
+  universal formatter. Source mode supports `--format auto`, `markdown`, `mdx`
+  through the Markdown parser, `openapi`, `openref`, `rst`, and `html`. It
+  accepts local files or directories only, rejects URL-like inputs, missing
+  paths, discovery reports, `--source` plus `--sdk`, and all `--preset`
+  requests, and does not fetch, crawl, select candidates, infer task fit, or
+  decide source selection. Successful source generation writes `manifest.json`
+  plus generated docs under `llm-docs/`; the manifest records source file
+  hashes and byte sizes, a deterministic directory aggregate hash when
+  applicable, parser/formatter metadata, generated output hashes, byte sizes,
+  line counts, deterministic estimated token counts, and warnings.
 - Can run `capabilities --json` to print a deterministic, machine-readable
   contract of implemented commands and planned/unsupported capabilities for
   agents. The contract has schema version `0.1.0`, package name/version
@@ -133,16 +145,17 @@ Current implementation:
   does not install or register skills, write user config, probe environment
   state, or perform network work.
 - Current CLI commands are limited to local/repo/website `discover`,
-  `source-truth inspect`, `source-truth generate`, `generate --sdk`, `verify`,
-  `list-sdks`, `validate --sdk`, `capabilities --json`, and read-only
-  `agent context`.
+  `source-truth inspect`, `source-truth generate`, `generate --source`,
+  `generate --sdk`, `verify`, `list-sdks`, `validate --sdk`,
+  `capabilities --json`, and read-only `agent context`.
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or behavior-level source documentation from
   code. Semantic chunking exists as a library capability for existing DocNode IR
-  only; current configured SDK and source-truth docs manifests include partial
-  generated-output RAG metadata only (`lineCount` and `estimatedTokenCount`) and
-  do not consume or publish semantic chunk records. Discovery reports do not yet
-  include this generated-output metadata. Discovery modes are inspection
+  only; current source docs, configured SDK, and source-truth docs manifests
+  include partial generated-output RAG metadata only (`lineCount` and
+  `estimatedTokenCount`) and do not consume or publish semantic chunk records.
+  Discovery reports do not yet include this generated-output metadata.
+  Discovery modes are inspection
   foundations only; they do not generate docs, choose sources, assign trust
   scores, infer authority, or claim source truth.
 - Local and repo discovery order candidates by deterministic evidence category
@@ -178,8 +191,8 @@ The workflows below describe the approved next-generation product direction.
 When using the current CLI, verify that the needed command exists first. If the
 workflow needs discovery, repo caching, refresh, source verification,
 behavior-level source documentation, or manifest data beyond the current
-configured SDK and source-truth docs manifests, treat it as planned work unless
-source and tests prove it has been implemented.
+source docs, configured SDK, and source-truth docs manifests, treat it as
+planned work unless source and tests prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -235,8 +248,10 @@ Agent workflow:
 2. Optionally run `llm-docs discover --source <path> --output-dir <dir>` to
    produce a bounded local inspection report for agent review.
 3. Detect the format or honor the user's requested format.
-4. Run source conversion directly when a CLI mode exists, or use this as the
-   next implementation step if only parser modules support the format.
+4. Run `llm-docs generate --source <path> --output-dir <dir>` with `--format`
+   omitted for auto-detection or set to a supported parser hint. Do not pass a
+   discovery report as `--source`; review the report as candidate evidence and
+   pass the selected local file or directory explicitly.
 5. Report generated output files and source path. If only discovery was run,
    report the `discovery-report.json` path and candidate count instead.
 
@@ -522,15 +537,20 @@ Record at minimum:
 - generated output paths
 - warnings and skipped candidates
 
-The current configured SDK generation path writes a scoped
-`manifest.json` with configured source details, hashes, parser and formatter
-metadata, generated file hashes, byte sizes, line counts, and deterministic
-estimated token counts. The current `verify` command checks configured SDK
-manifest file hashes and byte sizes, and rejects malformed optional generated
-output line/token metadata when present; it does not recompute line or token
-counts yet, or perform refresh, discovery report validation, repo freshness
-verification, or source-code verification. Future implementations should extend
-manifest coverage to the broader provenance fields above.
+The current explicit local source generation path writes a source-mode
+`manifest.json` with source path/type, format hint, resolved format,
+parser/formatter metadata, source file hashes and byte sizes, a deterministic
+directory aggregate hash when applicable, generated file hashes, byte sizes,
+line counts, deterministic estimated token counts, and warnings. The current
+configured SDK generation path writes a scoped `manifest.json` with configured
+source details, hashes, parser and formatter metadata, generated file hashes,
+byte sizes, line counts, and deterministic estimated token counts. The current
+`verify` command checks configured SDK manifest file hashes and byte sizes, and
+rejects malformed optional generated output line/token metadata when present;
+it does not recompute line or token counts yet, verify source-mode manifests,
+or perform refresh, discovery report validation, repo freshness verification,
+or source-code verification. Future implementations should extend manifest
+coverage to the broader provenance fields above.
 
 ## Clarifying Questions
 
@@ -606,7 +626,8 @@ Local docs:
 
 ```text
 User: Generate LLM docs from ./docs.
-Agent: Verify path, detect format, convert directly.
+Agent: Verify path, then run llm-docs generate --source ./docs --output-dir <dir>
+with an explicit format hint when useful.
 ```
 
 Source-truth codebase docs:

@@ -221,10 +221,14 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Deterministic configured SDK `generate --format` / `--preset` handling:
       `--format openref` and `--format openref-0.1` are accepted for the
       existing `generate --sdk` OpenRef compatibility path; unsupported
-      `--format` values, all `--preset` requests, and top-level
-      `generate --source` fail honestly before generation
-- [ ] General CLI enhancements for `generate --source --format` and supported
-      `--preset` generation
+      configured-SDK `--format` values and all `--preset` requests fail
+      honestly before generation
+- [x] Explicit local source docs generation through
+      `generate --source <local-file-or-directory> --output-dir <dir>` with
+      parser hints for `auto`, `markdown`, `mdx`, `openapi`, `openref`, `rst`,
+      and `html`, source provenance manifest writing, URL/discovery-report
+      rejection, and `--sdk` mutual exclusion
+- [ ] Supported `--preset` generation
 - [ ] Directory parsing for full swift-book (all chapters)
 - [ ] JSONL export format for embedding pipelines
 - [x] OpenAPI 3.x / Swagger 2.0 parser foundation for explicit local JSON/YAML
@@ -290,23 +294,23 @@ Current capabilities contract scope:
 - Implemented entries cover `discover --source`, `discover --repo`,
   `discover --url`, `source-truth inspect --source`,
   `source-truth generate --source --output-dir`, read-only `agent context`,
-  configured `generate --sdk` with optional `--format openref` /
+  explicit local `generate --source` with parser hints, configured
+  `generate --sdk` with optional `--format openref` /
   `--format openref-0.1`, configured SDK `verify`, `list-sdks`, and
   `validate --sdk`.
-- Planned/unsupported entries include general `generate --source`,
-  `generate --preset`, `refresh`, source-code verification for official docs,
-  broad website crawling, automatic source selection, framework/route
-  understanding, behavior-level generation from source code,
-  `agent install codex`, and `agent doctor`.
+- Planned/unsupported entries include `generate --preset`, `refresh`,
+  source-code verification for official docs, broad website crawling,
+  automatic source selection, framework/route understanding, behavior-level
+  generation from source code, `agent install codex`, and `agent doctor`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
-  `manifest.json`, `failure.json`, configured SDK parsed spec output, and
-  configured SDK LLM docs output.
-- Generated-output manifest metadata is currently partial: configured SDK and
-  source-truth docs manifests record `lineCount` and deterministic
-  `estimatedTokenCount` for explicit generated files, but capabilities output
-  does not claim full manifest expansion, refresh support, source-code
-  verification, or semantic chunk publication.
+  `manifest.json`, `failure.json`, source docs under `llm-docs/`, configured
+  SDK parsed spec output, and configured SDK LLM docs output.
+- Generated-output manifest metadata is currently partial: source docs,
+  configured SDK, and source-truth docs manifests record `lineCount` and
+  deterministic `estimatedTokenCount` for explicit generated files, but
+  capabilities output does not claim full manifest expansion, refresh support,
+  source-code verification, or semantic chunk publication.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
@@ -365,14 +369,39 @@ Current source-truth evidence scope:
   documentation claims, infer runtime behavior, decide task fit, select sources,
   or summarize behavior beyond observed export and package/config facts.
 
+Current explicit local source docs generation scope:
+
+- `llm-docs generate --source <local-file-or-directory> --output-dir <dir>`
+  accepts only explicit local file or directory paths.
+- `--sdk` and `--source` are mutually exclusive. `--preset` remains
+  unsupported and fails before output work.
+- URL-like sources, missing paths, symlinked source roots, discovery reports,
+  and candidate/discovery report auto-selection are rejected honestly. Source
+  mode never fetches network resources and does not consume discovery reports
+  automatically.
+- `--format` is a parser hint. Supported values are `auto`, `markdown`, `mdx`
+  as Markdown parser support, `openapi`, `openref`, `rst`, and `html`.
+  Unsupported source-mode formats fail before output work.
+- Source mode parses through the existing parser registry, formats through
+  `UniversalFormatter`, writes generated docs under `llm-docs/`, and writes a
+  root `manifest.json` only after successful parsing and formatting.
+- The source manifest has mode `local-source-docs` and records generator
+  metadata, source input/resolved path/type, format hint and resolved format,
+  parser/formatter metadata, deterministic source file hashes and byte sizes,
+  a stable directory aggregate hash when applicable, generated output hashes,
+  byte sizes, line counts, deterministic estimated token counts, and warnings.
+- Source mode does not verify generated output later; current `verify` remains
+  scoped to configured-SDK manifests.
+
 Current OpenAPI / Swagger parser scope:
 
 - Accepts only explicit local `.json`, `.yaml`, and `.yml` files.
 - Supports OpenAPI 3.x and Swagger 2.0 roots with a required `paths` object.
 - Preserves schema references and simple inline examples in the IR, but does
   not fetch, dereference, or resolve remote sources.
-- Exists as parser/library support and is not yet a `generate --source` CLI
-  workflow.
+- Is available through `generate --source <local-file> --format openapi` or
+  auto-detection for explicit local files. Directory source mode is not
+  supported by this parser.
 
 Current Markdown / MDX parser scope:
 
@@ -391,6 +420,8 @@ Current Markdown / MDX parser scope:
   fences.
 - Does not evaluate JSX, execute imports, fetch network sources, or add
   product-specific MDX rules.
+- Is available through `generate --source <local-file-or-directory>
+  --format markdown`; `--format mdx` is accepted as a Markdown parser hint.
 
 Current RST parser scope:
 
@@ -404,8 +435,8 @@ Current RST parser scope:
   `.. code-block::` / `.. code::` directives with optional language.
 - Does not execute or fetch includes, run Sphinx/docutils transforms, resolve
   references, or claim full RST/Sphinx support.
-- Exists as parser/library support and is not yet a `generate --source` CLI
-  workflow.
+- Is available through `generate --source <local-file-or-directory>
+  --format rst`.
 
 Current HTML parser scope:
 
@@ -422,8 +453,8 @@ Current HTML parser scope:
 - Strips `script`, `style`, and `template` elements before parsing.
 - Does not render JavaScript, execute content, fetch linked resources, follow
   links, infer source authority, or choose candidate sources.
-- Exists as parser/library support and is not yet a `generate --source` CLI
-  workflow.
+- Is available through `generate --source <local-file-or-directory>
+  --format html`.
 
 Current semantic chunking scope:
 

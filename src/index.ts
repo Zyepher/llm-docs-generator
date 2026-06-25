@@ -175,3 +175,16 @@ export type {
   SourceTruthGeneratedOutputKind,
   SourceTruthManifestSourceFile,
 } from './core/source-truth-docs.js';
+export {
+  SOURCE_DOCS_MODE,
+  SOURCE_DOCS_SCHEMA_VERSION,
+  generateSourceDocs,
+} from './core/source-docs.js';
+export type {
+  GenerateSourceDocsOptions,
+  GenerateSourceDocsResult,
+  SourceDocsFileManifestEntry,
+  SourceDocsGeneratedOutput,
+  SourceDocsGeneratorMetadata,
+  SourceDocsManifest,
+} from './core/source-docs.js';

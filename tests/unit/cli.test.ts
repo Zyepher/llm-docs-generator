@@ -90,6 +90,46 @@ interface GenerationManifest {
   warnings: string[];
 }
 
+interface SourceDocsManifest {
+  schemaVersion: string;
+  generatedAt: string;
+  generator: {
+    name: string;
+    version: string;
+    cliName: string;
+  };
+  mode: string;
+  source: {
+    input: string;
+    resolvedPath: string;
+    type: string;
+    formatHint: string;
+    resolvedFormat: string;
+    byteSize?: number;
+    hash?: string;
+    fileCount?: number;
+    aggregateHash?: string;
+  };
+  sourceFiles: Array<{
+    path: string;
+    resolvedPath: string;
+    byteSize: number;
+    hash: string;
+  }>;
+  parser: {
+    name: string;
+    version: string;
+    format: string;
+  };
+  formatter: {
+    name: string;
+    version: string;
+    format: string;
+  };
+  generatedOutputs: ManifestFileEntry[];
+  warnings: string[];
+}
+
 interface DiscoveryCandidate {
   path: string;
   resolvedPath: string;
@@ -660,10 +700,7 @@ describe('CLI compatibility behavior', () => {
       packageMetadata.files
         .filter((file) => file.startsWith('skills/'))
         .sort(compareStringsByCodeUnit)
-    ).toEqual([
-      'skills/llm-docs-generator/SKILL.md',
-      'skills/repo-docs-discovery/SKILL.md',
-    ]);
+    ).toEqual(['skills/llm-docs-generator/SKILL.md', 'skills/repo-docs-discovery/SKILL.md']);
   });
 
   it('ships valid bundled skill frontmatter for agent workflows', async () => {
@@ -742,7 +779,9 @@ describe('CLI compatibility behavior', () => {
     expect(rootHelp.stdout).toContain('agent');
     expect(rootHelp.stdout).toContain('Report implemented and planned CLI capabilities for');
     expect(rootHelp.stdout).toContain('agents');
-    expect(capabilitiesHelp.stdout).toContain('Report implemented and planned CLI capabilities for agents');
+    expect(capabilitiesHelp.stdout).toContain(
+      'Report implemented and planned CLI capabilities for agents'
+    );
     expect(capabilitiesHelp.stdout).toContain('--json');
     expect(capabilitiesHelp.stdout).toContain(
       'Print the deterministic machine-readable capabilities contract'
@@ -759,29 +798,24 @@ describe('CLI compatibility behavior', () => {
     );
   }, 15000);
 
-  it('describes generate options as configured SDK guards or planned unsupported modes', async () => {
+  it('describes generate options as local source mode, configured SDK guards, or planned unsupported modes', async () => {
     const { stdout } = await runCli(['generate', '--help']);
 
     expect(stdout).toMatch(
-      /--source <path>\s+Planned general source generation input \(currently\s+unsupported\)/
+      /--source <path>\s+Explicit local file or directory to parse and\s+format/
     );
     expect(stdout).toMatch(
-      /--format <format>\s+Configured SDK format guard: openref or openref-0\.1/
+      /--format <format>\s+Source parser hint: auto, markdown, mdx, openapi,\s+openref, rst, html; SDK guard: openref or\s+openref-0\.1/
     );
-    expect(stdout).toMatch(
-      /--preset <name>\s+Planned preset generation input \(currently\s+unsupported\)/
-    );
-    expect(stdout).not.toContain('General generation format');
-    expect(stdout).not.toContain('Generate from source');
+    expect(stdout).toMatch(/--preset <name>\s+Planned preset generation input \(unsupported\)/);
+    expect(stdout).not.toContain('candidate');
   });
 
   it('prints deterministic agent context JSON metadata for packaged artifacts', async () => {
     const first = await runCli(['agent', 'context', '--json']);
     const second = await runCli(['agent', 'context', '--json']);
     const context = JSON.parse(first.stdout) as AgentContextContract;
-    const artifacts = new Map(
-      context.contextArtifacts.map((artifact) => [artifact.id, artifact])
-    );
+    const artifacts = new Map(context.contextArtifacts.map((artifact) => [artifact.id, artifact]));
 
     expect(first.stdout).toBe(second.stdout);
     expect(first.stdout.endsWith('\n')).toBe(true);
@@ -832,9 +866,7 @@ describe('CLI compatibility behavior', () => {
     ]);
     expect(context.skillArtifacts).toHaveLength(2);
     expect(await listPackageRelativeFiles(join(repoRoot, 'skills'))).toEqual(
-      context.skillArtifacts
-        .map((artifact) => artifact.path)
-        .sort(compareStringsByCodeUnit)
+      context.skillArtifacts.map((artifact) => artifact.path).sort(compareStringsByCodeUnit)
     );
 
     for (const artifact of context.skillArtifacts) {
@@ -869,28 +901,24 @@ describe('CLI compatibility behavior', () => {
     expect(output).not.toMatch(/\bhost skill installation is writable\b/i);
   });
 
-  it(
-    'prints a deterministic capabilities JSON contract without generatedAt',
-    async () => {
-      const first = await runCli(['capabilities', '--json']);
-      const second = await runCli(['capabilities', '--json']);
-      const capabilities = JSON.parse(first.stdout) as CapabilitiesContract;
+  it('prints a deterministic capabilities JSON contract without generatedAt', async () => {
+    const first = await runCli(['capabilities', '--json']);
+    const second = await runCli(['capabilities', '--json']);
+    const capabilities = JSON.parse(first.stdout) as CapabilitiesContract;
 
-      expect(first.stdout).toBe(second.stdout);
-      expect(first.stdout.endsWith('\n')).toBe(true);
-      expect(first.stdout).not.toContain('generatedAt');
-      expect(capabilities).toMatchObject({
-        schemaVersion: '0.1.0',
-        generator: {
-          packageName: 'llm-docs-generator',
-          packageVersion: '1.0.0',
-          cliName: 'supabase-llm-docs',
-          binary: 'llm-docs',
-        },
-      });
-    },
-    15000
-  );
+    expect(first.stdout).toBe(second.stdout);
+    expect(first.stdout.endsWith('\n')).toBe(true);
+    expect(first.stdout).not.toContain('generatedAt');
+    expect(capabilities).toMatchObject({
+      schemaVersion: '0.1.0',
+      generator: {
+        packageName: 'llm-docs-generator',
+        packageVersion: '1.0.0',
+        cliName: 'supabase-llm-docs',
+        binary: 'llm-docs',
+      },
+    });
+  }, 15000);
 
   it('separates implemented capabilities from planned or unsupported capabilities', async () => {
     const { stdout } = await runCli(['capabilities', '--json']);
@@ -909,13 +937,13 @@ describe('CLI compatibility behavior', () => {
       'source-truth-inspect',
       'source-truth-generate',
       'agent-context',
+      'generate-source',
       'generate-sdk',
       'verify-configured-sdk',
       'list-sdks',
       'validate-sdk',
     ]);
     expect([...planned.keys()]).toEqual([
-      'generate-source',
       'generate-preset',
       'refresh',
       'source-code-verification',
@@ -926,9 +954,9 @@ describe('CLI compatibility behavior', () => {
       'agent-install-codex',
       'agent-doctor',
     ]);
-    expect(capabilities.implemented.every((capability) => capability.status === 'implemented')).toBe(
-      true
-    );
+    expect(
+      capabilities.implemented.every((capability) => capability.status === 'implemented')
+    ).toBe(true);
     expect(
       capabilities.plannedUnsupported.every(
         (capability) => capability.status === 'planned-unsupported'
@@ -953,6 +981,24 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('agent-context')?.inputBoundary).toBe(
       'packaged context and skill files only'
     );
+    expect(implemented.get('generate-source')?.outputFiles).toEqual([
+      'manifest.json',
+      'llm-docs/*-llms.txt',
+    ]);
+    expect(implemented.get('generate-source')?.options).toEqual([
+      '--source <path>',
+      '--format auto|markdown|mdx|openapi|openref|rst|html',
+    ]);
+    expect(implemented.get('generate-source')?.limitations).toEqual(
+      expect.arrayContaining([
+        'local files and directories only',
+        'no URL fetching',
+        'no discovery report consumption',
+        'no candidate auto-selection',
+        'no preset generation',
+        'no source selection decision',
+      ])
+    );
     expect(implemented.get('generate-sdk')?.outputFiles).toEqual([
       'manifest.json',
       'parsed/<sdk>-<resolved-version>-spec.json',
@@ -964,19 +1010,11 @@ describe('CLI compatibility behavior', () => {
       '--format openref|openref-0.1',
     ]);
     expect(implemented.get('generate-sdk')?.limitations).toContain('no preset generation');
-    expect(planned.get('generate-source')?.reason).toBe(
-      'top-level general generate --source is not implemented; explicit local source evidence generation is available only through source-truth generate --source --output-dir'
-    );
-    expect(planned.get('generate-source')?.reason).toContain(
-      'source-truth generate --source --output-dir'
-    );
-    expect(planned.get('generate-source')?.reason).not.toContain(
-      'no current CLI generation workflow consumes explicit sources'
-    );
+    expect(planned.has('generate-source')).toBe(false);
     expect(planned.get('generate-preset')?.reason).toBe(
-      'preset generation is not implemented; the current generate command only supports configured OpenRef SDK generation through generate --sdk'
+      'preset generation is not implemented; the current generate command supports explicit local source generation and configured OpenRef SDK generation only'
     );
-    expect([...implemented.values()].map((capability) => capability.mode)).not.toContain(
+    expect([...implemented.values()].map((capability) => capability.mode)).toContain(
       'generate --source'
     );
     expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
@@ -988,9 +1026,7 @@ describe('CLI compatibility behavior', () => {
     expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
       'agent doctor'
     );
-    expect(planned.get('agent-install-codex')?.reason).toContain(
-      'no current CLI skill installer'
-    );
+    expect(planned.get('agent-install-codex')?.reason).toContain('no current CLI skill installer');
     expect(planned.get('agent-doctor')?.reason).toContain('no current CLI host diagnostics');
   });
 
@@ -1060,8 +1096,8 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 10');
-    expect(stdout).toContain('Planned or unsupported modes: 10');
+    expect(stdout).toContain('Implemented modes: 11');
+    expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
 
@@ -1586,9 +1622,12 @@ describe('CLI compatibility behavior', () => {
     const sourceDir = join(dir, 'source');
     const outputDir = join(dir, 'out');
     await mkdir(join(sourceDir, 'tests'), { recursive: true });
-    const testSource = ['it("keeps evidence path-only", () => {', '  expect(true).toBe(true);', '});', ''].join(
-      '\n'
-    );
+    const testSource = [
+      'it("keeps evidence path-only", () => {',
+      '  expect(true).toBe(true);',
+      '});',
+      '',
+    ].join('\n');
     await writeFile(join(sourceDir, 'tests/path.spec.ts'), testSource, 'utf-8');
 
     const { stdout, stderr } = await runCli([
@@ -3163,9 +3202,7 @@ describe('CLI compatibility behavior', () => {
       join(outputDir, 'swift/v2/llm-docs/supabase-swift-v2-database-llms.txt'),
       'utf-8'
     );
-    expect(moduleDoc).toContain(
-      '<SYSTEM>Database operations for Supabase Swift SDK v2.</SYSTEM>'
-    );
+    expect(moduleDoc).toContain('<SYSTEM>Database operations for Supabase Swift SDK v2.</SYSTEM>');
     expect(moduleDoc).toContain('# Supabase Swift SDK v2 Database Documentation');
     expect(moduleDoc).toContain('Database operations');
     expect(moduleDoc).toContain('# 1. Select data');
@@ -3275,6 +3312,240 @@ describe('CLI compatibility behavior', () => {
     }
   );
 
+  it('generates local Markdown and MDX directory source docs with manifest provenance', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-dir-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'docs-source');
+    const outsideLinkedDoc = join(dir, 'outside-linked.md');
+    const outputDir = join(dir, 'output');
+
+    await mkdir(join(sourceDir, 'guides'), { recursive: true });
+    await writeFile(
+      join(sourceDir, 'index.md'),
+      ['# Project Docs', '', 'Intro text.', '', '## Install', '', 'Run setup.', ''].join('\n'),
+      'utf-8'
+    );
+    await writeFile(
+      join(sourceDir, 'guides', 'usage.mdx'),
+      [
+        "import { Note } from './Note'",
+        '',
+        '# Usage Guide',
+        '',
+        '<Note>Use the public API.</Note>',
+        '',
+        '## Example',
+        '',
+        '```tsx',
+        'export const example = <Widget />',
+        '```',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    await writeFile(join(sourceDir, 'ignored.txt'), '# Not parsed\n', 'utf-8');
+    await writeFile(outsideLinkedDoc, '# Linked Secret\n\nThis must not be parsed.\n', 'utf-8');
+    await symlink(outsideLinkedDoc, join(sourceDir, 'linked.md'), 'file');
+
+    const { stdout } = await runCli(['generate', '--source', sourceDir, '--output-dir', outputDir]);
+
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifestText = await readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(manifestText) as SourceDocsManifest;
+    const outputPaths = manifest.generatedOutputs.map((output) => output.path);
+
+    expect(stdout).toContain('Local source docs generated');
+    expect(stdout).toContain('Format: markdown');
+    expect(manifestText.endsWith('\n')).toBe(true);
+    expect(new Date(manifest.generatedAt).toISOString()).toBe(manifest.generatedAt);
+    expect(manifest).toMatchObject({
+      schemaVersion: '0.1.0',
+      generator: {
+        name: 'llm-docs-generator',
+        version: '1.0.0',
+        cliName: 'supabase-llm-docs',
+      },
+      mode: 'local-source-docs',
+      source: {
+        input: sourceDir,
+        resolvedPath: sourceDir,
+        type: 'directory',
+        formatHint: 'auto',
+        resolvedFormat: 'markdown',
+        fileCount: 2,
+      },
+      parser: {
+        name: 'Markdown Parser',
+        version: '1.0.0',
+        format: 'markdown',
+      },
+      formatter: {
+        name: 'UniversalFormatter',
+        version: '1.0.0',
+        format: 'universal-llm-docs',
+      },
+    });
+    expect(manifest.source.aggregateHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(manifest.sourceFiles.map((file) => file.path)).toEqual(['guides/usage.mdx', 'index.md']);
+    expect(manifest.warnings).toContain('Skipped symlinked source entry: linked.md');
+    expect(manifest.sourceFiles.map((file) => file.hash)).toEqual([
+      await sha256File(join(sourceDir, 'guides', 'usage.mdx')),
+      await sha256File(join(sourceDir, 'index.md')),
+    ]);
+    expect(manifest.sourceFiles.map((file) => file.byteSize)).toEqual([
+      await byteSize(join(sourceDir, 'guides', 'usage.mdx')),
+      await byteSize(join(sourceDir, 'index.md')),
+    ]);
+    expect(outputPaths).toEqual(['llm-docs/docs-source-full-llms.txt']);
+
+    const fullDocPath = join(outputDir, outputPaths[0] ?? '');
+    const fullDoc = await readFile(fullDocPath, 'utf-8');
+    expect(fullDoc).toContain('# docs-source');
+    expect(fullDoc).toContain('Project Docs');
+    expect(fullDoc).toContain('Usage Guide');
+    expect(fullDoc).toContain('export const example = <Widget />');
+    expect(fullDoc).not.toContain("import { Note } from './Note'");
+    expect(fullDoc).not.toContain('Linked Secret');
+    expect(fullDoc).not.toContain('<!-- Format: markdown');
+
+    for (const output of manifest.generatedOutputs) {
+      expect(isAbsolute(output.path)).toBe(false);
+      expect(output.path.startsWith('..')).toBe(false);
+      expect(output.path.includes('\\')).toBe(false);
+      expect(output.kind).toBe('llm-docs');
+
+      const actualPath = join(outputDir, output.path);
+      const text = await readFile(actualPath, 'utf-8');
+      expect(output.byteSize).toBe(await byteSize(actualPath));
+      expect(output.hash).toBe(await sha256File(actualPath));
+      expect(output.lineCount).toBe(countTextLines(text));
+      expect(output.estimatedTokenCount).toBe(estimateTextTokens(text));
+    }
+  });
+
+  it('rejects mixed-format directory source auto-detection before output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-mixed-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'docs-source');
+    const outputDir = join(dir, 'output');
+
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.md'), '# Markdown Docs\n', 'utf-8');
+    await writeFile(
+      join(sourceDir, 'page.html'),
+      '<!doctype html><html><body><h1>HTML Docs</h1></body></html>\n',
+      'utf-8'
+    );
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Directory auto-detection for generate --source is ambiguous');
+    expect(result.stderr).toContain('Specify --format markdown, rst, or html');
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('uses an explicit markdown format hint for a local file that auto-detection cannot classify', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-hint-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'Guide Notes.txt');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(
+      sourcePath,
+      [
+        '# Guide Notes',
+        '',
+        'Plain markdown in a text file.',
+        '',
+        '## Steps',
+        '',
+        'Run it.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const { stdout } = await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifest = JSON.parse(
+      await readFile(join(outputDir, 'manifest.json'), 'utf-8')
+    ) as SourceDocsManifest;
+
+    expect(stdout).toContain('Local source docs generated');
+    expect(manifest.source).toMatchObject({
+      input: sourcePath,
+      resolvedPath: sourcePath,
+      type: 'file',
+      formatHint: 'markdown',
+      resolvedFormat: 'markdown',
+      byteSize: await byteSize(sourcePath),
+      hash: await sha256File(sourcePath),
+    });
+    expect(manifest.sourceFiles).toHaveLength(1);
+    expect(manifest.sourceFiles[0]).toMatchObject({
+      path: 'Guide Notes.txt',
+      resolvedPath: sourcePath,
+      byteSize: await byteSize(sourcePath),
+      hash: await sha256File(sourcePath),
+    });
+    expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'llm-docs/guide-notes-full-llms.txt',
+    ]);
+  });
+
+  it('auto-detects static HTML source generation without fetching linked resources', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-html-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'page.html');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<html><head><title>HTML Docs</title><script src="https://example.com/app.js"></script></head>',
+        '<body><h1>HTML Docs</h1><h2>Overview</h2><p>Static content only.</p></body></html>',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const { stdout } = await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--output-dir',
+      outputDir,
+    ]);
+    const manifest = JSON.parse(
+      await readFile(join(outputDir, 'manifest.json'), 'utf-8')
+    ) as SourceDocsManifest;
+    const fullDoc = await readFile(join(outputDir, 'llm-docs/page-full-llms.txt'), 'utf-8');
+
+    expect(stdout).toContain('Format: html');
+    expect(manifest.source.formatHint).toBe('auto');
+    expect(manifest.source.resolvedFormat).toBe('html');
+    expect(manifest.parser.name).toBe('Static HTML Parser');
+    expect(fullDoc).toContain('Static content only.');
+    expect(fullDoc).not.toContain('https://example.com/app.js');
+  });
+
   it('rejects unsupported generate --format values before configured SDK generation', async () => {
     const configDir = await createTestConfig();
     const outputDir = join(configDir, 'output');
@@ -3298,11 +3569,9 @@ describe('CLI compatibility behavior', () => {
       'Generate failed: --format markdown is not supported for configured generate --sdk'
     );
     expect(result.stderr).toContain(
-      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+      'Supported generation modes: generate --source <local-file-or-directory>'
     );
-    expect(result.stderr).toContain(
-      'source-truth generate --source <path> --output-dir <dir>'
-    );
+    expect(result.stderr).toContain('Preset generation remains planned/unsupported');
     expect(result.stdout).not.toContain('Processing');
     expect(await pathExists(outputDir)).toBe(false);
     expect(await findManifestFiles(configDir)).toEqual([]);
@@ -3326,14 +3595,12 @@ describe('CLI compatibility behavior', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      'Generate failed: generate requires --sdk for the current configured OpenRef SDK path.'
+      'Generate failed: generate requires exactly one of --source or --sdk.'
     );
     expect(result.stderr).toContain(
-      'Current supported generation mode: generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+      'Supported generation modes: generate --source <local-file-or-directory>'
     );
-    expect(result.stderr).toContain(
-      'General generate --source and preset generation are planned/unsupported in the current CLI.'
-    );
+    expect(result.stderr).toContain('generate --sdk <sdk>');
     expect(result.stderr).not.toContain('Fatal error');
     expect(result.stderr).not.toContain(configDir);
     expect(result.stdout).not.toContain('Processing');
@@ -3361,10 +3628,10 @@ describe('CLI compatibility behavior', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      'Generate failed: generate requires --sdk for the current configured OpenRef SDK path.'
+      'Generate failed: generate requires exactly one of --source or --sdk.'
     );
     expect(result.stderr).toContain(
-      'Current supported generation mode: generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+      'Supported generation modes: generate --source <local-file-or-directory>'
     );
     expect(result.stderr).not.toContain('Fatal error');
     expect(result.stderr).not.toContain(configDir);
@@ -3389,10 +3656,10 @@ describe('CLI compatibility behavior', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      'Generate failed: generate requires --sdk for the current configured OpenRef SDK path.'
+      'Generate failed: generate requires exactly one of --source or --sdk.'
     );
     expect(result.stderr).toContain(
-      'Current supported generation mode: generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+      'Supported generation modes: generate --source <local-file-or-directory>'
     );
     expect(result.stderr).not.toContain('Fatal error');
     expect(result.stderr).not.toContain(configDir);
@@ -3415,12 +3682,11 @@ describe('CLI compatibility behavior', () => {
     ]);
 
     expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Generate failed: generate --preset is not implemented.');
     expect(result.stderr).toContain(
-      'Generate failed: generate --preset is not implemented for the current configured SDK path.'
+      'Preset generation remains planned/unsupported in the current CLI.'
     );
-    expect(result.stderr).toContain(
-      'General generate --source and preset generation are planned/unsupported in the current CLI.'
-    );
+    expect(result.stderr).toContain('generate --source <local-file-or-directory>');
     expect(result.stderr).toContain('generate --sdk <sdk>');
     expect(result.stdout).not.toContain('Processing');
     expect(await pathExists(outputDir)).toBe(false);
@@ -3447,11 +3713,9 @@ describe('CLI compatibility behavior', () => {
     ]);
 
     expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Generate failed: generate --preset is not implemented.');
     expect(result.stderr).toContain(
-      'Generate failed: generate --preset is not implemented for the current configured SDK path.'
-    );
-    expect(result.stderr).toContain(
-      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+      'Preset generation remains planned/unsupported in the current CLI.'
     );
     expect(result.stderr).not.toContain('Fatal error');
     expect(result.stderr).not.toContain(configDir);
@@ -3460,15 +3724,97 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(configDir)).toBe(false);
   });
 
-  it('rejects top-level generate --source without implying source generation is implemented', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-'));
+  it('rejects generate --source plus --sdk before config or output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-sdk-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'docs.md');
+    const configDir = join(dir, 'missing-config');
+    const outputDir = join(dir, 'output');
+    await writeFile(sourcePath, '# Docs\n', 'utf-8');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourcePath,
+      '--sdk',
+      'swift',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate --source and --sdk are mutually exclusive.'
+    );
+    expect(result.stderr).not.toContain(configDir);
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
+    expect(await pathExists(configDir)).toBe(false);
+  });
+
+  it('rejects unsupported source-mode formats before output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-format-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'docs.md');
+    const outputDir = join(dir, 'output');
+    await writeFile(sourcePath, '# Docs\n', 'utf-8');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'asciidoc',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: --format asciidoc is not supported for generate --source'
+    );
+    expect(result.stderr).toContain(
+      'supported source formats are auto, markdown, mdx, openapi, openref, rst, html'
+    );
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects URL-like generate --source inputs without fetching network resources', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-url-'));
     tempDirs.push(dir);
     const outputDir = join(dir, 'output');
 
     const result = await runCliWithExit([
       'generate',
       '--source',
-      './docs',
+      'https://example.com/docs',
+      '--format',
+      'html',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate --source accepts explicit local file or directory paths only'
+    );
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects missing generate --source paths without writing a manifest', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-missing-'));
+    tempDirs.push(dir);
+    const missingPath = join(dir, 'missing.md');
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      missingPath,
       '--format',
       'markdown',
       '--output-dir',
@@ -3477,16 +3823,324 @@ describe('CLI compatibility behavior', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      'Generate failed: top-level general generate --source is not implemented.'
+      `Generate failed: generate --source path not found: ${missingPath}`
     );
-    expect(result.stderr).toContain(
-      'General generate --source and preset generation are planned/unsupported in the current CLI.'
-    );
-    expect(result.stderr).toContain(
-      'source-truth generate --source <path> --output-dir <dir>'
-    );
-    expect(result.stdout).not.toContain('Processing');
+    expect(result.stdout).not.toContain('Local source docs generated');
     expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('removes stale source docs artifacts after early source-mode validation failures', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-early-stale-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'docs.md');
+    const missingPath = join(dir, 'missing.md');
+    const missingOutputDir = join(dir, 'missing-output');
+    const unsupportedFormatOutputDir = join(dir, 'unsupported-format-output');
+
+    await writeFile(sourcePath, '# Docs\n\n## Intro\n\nHello.\n', 'utf-8');
+
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      missingOutputDir,
+    ]);
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      unsupportedFormatOutputDir,
+    ]);
+
+    expect(await pathExists(join(missingOutputDir, 'manifest.json'))).toBe(true);
+    expect(await pathExists(join(missingOutputDir, 'llm-docs'))).toBe(true);
+    expect(await pathExists(join(unsupportedFormatOutputDir, 'manifest.json'))).toBe(true);
+    expect(await pathExists(join(unsupportedFormatOutputDir, 'llm-docs'))).toBe(true);
+
+    const missingResult = await runCliWithExit([
+      'generate',
+      '--source',
+      missingPath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      missingOutputDir,
+    ]);
+    const unsupportedFormatResult = await runCliWithExit([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'asciidoc',
+      '--output-dir',
+      unsupportedFormatOutputDir,
+    ]);
+
+    expect(missingResult.exitCode).toBe(1);
+    expect(missingResult.stderr).toContain(
+      `Generate failed: generate --source path not found: ${missingPath}`
+    );
+    expect(unsupportedFormatResult.exitCode).toBe(1);
+    expect(unsupportedFormatResult.stderr).toContain(
+      'Generate failed: --format asciidoc is not supported for generate --source'
+    );
+    expect(await pathExists(join(missingOutputDir, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(missingOutputDir, 'llm-docs'))).toBe(false);
+    expect(await pathExists(join(unsupportedFormatOutputDir, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(unsupportedFormatOutputDir, 'llm-docs'))).toBe(false);
+  });
+
+  it('does not remove non-source manifests after source-mode validation failures', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-non-source-manifest-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const preservedDocPath = join(outputDir, 'llm-docs', 'keep.txt');
+    const missingPath = join(dir, 'missing.md');
+    const manifestText = `${JSON.stringify(
+      {
+        schemaVersion: '0.1.0',
+        mode: 'configured-sdk',
+      },
+      null,
+      2
+    )}\n`;
+
+    await mkdir(dirname(preservedDocPath), { recursive: true });
+    await writeFile(manifestPath, manifestText, 'utf-8');
+    await writeFile(preservedDocPath, 'keep me\n', 'utf-8');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      missingPath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      `Generate failed: generate --source path not found: ${missingPath}`
+    );
+    expect(await readFile(manifestPath, 'utf-8')).toBe(manifestText);
+    expect(await readFile(preservedDocPath, 'utf-8')).toBe('keep me\n');
+  });
+
+  it('rejects source files inside source-mode output artifacts without deleting them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-protected-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const manifestSourcePath = join(outputDir, 'manifest.json');
+    const generatedSourcePath = join(outputDir, 'llm-docs', 'input.md');
+    const manifestSourceText = '# Manifest Source\n\nDo not delete.\n';
+    const generatedSourceText = '# Generated Source\n\nDo not delete.\n';
+
+    await mkdir(dirname(generatedSourcePath), { recursive: true });
+    await writeFile(manifestSourcePath, manifestSourceText, 'utf-8');
+    await writeFile(generatedSourcePath, generatedSourceText, 'utf-8');
+
+    const manifestResult = await runCliWithExit([
+      'generate',
+      '--source',
+      manifestSourcePath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+    const generatedResult = await runCliWithExit([
+      'generate',
+      '--source',
+      generatedSourcePath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(manifestResult.exitCode).toBe(1);
+    expect(manifestResult.stderr).toContain(
+      'file input must not be the source-mode manifest path'
+    );
+    expect(generatedResult.exitCode).toBe(1);
+    expect(generatedResult.stderr).toContain(
+      'file input must not be inside the source-mode generated docs directory'
+    );
+    expect(await readFile(manifestSourcePath, 'utf-8')).toBe(manifestSourceText);
+    expect(await readFile(generatedSourcePath, 'utf-8')).toBe(generatedSourceText);
+  });
+
+  it('rejects whitespace-wrapped source files inside source-mode output artifacts without deleting them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-protected-spaces-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const manifestSourcePath = join(outputDir, 'manifest.json');
+    const generatedSourcePath = join(outputDir, 'llm-docs', 'input.md');
+    const manifestSourceText = `${JSON.stringify(
+      {
+        schemaVersion: '0.1.0',
+        mode: 'local-source-docs',
+      },
+      null,
+      2
+    )}\n`;
+    const generatedSourceText = '# Generated Source\n\nDo not delete.\n';
+
+    await mkdir(dirname(generatedSourcePath), { recursive: true });
+    await writeFile(manifestSourcePath, manifestSourceText, 'utf-8');
+    await writeFile(generatedSourcePath, generatedSourceText, 'utf-8');
+
+    const manifestResult = await runCliWithExit([
+      'generate',
+      '--source',
+      ` ${manifestSourcePath} `,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+    const generatedResult = await runCliWithExit([
+      'generate',
+      '--source',
+      ` ${generatedSourcePath} `,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(manifestResult.exitCode).toBe(1);
+    expect(manifestResult.stderr).toContain(
+      'file input must not be the source-mode manifest path'
+    );
+    expect(generatedResult.exitCode).toBe(1);
+    expect(generatedResult.stderr).toContain(
+      'file input must not be inside the source-mode generated docs directory'
+    );
+    expect(await readFile(manifestSourcePath, 'utf-8')).toBe(manifestSourceText);
+    expect(await readFile(generatedSourcePath, 'utf-8')).toBe(generatedSourceText);
+  });
+
+  it('rejects source output directories inside source before output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-inside-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'docs');
+    const outputDir = join(sourceDir, 'agent-docs');
+
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.md'), '# Docs\n', 'utf-8');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourceDir,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'generate --source --output-dir must not be the same as, or inside, the explicit --source directory'
+    );
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects discovery reports as generate --source inputs without choosing candidates', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-report-'));
+    tempDirs.push(dir);
+    const reportPath = join(dir, 'candidate-evidence.json');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(
+      reportPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          candidates: [
+            {
+              path: 'docs.md',
+              evidence: {
+                category: 'structured-doc-source',
+                signals: ['extension:md'],
+              },
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      reportPath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('discovery reports are candidate evidence for agent review');
+    expect(result.stderr).toContain('not consumed automatically');
+    expect(result.stdout).not.toContain('Processing');
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('removes stale source docs artifacts after a source generation parse failure', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-stale-'));
+    tempDirs.push(dir);
+    const goodSourcePath = join(dir, 'docs.md');
+    const badSourcePath = join(dir, 'bad-openapi.json');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(goodSourcePath, '# Docs\n\n## Intro\n\nHello.\n', 'utf-8');
+    await writeFile(
+      badSourcePath,
+      JSON.stringify({ openapi: '3.1.0', info: { title: 'Bad API' }, paths: [] }, null, 2),
+      'utf-8'
+    );
+
+    await runCli([
+      'generate',
+      '--source',
+      goodSourcePath,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(true);
+    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(true);
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      badSourcePath,
+      '--format',
+      'openapi',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('OpenAPI / Swagger document must contain a paths object');
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(false);
   });
 
   it('removes a stale manifest for failed generation tasks while continuing later tasks', async () => {
@@ -3992,13 +4646,9 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('Checked files: 0');
     expect(result.stderr).toContain('output[0].lineCount must be a non-negative integer');
-    expect(result.stderr).toContain(
-      'output[0].estimatedTokenCount must be a non-negative integer'
-    );
+    expect(result.stderr).toContain('output[0].estimatedTokenCount must be a non-negative integer');
     expect(result.stderr).toContain('output[1].lineCount must be a non-negative integer');
-    expect(result.stderr).toContain(
-      'output[1].estimatedTokenCount must be a non-negative integer'
-    );
+    expect(result.stderr).toContain('output[1].estimatedTokenCount must be a non-negative integer');
   });
 
   it('does not claim repo or source-code verification', async () => {

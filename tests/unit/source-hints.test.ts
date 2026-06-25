@@ -9,12 +9,13 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const implementedFormats = new Set(['openref', 'markdown']);
-const unsupportedCurrentCliExamples = ['llm-docs generate --source'];
+const unverifiedDirectGenerationExamples = ['llm-docs generate --source'];
 
 interface SourceHint {
+  id?: unknown;
   format?: unknown;
   hint?: unknown;
+  note?: unknown;
   status?: unknown;
   tested?: unknown;
   usage?: unknown;
@@ -30,7 +31,7 @@ async function readSourceHintCatalog(): Promise<SourceHintCatalog> {
 }
 
 describe('source hint catalog', () => {
-  it('uses hint entries instead of unsupported usage commands', async () => {
+  it('uses hint entries instead of unverified direct generation commands', async () => {
     const catalog = await readSourceHintCatalog();
 
     expect(Array.isArray(catalog.sources)).toBe(true);
@@ -39,25 +40,39 @@ describe('source hint catalog', () => {
     for (const source of catalog.sources ?? []) {
       expect(typeof source.hint).toBe('string');
       expect((source.hint as string).trim().length).toBeGreaterThan(0);
-      for (const unsupportedExample of unsupportedCurrentCliExamples) {
-        expect(source.hint as string).not.toContain(unsupportedExample);
+      for (const directGenerationExample of unverifiedDirectGenerationExamples) {
+        expect(source.hint as string).not.toContain(directGenerationExample);
       }
       expect(source).not.toHaveProperty('usage');
       expect(typeof source.tested).toBe('boolean');
     }
   });
 
-  it('keeps planned formats untested until parser and CLI support exists', async () => {
+  it('keeps planned source hints untested until the source path and workflow are validated', async () => {
     const catalog = await readSourceHintCatalog();
-    const unimplementedFormatSources = (catalog.sources ?? []).filter(
-      (source) => typeof source.format === 'string' && !implementedFormats.has(source.format)
-    );
+    const plannedSources = (catalog.sources ?? []).filter((source) => source.status === 'planned');
 
-    expect(unimplementedFormatSources.length).toBeGreaterThan(0);
+    expect(plannedSources.length).toBeGreaterThan(0);
 
-    for (const source of unimplementedFormatSources) {
-      expect(source.status).toBe('planned');
+    for (const source of plannedSources) {
       expect(source.tested).toBe(false);
+      expect(typeof source.note).toBe('string');
+      expect((source.note as string).trim().length).toBeGreaterThan(0);
     }
+  });
+
+  it('marks the Python RST hint as unvalidated for current explicit local source generation', async () => {
+    const catalog = await readSourceHintCatalog();
+    const pythonSource = (catalog.sources ?? []).find((source) => source.id === 'python-docs');
+
+    expect(pythonSource).toMatchObject({
+      format: 'restructuredtext',
+      tested: false,
+      status: 'planned',
+    });
+    expect(pythonSource?.hint).toContain(
+      'has not been validated with the current explicit local source generation workflow'
+    );
+    expect(pythonSource?.note).toContain('agent verification of repository, path, version');
   });
 });

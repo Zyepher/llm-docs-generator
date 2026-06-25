@@ -99,6 +99,7 @@ npx tsx src/cli.ts capabilities --json
 npx tsx src/cli.ts source-truth inspect --source ./src
 npx tsx src/cli.ts source-truth generate --source ./src --output-dir ./reports/source-truth
 npx tsx src/cli.ts agent context --json
+npx tsx src/cli.ts generate --source ./docs --format markdown --output-dir ./agent-docs
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
 npx tsx src/cli.ts verify --output-dir ./output/swift/v2
@@ -170,32 +171,32 @@ rejects output directories that are the source path or inside the source path.
 The source-truth docs manifest records generated output hashes, byte sizes, line
 counts, and deterministic estimated token counts.
 
-The current CLI does not yet expose general `generate --source`, refresh, or
-source verification. It writes
-`manifest.json` for successful configured `generate --sdk` tasks with generated
-output hashes, byte sizes, line counts, and deterministic estimated token
-counts. Current configured SDK `verify` checks manifest source and output file
-hashes and byte sizes, and validates optional line/token metadata shape when
-present, but does not recompute those counts yet. Markdown / MDX / DocC, RST,
-static HTML, and OpenAPI 3.x / Swagger 2.0
-parsing exist in parser modules but are not wired as current CLI generation
-commands. The Markdown parser accepts local `.md`, `.markdown`, and `.mdx`
-files and directories containing them; MDX cleanup is deterministic, preserves
-fenced code, and does not evaluate JSX or imports. The RST parser accepts local
-`.rst` files and directories containing nested `.rst` files, supports a
-documented Python-style subset, and records warnings for unsupported
-directives/includes without executing or fetching them. The HTML parser accepts
-local `.html` and `.htm` files and directories containing nested HTML files,
-strips scripts/styles/templates, never renders JavaScript or fetches links, and
-records lower-confidence rendered-HTML fallback metadata. Semantic chunking
-exists as a library API for existing DocNode IR: it emits stable semantic chunk
-records with path-derived IDs, order, source metadata, hashes, sizes, token
-estimates, split metadata, and warnings. Current CLI manifests include only
-partial generated-output line/token metadata; CLI generation, manifests, and
-discovery reports do not yet consume or publish semantic chunks. Discovery
-reports do not generate docs, choose sources, assign trust scores, infer
-authority, or claim source truth. Discovery candidates are ordered
-deterministically for agent review only.
+The current `generate --source <local-file-or-directory>` command supports
+explicit local source docs generation only. It rejects URL-like inputs, missing
+paths, discovery reports, `--source` plus `--sdk`, and all `--preset` requests.
+Its `--format` option is a parser hint supporting `auto`, `markdown`, `mdx`
+through the Markdown parser, `openapi`, `openref`, `rst`, and `html`.
+Successful source generation writes `manifest.json` at the requested output
+root and generated LLM docs under `llm-docs/`. The source manifest records the
+input path, resolved source type, format hint and resolved format, parser and
+formatter metadata, source file hashes and byte sizes, directory aggregate hash
+when applicable, generated output hashes, byte sizes, line counts,
+deterministic estimated token counts, and warnings.
+
+The current CLI still does not expose refresh or source verification. It also
+writes `manifest.json` for successful configured `generate --sdk` tasks with
+generated output hashes, byte sizes, line counts, and deterministic estimated
+token counts. Current configured SDK `verify` checks configured-SDK manifest
+source and output file hashes and byte sizes, and validates optional line/token
+metadata shape when present, but does not recompute those counts yet and does
+not verify source-mode manifests. Discovery reports do not generate docs,
+choose sources, assign trust scores, infer authority, or claim source truth.
+Discovery candidates are ordered deterministically for agent review only.
+Semantic chunking exists as a library API for existing DocNode IR: it emits
+stable semantic chunk records with path-derived IDs, order, source metadata,
+hashes, sizes, token estimates, split metadata, and warnings. Current CLI
+generation, manifests, and discovery reports do not yet consume or publish
+semantic chunks.
 
 The current CLI is implemented in:
 
@@ -293,17 +294,19 @@ agent intent/source/scope resolution
   estimated token counts for generated outputs. Current `verify` checks those
   configured SDK manifest file hashes and byte sizes, and validates optional
   line/token metadata shape when present without recomputing the counts. Local
-  bounded inspection reports are available through `discover --source`, and repo
-  cache/inspection reports are available through `discover --repo`. Bounded
-  explicit URL inspection reports are available through `discover --url`; the
-  implemented command surface is
-  available through deterministic `capabilities --json`; bounded local
-  TypeScript/JavaScript export, optional AST signature, package/config, and
-  path-based test/example context evidence reports are available through
-  `source-truth inspect --source`, and evidence-bound Markdown is available through
-  `source-truth generate --source --output-dir`. Broader crawling, refresh,
-  source-code verification, and behavior-level source documentation remain
-  planned.
+  source docs generation is available through
+  `generate --source <local-file-or-directory> --output-dir <dir>` for explicit
+  local Markdown/MDX, OpenAPI, OpenRef, RST, and static HTML inputs. Local
+  bounded inspection reports are available through `discover --source`, and
+  repo cache/inspection reports are available through `discover --repo`.
+  Bounded explicit URL inspection reports are available through `discover
+  --url`; the implemented command surface is available through deterministic
+  `capabilities --json`; bounded local TypeScript/JavaScript export, optional
+  AST signature, package/config, and path-based test/example context evidence
+  reports are available through `source-truth inspect --source`, and
+  evidence-bound Markdown is available through `source-truth generate --source
+  --output-dir`. Broader crawling, refresh, source-code verification, and
+  behavior-level source documentation remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL
