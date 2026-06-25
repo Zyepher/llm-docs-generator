@@ -58,11 +58,15 @@ export interface GenerateSourceDocsOptions {
   generator: SourceDocsGeneratorMetadata;
 }
 
-export interface SourceDocsFileManifestEntry {
+interface SourceDocsBaseFileManifestEntry {
   path: string;
   resolvedPath: string;
   byteSize: number;
   hash: string;
+}
+
+export interface SourceDocsFileManifestEntry extends SourceDocsBaseFileManifestEntry {
+  format: SourceDocsResolvedFormat;
 }
 
 export interface SourceDocsGeneratedOutput {
@@ -132,7 +136,7 @@ interface SourceFileCollection {
   warnings: string[];
 }
 
-interface BoundedSourceFile extends SourceDocsFileManifestEntry {
+interface BoundedSourceFile extends SourceDocsBaseFileManifestEntry {
   format: SourceFileFormat;
 }
 
@@ -649,11 +653,18 @@ function buildSourceDocsManifest(options: {
   resolvedFormat: SourceDocsResolvedFormat;
   parser: Parser;
   generator: SourceDocsGeneratorMetadata;
-  sourceFiles: SourceDocsFileManifestEntry[];
+  sourceFiles: BoundedSourceFile[];
   generatedOutputs: SourceDocsGeneratedOutput[];
   warnings: string[];
 }): SourceDocsManifest {
-  const sourceFile = options.source.type === 'file' ? options.sourceFiles[0] : undefined;
+  const sourceFiles: SourceDocsFileManifestEntry[] = options.sourceFiles.map((file) => ({
+    path: file.path,
+    resolvedPath: file.resolvedPath,
+    byteSize: file.byteSize,
+    hash: file.hash,
+    format: options.resolvedFormat,
+  }));
+  const sourceFile = options.source.type === 'file' ? sourceFiles[0] : undefined;
 
   return {
     schemaVersion: SOURCE_DOCS_SCHEMA_VERSION,
@@ -668,15 +679,15 @@ function buildSourceDocsManifest(options: {
       resolvedFormat: options.resolvedFormat,
       ...(sourceFile === undefined
         ? {
-            fileCount: options.sourceFiles.length,
-            aggregateHash: aggregateSourceFilesHash(options.sourceFiles),
+            fileCount: sourceFiles.length,
+            aggregateHash: aggregateSourceFilesHash(sourceFiles),
           }
         : {
             byteSize: sourceFile.byteSize,
             hash: sourceFile.hash,
           }),
     },
-    sourceFiles: options.sourceFiles,
+    sourceFiles,
     parser: {
       name: options.parser.name,
       version: options.generator.version,
