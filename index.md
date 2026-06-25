@@ -127,17 +127,19 @@ The current `source-truth inspect --source` command accepts one explicit local
 file or directory and prints a deterministic JSON evidence report to stdout. It
 uses bounded traversal, skips common dependency/build directories, does not
 follow symlinks, records hashes for inspected supported files, and extracts
-conservative top-level TypeScript/JavaScript export facts with normalized source
-paths and line ranges. It does not verify claims, infer runtime behavior,
-decide task fit, summarize behavior, or select authoritative sources.
+conservative top-level TypeScript/JavaScript export facts plus `package.json`
+and `tsconfig*.json` package/config facts with normalized source paths and line
+ranges. It does not verify claims, infer runtime behavior, infer framework
+identity, decide task fit, summarize behavior, or select authoritative sources.
 
 The current `source-truth generate --source --output-dir` command accepts one
 explicit local file or directory, reuses the source-truth inspector, and writes
 `source-truth-report.json`, `source-truth.md`, and `manifest.json`. The Markdown
-contains only observed export facts grouped by normalized source file. If no
-facts are extractable, the command exits non-zero and writes `failure.json`
-referencing the raw evidence report instead of Markdown. It rejects output
-directories that are the source path or inside the source path.
+contains observed export facts and package/config facts grouped by normalized
+source file. If no export or package/config facts are extractable, the command
+exits non-zero and writes `failure.json` referencing the raw evidence report
+instead of Markdown. It rejects output directories that are the source path or
+inside the source path.
 
 The current CLI does not yet expose general `generate --source`, refresh, or
 source verification. It writes
@@ -259,10 +261,11 @@ agent intent/source/scope resolution
   available through `discover --source`, and repo cache/inspection reports are
   available through `discover --repo`. Bounded explicit URL inspection reports
   are available through `discover --url`; bounded local TypeScript/JavaScript
-  export evidence reports are available through `source-truth inspect --source`,
-  and evidence-bound export-facts Markdown is available through `source-truth
-  generate --source --output-dir`. Broader crawling, refresh, source-code
-  verification, and behavior-level source documentation remain planned.
+  export and package/config evidence reports are available through
+  `source-truth inspect --source`, and evidence-bound Markdown is available
+  through `source-truth generate --source --output-dir`. Broader crawling,
+  refresh, source-code verification, and behavior-level source documentation
+  remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL

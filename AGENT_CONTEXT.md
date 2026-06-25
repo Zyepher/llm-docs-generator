@@ -94,16 +94,17 @@ Current implementation:
   explicit local source path and print a deterministic JSON evidence report to
   stdout. The report uses bounded traversal, does not follow symlinks, skips
   dependency/build directories, records supported file hashes, warnings, and
-  conservative TypeScript/JavaScript export facts with source file and line
-  ranges. It does not verify claims, infer behavior, decide authority, or
-  choose task fit.
+  conservative TypeScript/JavaScript export facts plus `package.json` and
+  `tsconfig*.json` package/config facts with source file and line ranges. It
+  does not verify claims, infer behavior, infer framework identity, decide
+  authority, or choose task fit.
 - Can run `source-truth generate --source <local-file-or-directory>
-  --output-dir <dir>` to write an evidence-bound Markdown export-facts file,
-  the raw evidence report, and a manifest. The command reuses
-  `inspectSourceTruth`, accepts only an explicit local source path, and fails
-  with `failure.json` referencing `source-truth-report.json` when no
-  extractable export facts are found. It rejects output directories that are
-  the source path or inside the source path.
+  --output-dir <dir>` to write an evidence-bound Markdown file, the raw
+  evidence report, and a manifest. The command reuses `inspectSourceTruth`,
+  accepts only an explicit local source path, and fails with `failure.json`
+  referencing `source-truth-report.json` when no extractable export or
+  package/config facts are found. It rejects output directories that are the
+  source path or inside the source path.
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`, `generate --sdk`, `verify`,
   `list-sdks`, and `validate --sdk`.
@@ -247,11 +248,11 @@ Agent workflow:
    code when the user asks for source-truth codebase docs.
 5. If the agent has resolved an explicit local source path, it may run
    `llm-docs source-truth inspect --source <path>` to obtain bounded factual
-   TypeScript/JavaScript export evidence for review.
+   TypeScript/JavaScript export and package/config evidence for review.
 6. If explicit source-truth codebase docs are requested, run
    `llm-docs source-truth generate --source <path> --output-dir <dir>` to
-   generate conservative export-facts Markdown and provenance files from the
-   inspected implementation source files.
+   generate conservative evidence Markdown and provenance files from the
+   inspected implementation and config files.
 7. Feed inspected structured facts into the LLM-friendly formatter.
 8. Write provenance with repo URL, commit/tag, source files analyzed, and
    confidence warnings.
@@ -260,10 +261,11 @@ Important current-state rule:
 
 Do not claim this project can generate accurate or behavior-complete docs from
 code. `source-truth inspect` extracts conservative TypeScript/JavaScript export
-facts from an explicit local source path. `source-truth generate` formats only
-those observed facts into Markdown and provenance files. These modes do not
-verify claims, summarize runtime behavior, decide authority, choose task fit, or
-resolve re-export targets.
+facts and `package.json` / `tsconfig*.json` package/config facts from an
+explicit local source path. `source-truth generate` formats only those observed
+facts into Markdown and provenance files. These modes do not verify claims,
+summarize runtime behavior, infer framework identity, decide authority, choose
+task fit, or resolve re-export targets.
 
 ### Intent 4: Refresh Or Verify Existing Generated Docs
 
@@ -517,8 +519,9 @@ Do not ask when:
 - Do not generate from a top or first ordered candidate unless the user or
   agent has explicitly selected that candidate or a documented automation flag
   requires it.
-- Do not claim source-truth codebase docs go beyond observed export facts unless
-  the implementation actually inspects and proves that broader evidence.
+- Do not claim source-truth codebase docs go beyond observed export and
+  package/config facts unless the implementation actually inspects and proves
+  that broader evidence.
 - Do not mark official docs as source-verified unless implementation files were
   actually inspected.
 - Do not mix unrelated products or SDKs from a monorepo into one output.

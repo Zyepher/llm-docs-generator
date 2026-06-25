@@ -40,7 +40,7 @@ describe('source-truth inspection', () => {
       '  value: string;',
       '}',
       'export type Alias = Options;',
-      "export { makeAlpha as renamedAlpha };",
+      'export { makeAlpha as renamedAlpha };',
       "export * from './beta';",
       '',
     ].join('\n');
@@ -90,13 +90,15 @@ describe('source-truth inspection', () => {
       byteSize: Buffer.byteLength(betaSource),
       sha256: sha256(betaSource),
     });
-    expect(report.facts.map(({ kind, symbolKind, name, exportedName, moduleSpecifier }) => ({
-      kind,
-      symbolKind,
-      name,
-      exportedName,
-      moduleSpecifier,
-    }))).toEqual([
+    expect(
+      report.facts.map(({ kind, symbolKind, name, exportedName, moduleSpecifier }) => ({
+        kind,
+        symbolKind,
+        name,
+        exportedName,
+        moduleSpecifier,
+      }))
+    ).toEqual([
       {
         kind: 'exported-symbol',
         symbolKind: 'value',
@@ -177,13 +179,15 @@ describe('source-truth inspection', () => {
 
     const report = await inspectSourceTruth({ source: sourceDir, maxFileBytes: 20 });
 
-    expect(report.files.map((file) => ({
-      path: file.path,
-      status: file.status,
-      supported: file.supported,
-      skipReason: file.skipReason,
-      facts: file.facts.length,
-    }))).toEqual([
+    expect(
+      report.files.map((file) => ({
+        path: file.path,
+        status: file.status,
+        supported: file.supported,
+        skipReason: file.skipReason,
+        facts: file.facts.length,
+      }))
+    ).toEqual([
       {
         path: 'large.ts',
         status: 'skipped',
@@ -218,6 +222,554 @@ describe('source-truth inspection', () => {
       'Skipped oversized file: small.js (27 bytes)',
     ]);
     expect(report.files.every((file) => file.sha256 === undefined)).toBe(true);
+  });
+
+  it('extracts conservative package manifest evidence with field provenance', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-package-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    const packageJson = [
+      '{',
+      '  "name": "@scope/example",',
+      '  "version": "1.2.3",',
+      '  "type": "module",',
+      '  "packageManager": "npm@10.0.0",',
+      '  "bin": {',
+      '    "example": "./dist/cli.js",',
+      '    "z-tool": "./dist/z.js"',
+      '  },',
+      '  "exports": {',
+      '    ".": "./dist/index.js",',
+      '    "./cli": "./dist/cli.js"',
+      '  },',
+      '  "scripts": {',
+      '    "build": "tsc",',
+      '    "test": "vitest"',
+      '  },',
+      '  "dependencies": {',
+      '    "react": "^18.0.0"',
+      '  },',
+      '  "devDependencies": {',
+      '    "typescript": "^5.0.0"',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'package.json'), packageJson, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(report.files.map((file) => file.path)).toEqual(['package.json']);
+    expect(report.files[0]).toMatchObject({
+      path: 'package.json',
+      status: 'inspected',
+      supported: true,
+      facts: [],
+      configFacts: expect.any(Array),
+      sha256: sha256(packageJson),
+    });
+    expect(
+      report.configFacts.map(({ kind, name, value, group, fieldPath, lineRangeGranularity }) => ({
+        kind,
+        name,
+        value,
+        group,
+        fieldPath,
+        lineRangeGranularity,
+      }))
+    ).toEqual([
+      {
+        kind: 'package-name',
+        name: 'name',
+        value: '@scope/example',
+        group: undefined,
+        fieldPath: 'name',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-version',
+        name: 'version',
+        value: '1.2.3',
+        group: undefined,
+        fieldPath: 'version',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-type',
+        name: 'type',
+        value: 'module',
+        group: undefined,
+        fieldPath: 'type',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-manager',
+        name: 'packageManager',
+        value: 'npm@10.0.0',
+        group: undefined,
+        fieldPath: 'packageManager',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-bin-name',
+        name: 'example',
+        value: undefined,
+        group: undefined,
+        fieldPath: 'bin.example',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-bin-name',
+        name: 'z-tool',
+        value: undefined,
+        group: undefined,
+        fieldPath: 'bin["z-tool"]',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-export-key',
+        name: '.',
+        value: undefined,
+        group: undefined,
+        fieldPath: 'exports["."]',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-export-key',
+        name: './cli',
+        value: undefined,
+        group: undefined,
+        fieldPath: 'exports["./cli"]',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-script-name',
+        name: 'build',
+        value: undefined,
+        group: undefined,
+        fieldPath: 'scripts.build',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-script-name',
+        name: 'test',
+        value: undefined,
+        group: undefined,
+        fieldPath: 'scripts.test',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-dependency-name',
+        name: 'react',
+        value: undefined,
+        group: 'dependencies',
+        fieldPath: 'dependencies.react',
+        lineRangeGranularity: 'field',
+      },
+      {
+        kind: 'package-dependency-name',
+        name: 'typescript',
+        value: undefined,
+        group: 'devDependencies',
+        fieldPath: 'devDependencies.typescript',
+        lineRangeGranularity: 'field',
+      },
+    ]);
+    expect(report.configFacts.map((fact) => fact.order)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]);
+    expect(report.configFacts.every((fact) => fact.provenance.path === 'package.json')).toBe(true);
+    expect(report.configFacts[0]?.provenance.lineRange).toEqual({ start: 2, end: 2 });
+  });
+
+  it('does not derive a bin name from string-form package bin', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-package-string-bin-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    const packageJson = [
+      '{',
+      '  "name": "string-bin-package",',
+      '  "version": "1.0.0",',
+      '  "bin": "./dist/cli.js"',
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'package.json'), packageJson, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(report.configFacts.map((fact) => fact.kind)).toEqual([
+      'package-name',
+      'package-version',
+    ]);
+    expect(report.configFacts.some((fact) => fact.kind === 'package-bin-name')).toBe(false);
+  });
+
+  it('emits package object keys even when sibling values are non-string or nested', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-package-mixed-objects-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    const packageJson = [
+      '{',
+      '  "bin": {',
+      '    "cli": "./dist/cli.js",',
+      '    "nested": { "target": "./dist/nested.js" }',
+      '  },',
+      '  "scripts": {',
+      '    "build": "tsc",',
+      '    "metadata": { "command": "not a script string" }',
+      '  },',
+      '  "dependencies": {',
+      '    "actual": "^1.0.0",',
+      '    "workspace": { "path": "../workspace" }',
+      '  },',
+      '  "devDependencies": {',
+      '    "typed": false',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'package.json'), packageJson, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(
+      report.configFacts.map(({ kind, name, group, fieldPath, provenance }) => ({
+        kind,
+        name,
+        group,
+        fieldPath,
+        lineRange: provenance.lineRange,
+      }))
+    ).toEqual([
+      {
+        kind: 'package-bin-name',
+        name: 'cli',
+        group: undefined,
+        fieldPath: 'bin.cli',
+        lineRange: { start: 3, end: 3 },
+      },
+      {
+        kind: 'package-bin-name',
+        name: 'nested',
+        group: undefined,
+        fieldPath: 'bin.nested',
+        lineRange: { start: 4, end: 4 },
+      },
+      {
+        kind: 'package-script-name',
+        name: 'build',
+        group: undefined,
+        fieldPath: 'scripts.build',
+        lineRange: { start: 7, end: 7 },
+      },
+      {
+        kind: 'package-script-name',
+        name: 'metadata',
+        group: undefined,
+        fieldPath: 'scripts.metadata',
+        lineRange: { start: 8, end: 8 },
+      },
+      {
+        kind: 'package-dependency-name',
+        name: 'actual',
+        group: 'dependencies',
+        fieldPath: 'dependencies.actual',
+        lineRange: { start: 11, end: 11 },
+      },
+      {
+        kind: 'package-dependency-name',
+        name: 'workspace',
+        group: 'dependencies',
+        fieldPath: 'dependencies.workspace',
+        lineRange: { start: 12, end: 12 },
+      },
+      {
+        kind: 'package-dependency-name',
+        name: 'typed',
+        group: 'devDependencies',
+        fieldPath: 'devDependencies.typed',
+        lineRange: { start: 15, end: 15 },
+      },
+    ]);
+  });
+
+  it('uses later duplicate JSON keys for effective config fact provenance', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-config-duplicate-keys-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    const packageJson = [
+      '{',
+      '  "name": "early-name",',
+      '  "name": "late-name",',
+      '  "scripts": { "build": "early" },',
+      '  "scripts": { "build": "late" }',
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'package.json'), packageJson, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const nameFact = report.configFacts.find((fact) => fact.kind === 'package-name');
+    const buildFact = report.configFacts.find((fact) => fact.kind === 'package-script-name');
+
+    expect(nameFact).toMatchObject({
+      value: 'late-name',
+      provenance: {
+        lineRange: { start: 3, end: 3 },
+      },
+      lineRangeGranularity: 'field',
+    });
+    expect(buildFact).toMatchObject({
+      name: 'build',
+      provenance: {
+        lineRange: { start: 5, end: 5 },
+      },
+      lineRangeGranularity: 'field',
+    });
+  });
+
+  it('extracts tsconfig evidence without inferring runtime or framework behavior', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-tsconfig-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    const tsconfigJson = [
+      '{',
+      '  // JSONC comments are accepted by TypeScript config parsing.',
+      '  "extends": "./tsconfig.base.json",',
+      '  "compilerOptions": {',
+      '    "module": "NodeNext",',
+      '    "strict": true',
+      '  },',
+      '  "include": [',
+      '    "src/**/*.ts",',
+      '    "tests/**/*.ts"',
+      '  ],',
+      '  "exclude": ["dist"],',
+      '  "files": ["src/index.ts"]',
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'tsconfig.build.json'), tsconfigJson, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(report.facts).toEqual([]);
+    expect(
+      report.configFacts.map(({ kind, name, value, group, fieldPath }) => ({
+        kind,
+        name,
+        value,
+        group,
+        fieldPath,
+      }))
+    ).toEqual([
+      {
+        kind: 'tsconfig-extends',
+        name: 'extends',
+        value: './tsconfig.base.json',
+        group: undefined,
+        fieldPath: 'extends',
+      },
+      {
+        kind: 'tsconfig-compiler-option',
+        name: 'module',
+        value: undefined,
+        group: undefined,
+        fieldPath: 'compilerOptions.module',
+      },
+      {
+        kind: 'tsconfig-compiler-option',
+        name: 'strict',
+        value: undefined,
+        group: undefined,
+        fieldPath: 'compilerOptions.strict',
+      },
+      {
+        kind: 'tsconfig-array-count',
+        name: 'include',
+        value: 2,
+        group: 'include',
+        fieldPath: 'include',
+      },
+      {
+        kind: 'tsconfig-array-path',
+        name: 'src/**/*.ts',
+        value: 'src/**/*.ts',
+        group: 'include',
+        fieldPath: 'include',
+      },
+      {
+        kind: 'tsconfig-array-path',
+        name: 'tests/**/*.ts',
+        value: 'tests/**/*.ts',
+        group: 'include',
+        fieldPath: 'include',
+      },
+      {
+        kind: 'tsconfig-array-count',
+        name: 'exclude',
+        value: 1,
+        group: 'exclude',
+        fieldPath: 'exclude',
+      },
+      {
+        kind: 'tsconfig-array-path',
+        name: 'dist',
+        value: 'dist',
+        group: 'exclude',
+        fieldPath: 'exclude',
+      },
+      {
+        kind: 'tsconfig-array-count',
+        name: 'files',
+        value: 1,
+        group: 'files',
+        fieldPath: 'files',
+      },
+      {
+        kind: 'tsconfig-array-path',
+        name: 'src/index.ts',
+        value: 'src/index.ts',
+        group: 'files',
+        fieldPath: 'files',
+      },
+    ]);
+    expect(report.configFacts.every((fact) => fact.configFileKind === 'tsconfig-json')).toBe(true);
+    expect(report.configFacts.every((fact) => fact.lineRangeGranularity === 'field')).toBe(true);
+    expect(
+      report.configFacts.find((fact) => fact.fieldPath === 'compilerOptions.module')?.provenance
+        .lineRange
+    ).toEqual({ start: 5, end: 5 });
+    expect(
+      report.configFacts.find((fact) => fact.fieldPath === 'compilerOptions.strict')?.provenance
+        .lineRange
+    ).toEqual({ start: 6, end: 6 });
+    expect(report.configFacts[4]?.provenance.lineRange).toEqual({ start: 9, end: 9 });
+  });
+
+  it('emits string tsconfig array paths from mixed arrays while keeping full array counts', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-tsconfig-mixed-arrays-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    const tsconfigJson = [
+      '{',
+      '  "include": [',
+      '    "src/**/*.ts",',
+      '    false,',
+      '    "tests/**/*.ts"',
+      '  ],',
+      '  "files": [',
+      '    1,',
+      '    "src/index.ts"',
+      '  ]',
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'tsconfig.json'), tsconfigJson, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(
+      report.configFacts.map(({ kind, name, value, group, provenance }) => ({
+        kind,
+        name,
+        value,
+        group,
+        lineRange: provenance.lineRange,
+      }))
+    ).toEqual([
+      {
+        kind: 'tsconfig-array-count',
+        name: 'include',
+        value: 3,
+        group: 'include',
+        lineRange: { start: 2, end: 6 },
+      },
+      {
+        kind: 'tsconfig-array-path',
+        name: 'src/**/*.ts',
+        value: 'src/**/*.ts',
+        group: 'include',
+        lineRange: { start: 3, end: 3 },
+      },
+      {
+        kind: 'tsconfig-array-path',
+        name: 'tests/**/*.ts',
+        value: 'tests/**/*.ts',
+        group: 'include',
+        lineRange: { start: 5, end: 5 },
+      },
+      {
+        kind: 'tsconfig-array-count',
+        name: 'files',
+        value: 2,
+        group: 'files',
+        lineRange: { start: 7, end: 10 },
+      },
+      {
+        kind: 'tsconfig-array-path',
+        name: 'src/index.ts',
+        value: 'src/index.ts',
+        group: 'files',
+        lineRange: { start: 9, end: 9 },
+      },
+    ]);
+  });
+
+  it('handles malformed and unsupported config files without hidden guesses', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-config-errors-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'package.json'), '{ "name": ', 'utf-8');
+    await writeFile(join(sourceDir, 'tsconfig.json'), '{ "compilerOptions": ', 'utf-8');
+    await writeFile(join(sourceDir, 'package-lock.json'), '{}\n', 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(
+      report.files.map((file) => ({
+        path: file.path,
+        status: file.status,
+        supported: file.supported,
+        configFacts: file.configFacts.length,
+        skipReason: file.skipReason,
+      }))
+    ).toEqual([
+      {
+        path: 'package-lock.json',
+        status: 'skipped',
+        supported: false,
+        configFacts: 0,
+        skipReason: 'unsupported-extension',
+      },
+      {
+        path: 'package.json',
+        status: 'inspected',
+        supported: true,
+        configFacts: 0,
+        skipReason: undefined,
+      },
+      {
+        path: 'tsconfig.json',
+        status: 'inspected',
+        supported: true,
+        configFacts: 0,
+        skipReason: undefined,
+      },
+    ]);
+    expect(report.configFacts).toEqual([]);
+    expect(report.warnings).toEqual([
+      'Skipped unsupported file: package-lock.json',
+      'Could not parse package config evidence in file: package.json',
+      'Could not parse tsconfig evidence in file: tsconfig.json',
+    ]);
   });
 
   it('hashes supported files from raw bytes before UTF-8 decoding for parsing', async () => {
