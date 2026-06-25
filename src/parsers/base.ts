@@ -13,6 +13,7 @@ import type { DocNode } from '../core/models.js';
  */
 export enum FormatType {
   OPENREF = 'openref',
+  OPENAPI = 'openapi',
   MARKDOWN = 'markdown',
   AUTO = 'auto',
 }
@@ -39,8 +40,9 @@ export interface Parser {
    * @param sourcePath - Path to the source file or directory
    * @returns true if this parser can handle the source
    *
-   * Performance: Should be fast (O(1) file extension check + O(k) content sniffing)
-   * where k is a small constant (e.g., first 100 bytes)
+   * Performance: Should be bounded to local inspection. Some parsers can use
+   * O(1) extension checks, while structured YAML/JSON parsers may inspect the
+   * full local file to avoid ambiguous extension-only detection.
    */
   detect(sourcePath: string): Promise<boolean>;
 

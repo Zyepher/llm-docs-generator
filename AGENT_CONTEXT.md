@@ -43,6 +43,8 @@ or pretend to understand arbitrary websites.
 Current implementation:
 
 - Can parse configured OpenRef YAML specs.
+- Can parse explicit local OpenAPI 3.x and Swagger 2.0 JSON/YAML files through
+  parser modules and convert them to the shared DocNode IR.
 - Can parse local Markdown / DocC-style sources through parser modules.
 - Can format parsed docs into LLM-friendly text.
 - Has early multi-format architecture.

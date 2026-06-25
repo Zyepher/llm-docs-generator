@@ -7,6 +7,7 @@ Successfully implemented a general-purpose, multi-format LLM documentation gener
 ## What Was Built
 
 ### Core Architecture
+
 ```
 llm-docs-generator/
 ├── src/
@@ -17,6 +18,8 @@ llm-docs-generator/
 │   │   └── formatter.ts           ✅ Legacy OpenRef formatter (kept for backward compat)
 │   ├── parsers/
 │   │   ├── base.ts                ✅ Parser interface
+│   │   ├── openapi/
+│   │   │   └── index.ts           ✅ OpenAPI 3.x / Swagger 2.0 → IR parser
 │   │   ├── openref/
 │   │   │   ├── parser.ts          ✅ OpenRef YAML parser
 │   │   │   ├── adapter.ts         ✅ OpenRef → IR adapter
@@ -40,6 +43,8 @@ llm-docs-generator/
 
 2. **Multi-Format Parsing**
    - **OpenRef YAML**: Supabase SDK specs
+   - **OpenAPI / Swagger**: Explicit local OpenAPI 3.x and Swagger 2.0
+     JSON/YAML files converted to DocNode IR as a parser/library capability
    - **Markdown/DocC**: Swift Programming Language book
    - Extensible: Add new formats easily
 
@@ -79,6 +84,7 @@ Success!
 ```
 
 **Generated Output Sample:**
+
 ```
 <SYSTEM>Swift Basic Operators documentation for LLMs</SYSTEM>
 
@@ -94,6 +100,7 @@ Operators are unary, binary, or ternary...
 ## How to Use
 
 ### For Swift-Book (Markdown)
+
 ```bash
 # Parse a single markdown file
 npx tsx test-swift-book.ts
@@ -103,6 +110,7 @@ llm-docs generate --preset swift-book --source ../TSPL.docc
 ```
 
 ### For Supabase (OpenRef - Backward Compatible)
+
 ```bash
 # Existing Supabase workflow still works
 cd /path/to/supabase/apps/docs/scripts
@@ -112,6 +120,7 @@ cd /path/to/supabase/apps/docs/scripts
 ## Architecture Highlights
 
 ### Unified IR Design
+
 ```
 Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
      ↓              ↓            ↓          ↓           ↓          ↓
@@ -122,17 +131,28 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 ### Format Mapping
 
 **OpenRef → IR:**
+
 - SDK → ROOT DocNode
 - Category → CATEGORY DocNode
 - Operation → OPERATION DocNode
 - Example → ITEM DocNode (with code ContentBlocks)
 
 **Markdown → IR:**
+
 - File → SECTION DocNode
 - H2 → CATEGORY DocNode
 - H3 → OPERATION DocNode
 - H4 → ITEM DocNode
 - Code block → CODE ContentBlock
+
+**OpenAPI / Swagger → IR:**
+
+- API document → ROOT DocNode with format, source kind, source path, title, and
+  version metadata
+- First operation tag → CATEGORY DocNode, with `Untagged` as the stable fallback
+- Operation → OPERATION DocNode with stable `operationId` or method/path ID
+- Endpoint details, parameters, request bodies, responses, schema refs, and
+  simple examples → deterministic PROSE ContentBlocks
 
 ## Benefits
 
@@ -147,6 +167,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [ ] CLI enhancements (--format, --preset flags)
 - [ ] Directory parsing for full swift-book (all chapters)
 - [ ] JSONL export format for embedding pipelines
+- [x] OpenAPI 3.x / Swagger 2.0 parser foundation for explicit local JSON/YAML
+      files
 - [x] Scoped manifest generation for configured OpenRef CLI output
 - [x] Scoped manifest hash/size verification for current configured SDK output
 - [x] Explicit local `discover --source` bounded inspection report
@@ -182,23 +204,36 @@ caches fetch remote refs without pulling into the checkout, and cached
 checkouts with local changes or ignored files are warned about and inspected as
 present.
 
+Current OpenAPI / Swagger parser scope:
+
+- Accepts only explicit local `.json`, `.yaml`, and `.yml` files.
+- Supports OpenAPI 3.x and Swagger 2.0 roots with a required `paths` object.
+- Preserves schema references and simple inline examples in the IR, but does
+  not fetch, dereference, or resolve remote sources.
+- Exists as parser/library support and is not yet a `generate --source` CLI
+  workflow.
+
 ## Files Modified/Created
 
 **New Core Files:**
+
 - `src/core/models.ts` - Added IR types at top
 - `src/core/detector.ts` - Format detection
 - `src/core/universal-formatter.ts` - IR-based formatter
 
 **New Parser Files:**
+
 - `src/parsers/base.ts` - Parser interface
 - `src/parsers/openref/` - OpenRef parser + adapter
 - `src/parsers/markdown/` - Markdown parser + adapter
 
 **Configuration:**
+
 - `config/presets/swift-book.json` - Swift preset
 - `package.json` - Added `marked` dependency
 
 **Tests:**
+
 - `test-swift-book.ts` - Working test script
 
 ## Success Metrics
