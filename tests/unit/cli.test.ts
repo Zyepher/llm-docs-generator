@@ -759,6 +759,22 @@ describe('CLI compatibility behavior', () => {
     );
   }, 15000);
 
+  it('describes generate options as configured SDK guards or planned unsupported modes', async () => {
+    const { stdout } = await runCli(['generate', '--help']);
+
+    expect(stdout).toMatch(
+      /--source <path>\s+Planned general source generation input \(currently\s+unsupported\)/
+    );
+    expect(stdout).toMatch(
+      /--format <format>\s+Configured SDK format guard: openref or openref-0\.1/
+    );
+    expect(stdout).toMatch(
+      /--preset <name>\s+Planned preset generation input \(currently\s+unsupported\)/
+    );
+    expect(stdout).not.toContain('General generation format');
+    expect(stdout).not.toContain('Generate from source');
+  });
+
   it('prints deterministic agent context JSON metadata for packaged artifacts', async () => {
     const first = await runCli(['agent', 'context', '--json']);
     const second = await runCli(['agent', 'context', '--json']);
@@ -900,6 +916,7 @@ describe('CLI compatibility behavior', () => {
     ]);
     expect([...planned.keys()]).toEqual([
       'generate-source',
+      'generate-preset',
       'refresh',
       'source-code-verification',
       'broad-crawling',
@@ -941,6 +958,12 @@ describe('CLI compatibility behavior', () => {
       'parsed/<sdk>-<resolved-version>-spec.json',
       'llm-docs/*-llms.txt',
     ]);
+    expect(implemented.get('generate-sdk')?.options).toEqual([
+      '--sdk <sdk>',
+      '--sdk-version <version>',
+      '--format openref|openref-0.1',
+    ]);
+    expect(implemented.get('generate-sdk')?.limitations).toContain('no preset generation');
     expect(planned.get('generate-source')?.reason).toBe(
       'top-level general generate --source is not implemented; explicit local source evidence generation is available only through source-truth generate --source --output-dir'
     );
@@ -949,6 +972,9 @@ describe('CLI compatibility behavior', () => {
     );
     expect(planned.get('generate-source')?.reason).not.toContain(
       'no current CLI generation workflow consumes explicit sources'
+    );
+    expect(planned.get('generate-preset')?.reason).toBe(
+      'preset generation is not implemented; the current generate command only supports configured OpenRef SDK generation through generate --sdk'
     );
     expect([...implemented.values()].map((capability) => capability.mode)).not.toContain(
       'generate --source'
@@ -1035,7 +1061,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
     expect(stdout).toContain('Implemented modes: 10');
-    expect(stdout).toContain('Planned or unsupported modes: 9');
+    expect(stdout).toContain('Planned or unsupported modes: 10');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
 
@@ -3211,6 +3237,256 @@ describe('CLI compatibility behavior', () => {
       expect(output.lineCount).toBe(countTextLines(text));
       expect(output.estimatedTokenCount).toBe(estimateTextTokens(text));
     }
+  });
+
+  it.each(['openref', 'openref-0.1'])(
+    'accepts --format %s for configured OpenRef SDK generation',
+    async (format) => {
+      const configDir = await createTestConfig();
+      const outputDir = join(configDir, 'output');
+
+      const { stdout } = await runCli([
+        'generate',
+        '--sdk',
+        'swift',
+        '--sdk-version',
+        'v2',
+        '--format',
+        format,
+        '--config-dir',
+        configDir,
+        '--output-dir',
+        outputDir,
+      ]);
+
+      const manifestPath = join(outputDir, 'swift/v2/manifest.json');
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+
+      expect(stdout).toContain('Processing 1 SDK/version pair');
+      expect(stdout).toContain('Generation complete!');
+      expect(stdout).toContain('Successful: 1');
+      expect(manifest.mode).toBe('configured-sdk');
+      expect(manifest.source.format).toBe('openref-0.1');
+      expect(manifest.parser.format).toBe('openref-0.1');
+      expect(await pathExists(join(outputDir, 'swift/v2/parsed/swift-v2-spec.json'))).toBe(true);
+      expect(
+        await pathExists(join(outputDir, 'swift/v2/llm-docs/supabase-swift-v2-full-llms.txt'))
+      ).toBe(true);
+    }
+  );
+
+  it('rejects unsupported generate --format values before configured SDK generation', async () => {
+    const configDir = await createTestConfig();
+    const outputDir = join(configDir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--sdk',
+      'swift',
+      '--sdk-version',
+      'v2',
+      '--format',
+      'markdown',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: --format markdown is not supported for configured generate --sdk'
+    );
+    expect(result.stderr).toContain(
+      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+    );
+    expect(result.stderr).toContain(
+      'source-truth generate --source <path> --output-dir <dir>'
+    );
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
+    expect(await findManifestFiles(configDir)).toEqual([]);
+  });
+
+  it('rejects generate --format openref without --sdk before config or output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-format-no-sdk-'));
+    tempDirs.push(dir);
+    const configDir = join(dir, 'missing-config');
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--format',
+      'openref',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate requires --sdk for the current configured OpenRef SDK path.'
+    );
+    expect(result.stderr).toContain(
+      'Current supported generation mode: generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+    );
+    expect(result.stderr).toContain(
+      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+    );
+    expect(result.stderr).not.toContain('Fatal error');
+    expect(result.stderr).not.toContain(configDir);
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
+    expect(await pathExists(configDir)).toBe(false);
+  });
+
+  it('rejects whitespace-only generate --sdk before config or output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-blank-sdk-'));
+    tempDirs.push(dir);
+    const configDir = join(dir, 'missing-config');
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--sdk',
+      '   ',
+      '--format',
+      'openref',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate requires --sdk for the current configured OpenRef SDK path.'
+    );
+    expect(result.stderr).toContain(
+      'Current supported generation mode: generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+    );
+    expect(result.stderr).not.toContain('Fatal error');
+    expect(result.stderr).not.toContain(configDir);
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
+    expect(await pathExists(configDir)).toBe(false);
+  });
+
+  it('rejects plain generate before config or output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-no-options-'));
+    tempDirs.push(dir);
+    const configDir = join(dir, 'missing-config');
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate requires --sdk for the current configured OpenRef SDK path.'
+    );
+    expect(result.stderr).toContain(
+      'Current supported generation mode: generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+    );
+    expect(result.stderr).not.toContain('Fatal error');
+    expect(result.stderr).not.toContain(configDir);
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
+    expect(await pathExists(configDir)).toBe(false);
+  });
+
+  it('rejects generate --preset honestly without requiring configured SDK generation', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-preset-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--preset',
+      'swift-book',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate --preset is not implemented for the current configured SDK path.'
+    );
+    expect(result.stderr).toContain(
+      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+    );
+    expect(result.stderr).toContain('generate --sdk <sdk>');
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects generate --preset before configured SDK generation even with sdk and format', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-preset-with-sdk-'));
+    tempDirs.push(dir);
+    const configDir = join(dir, 'missing-config');
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--preset',
+      'swift-book',
+      '--sdk',
+      'swift',
+      '--format',
+      'openref',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate --preset is not implemented for the current configured SDK path.'
+    );
+    expect(result.stderr).toContain(
+      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+    );
+    expect(result.stderr).not.toContain('Fatal error');
+    expect(result.stderr).not.toContain(configDir);
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
+    expect(await pathExists(configDir)).toBe(false);
+  });
+
+  it('rejects top-level generate --source without implying source generation is implemented', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      './docs',
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: top-level general generate --source is not implemented.'
+    );
+    expect(result.stderr).toContain(
+      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+    );
+    expect(result.stderr).toContain(
+      'source-truth generate --source <path> --output-dir <dir>'
+    );
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
   });
 
   it('removes a stale manifest for failed generation tasks while continuing later tasks', async () => {

@@ -40,6 +40,7 @@ const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';
 const CAPABILITIES_SCHEMA_VERSION = '0.1.0';
 const AGENT_CONTEXT_SCHEMA_VERSION = '0.2.0';
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const CONFIGURED_SDK_GENERATE_FORMATS = ['openref', 'openref-0.1'] as const;
 
 const AGENT_CONTEXT_ARTIFACTS = [
   {
@@ -242,6 +243,7 @@ const CAPABILITIES_CONTRACT = {
       mode: 'generate --sdk',
       status: 'implemented',
       inputBoundary: 'configured SDK manifest entry',
+      options: ['--sdk <sdk>', '--sdk-version <version>', '--format openref|openref-0.1'],
       outputFiles: [
         'manifest.json',
         'parsed/<sdk>-<resolved-version>-spec.json',
@@ -251,6 +253,7 @@ const CAPABILITIES_CONTRACT = {
       limitations: [
         'configured SDKs only',
         'no general generate --source CLI mode',
+        'no preset generation',
         'no discovery report consumption',
       ],
     },
@@ -315,6 +318,13 @@ const CAPABILITIES_CONTRACT = {
       status: 'planned-unsupported',
       reason:
         'top-level general generate --source is not implemented; explicit local source evidence generation is available only through source-truth generate --source --output-dir',
+    },
+    {
+      id: 'generate-preset',
+      command: 'generate --preset',
+      status: 'planned-unsupported',
+      reason:
+        'preset generation is not implemented; the current generate command only supports configured OpenRef SDK generation through generate --sdk',
     },
     {
       id: 'refresh',
@@ -444,6 +454,64 @@ function resolvePlannedOutputVersion(
 
 async function removeScopedManifest(outputDir: string): Promise<void> {
   await rm(`${outputDir}/manifest.json`, { force: true });
+}
+
+function failGenerateRequest(message: string): never {
+  console.error(chalk.red(`Generate failed: ${message}`));
+  console.error(
+    chalk.yellow(
+      'Current supported generation mode: generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+    )
+  );
+  console.error(
+    chalk.yellow(
+      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+    )
+  );
+  console.error(
+    chalk.yellow(
+      'For conservative local source evidence, use source-truth generate --source <path> --output-dir <dir>.'
+    )
+  );
+  process.exit(1);
+}
+
+function validateGenerateOptions(options: {
+  sdk?: string;
+  source?: string;
+  format?: string;
+  preset?: string;
+}): asserts options is {
+  sdk: string;
+  source?: string;
+  format?: string;
+  preset?: string;
+} {
+  if (options.source !== undefined) {
+    failGenerateRequest('top-level general generate --source is not implemented.');
+  }
+
+  if (options.preset !== undefined) {
+    failGenerateRequest('generate --preset is not implemented for the current configured SDK path.');
+  }
+
+  if (options.format !== undefined) {
+    const normalizedFormat = options.format.trim().toLowerCase();
+
+    if (
+      !CONFIGURED_SDK_GENERATE_FORMATS.some((supportedFormat) => supportedFormat === normalizedFormat)
+    ) {
+      failGenerateRequest(
+        `--format ${options.format} is not supported for configured generate --sdk; supported formats are ${CONFIGURED_SDK_GENERATE_FORMATS.join(
+          ', '
+        )}.`
+      );
+    }
+  }
+
+  if (options.sdk === undefined || options.sdk.trim().length === 0) {
+    failGenerateRequest('generate requires --sdk for the current configured OpenRef SDK path.');
+  }
 }
 
 program
@@ -728,7 +796,10 @@ program
 program
   .command('generate')
   .description('Generate LLM documentation for specified SDK(s) and version(s)')
-  .requiredOption('--sdk <sdk>', 'SDK to generate (or "all" for all SDKs)')
+  .option('--sdk <sdk>', 'SDK to generate (or "all" for all SDKs)')
+  .option('--source <path>', 'Planned general source generation input (currently unsupported)')
+  .option('--format <format>', 'Configured SDK format guard: openref or openref-0.1')
+  .option('--preset <name>', 'Planned preset generation input (currently unsupported)')
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
   .option('--config-dir <dir>', 'Configuration directory', 'config')
   .option('--output-dir <dir>', 'Output directory', '../../public/llms-openref')
@@ -736,13 +807,18 @@ program
   .option('--force', 'Force re-download specs (ignore cache)', false)
   .action(
     async (options: {
-      sdk: string;
+      sdk?: string;
+      source?: string;
+      format?: string;
+      preset?: string;
       sdkVersion: string;
       configDir: string;
       outputDir: string;
       verbose: boolean;
       force: boolean;
     }) => {
+      validateGenerateOptions(options);
+
       // Set log level
       Logger.setLevel(options.verbose ? LogLevel.DEBUG : LogLevel.INFO);
 
