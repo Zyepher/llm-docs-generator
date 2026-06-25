@@ -149,6 +149,7 @@ describe('source-truth docs generation', () => {
         hash: `sha256:${sha256(alphaSource)}`,
         factCount: 4,
         exportFactCount: 4,
+        signatureFactCount: 2,
         configFactCount: 0,
         parseDiagnosticCount: 0,
       },
@@ -159,6 +160,7 @@ describe('source-truth docs generation', () => {
         hash: `sha256:${sha256(zetaSource)}`,
         factCount: 2,
         exportFactCount: 2,
+        signatureFactCount: 1,
         configFactCount: 0,
         parseDiagnosticCount: 0,
       },
@@ -174,6 +176,130 @@ describe('source-truth docs generation', () => {
       expect(output.byteSize).toBe(bytes.byteLength);
       expect(output.hash).toBe(`sha256:${sha256(bytes)}`);
     }
+  });
+
+  it('renders signature evidence in Markdown without adding body text or unresolved export signatures', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-signatures-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      [
+        'export const typedValue: number = 123;',
+        "export function makeValue(input: string = 'fallback'): number {",
+        '  return typedValue;',
+        '}',
+        'export interface Options {',
+        '  label: string;',
+        '}',
+        'export { makeValue as renamedValue };',
+        "export * from './other';",
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const markdown = formatSourceTruthMarkdown(report);
+
+    expect(markdown).toContain('  - Signature evidence:');
+    expect(markdown).toContain('    - Declaration kind: `function`');
+    expect(markdown).toContain(
+      "    - Text: `export function makeValue(input: string): number`"
+    );
+    expect(markdown).toContain(
+      '    - Parameters: `input: string` (optional: `true`, rest: `false`, default: `true`)'
+    );
+    expect(markdown).toContain('    - Return type: `number`');
+    expect(markdown).toContain('    - Variables: `typedValue: number`');
+    expect(markdown).toContain('    - Member count: `1`');
+    expect(markdown).not.toContain('return typedValue');
+    expect(markdown).not.toContain('123');
+    expect(markdown).not.toContain('fallback');
+
+    const renamedBlockStart = markdown.indexOf('- `renamedValue`');
+    const renamedBlockEnd = markdown.indexOf('\n\n', renamedBlockStart);
+    const renamedBlock = markdown.slice(renamedBlockStart, renamedBlockEnd);
+    expect(renamedBlock).toContain('  - Fact kind: `re-exported-symbol`');
+    expect(renamedBlock).not.toContain('Signature evidence');
+
+    const exportAllBlockStart = markdown.indexOf('- `*`');
+    const exportAllBlockEnd = markdown.indexOf('\n\n', exportAllBlockStart);
+    const exportAllBlock = markdown.slice(exportAllBlockStart, exportAllBlockEnd);
+    expect(exportAllBlock).toContain('  - Fact kind: `export-all`');
+    expect(exportAllBlock).not.toContain('Signature evidence');
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(/\bverified\b/i);
+  });
+
+  it('renders signature evidence containing backticks with valid Markdown code spans', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-template-signature-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      ['export type Route = `/api/${string}`;', ''].join('\n'),
+      'utf-8'
+    );
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const markdown = formatSourceTruthMarkdown(report);
+
+    expect(markdown).toContain('    - Text: `` export type Route = `/api/${string}` ``');
+    expect(markdown).toContain('    - Type: `` `/api/${string}` ``');
+    expect(markdown).not.toContain('\\`/api/${string}\\`');
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(/\bverified\b/i);
+  });
+
+  it('renders non-signature values containing backticks with valid Markdown code spans', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-backtick-values-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    await writeFile(
+      join(sourceDir, 'tick`file.ts'),
+      [
+        'export const value = true;',
+        "export { value as renamedValue } from './mod`name';",
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    await writeFile(
+      join(sourceDir, 'package.json'),
+      [
+        '{',
+        '  "name": "pkg`name",',
+        '  "dependencies": {',
+        '    "dep`name": "^1.0.0"',
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const markdown = formatSourceTruthMarkdown(report);
+
+    expect(markdown).toContain('### `` tick`file.ts ``');
+    expect(markdown).toContain('  - Module specifier: `` ./mod`name ``');
+    expect(markdown).toContain('  - Value: `` pkg`name ``');
+    expect(markdown).toContain('- `` dep`name ``');
+    expect(markdown).toContain('  - Field path: `` dependencies["dep`name"] ``');
+    expect(markdown).not.toContain('\\`file');
+    expect(markdown).not.toContain('\\`name');
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(/\bverified\b/i);
   });
 
   it('generates Markdown and manifest provenance for config-only source evidence', async () => {
@@ -237,6 +363,7 @@ describe('source-truth docs generation', () => {
         path: file.path,
         factCount: file.factCount,
         exportFactCount: file.exportFactCount,
+        signatureFactCount: file.signatureFactCount,
         configFactCount: file.configFactCount,
         hash: file.hash,
       }))
@@ -245,6 +372,7 @@ describe('source-truth docs generation', () => {
         path: 'package.json',
         factCount: 4,
         exportFactCount: 0,
+        signatureFactCount: 0,
         configFactCount: 4,
         hash: `sha256:${sha256(packageJson)}`,
       },
@@ -252,6 +380,7 @@ describe('source-truth docs generation', () => {
         path: 'tsconfig.json',
         factCount: 4,
         exportFactCount: 0,
+        signatureFactCount: 0,
         configFactCount: 4,
         hash: `sha256:${sha256(tsconfigJson)}`,
       },

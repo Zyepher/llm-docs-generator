@@ -144,10 +144,16 @@ export type {
   SourceTruthInspectionReport,
   SourceTruthLineRange,
   SourceTruthProvenance,
+  SourceTruthSignatureDeclarationKind,
+  SourceTruthSignatureEvidence,
+  SourceTruthSignatureHeritage,
+  SourceTruthSignatureParameter,
+  SourceTruthSignatureVariable,
   SourceTruthSkipReason,
   SourceTruthSourceType,
   SourceTruthSymbolKind,
   SourceTruthTraversalSettings,
+  SourceTruthVariableDeclarationKind,
 } from './core/source-truth.js';
 export {
   SOURCE_TRUTH_DOCS_FAILURE_MODE,
