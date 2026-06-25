@@ -32,10 +32,11 @@ honest failures.
 
 Discovery-like CLI behavior must stay bounded, explicit, inspectable, and
 deterministic. Acceptable examples include listing files under a provided source
-path, crawling a provided URL within explicit scope, extracting links from
-provided content, and producing discovery reports for agent review. The CLI must
-not silently choose authoritative sources, guess source-specific documentation
-rules, or pretend to understand arbitrary websites.
+path, inspecting an explicit URL plus fixed same-origin well-known resources,
+extracting links from already fetched content, and producing discovery reports
+for agent review. The CLI must not silently choose authoritative sources, guess
+source-specific documentation rules, crawl arbitrary links, render JavaScript,
+or pretend to understand arbitrary websites.
 
 ## Current Capability Versus Target Capability
 
@@ -60,17 +61,25 @@ Current implementation:
   pulling into the checkout, records commit and dirty state when available,
   treats ignored local files as dirty cache contents, and inspects only the
   requested repo-relative scope path.
-- Current CLI commands are limited to local/repo `discover`, `generate --sdk`,
-  `verify`, `list-sdks`, and `validate --sdk`.
-- Does not yet fully implement website discovery, refresh, source verification,
+- Can run `discover --url <http-or-https-url>` for bounded explicit website
+  inspection. URL mode fetches only the explicit URL, same-origin root
+  `/llms.txt`, and same-origin root `/sitemap.xml`; it does not fetch extracted
+  candidate links, render JavaScript, or crawl arbitrary website paths. The
+  report records inspected resources, response status/content type/byte counts,
+  crawl policy, extracted candidate URLs, source resource provenance, and
+  warnings.
+- Current CLI commands are limited to local/repo/website `discover`,
+  `generate --sdk`, `verify`, `list-sdks`, and `validate --sdk`.
+- Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or source-truth codebase documentation
-  generation. Repo discovery is a cache/inspection foundation only; it does not
+  generation. Discovery modes are inspection foundations only; they do not
   generate docs, choose sources, score trust, infer authority, or claim source
   truth.
 - Local and repo discovery order candidates by deterministic evidence category
-  and normalized path for agent review. This order is derived from inspected
-  path, format/kind, extension, and already-read content prefix signals; it is
-  not a source-selection or authority judgment.
+  and normalized path for agent review. Website discovery orders extracted
+  candidate URLs by deterministic observation order and aggregates evidence from
+  the inspected resources. These orders are not source-selection or authority
+  judgments.
 
 Target next-generation implementation:
 
@@ -517,6 +526,7 @@ The following commands are the current regression baseline:
 ```bash
 llm-docs discover --source ./docs --output-dir ./reports/local-docs
 llm-docs discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
+llm-docs discover --url https://example.com/docs --output-dir ./reports/website
 llm-docs generate --sdk swift --sdk-version v2
 llm-docs generate --sdk all --sdk-version all
 llm-docs verify --output-dir ./output/swift/v2

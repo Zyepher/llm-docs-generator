@@ -69,3 +69,25 @@ export type {
   RepoGitState,
   RepoUpdateState,
 } from './core/repo-discovery.js';
+export {
+  DEFAULT_WEBSITE_FETCH_TIMEOUT_MS,
+  DEFAULT_WEBSITE_MAX_BYTES_PER_RESPONSE,
+  DEFAULT_WEBSITE_MAX_CANDIDATES,
+  WEBSITE_BOUNDED_INSPECTION_MODE,
+  discoverWebsite,
+  inspectWebsite,
+} from './core/website-discovery.js';
+export type {
+  DiscoverWebsiteResult,
+  DiscoverWebsiteOptions,
+  WebsiteCandidateEvidence,
+  WebsiteCandidateEvidenceFlag,
+  WebsiteCandidateEvidenceRelation,
+  WebsiteCandidateSourceResource,
+  WebsiteCrawlPolicy,
+  WebsiteDiscoveryCandidate,
+  WebsiteDiscoveryInspection,
+  WebsiteDiscoveryReport,
+  WebsiteInspectedResource,
+  WebsiteResourceRole,
+} from './core/website-discovery.js';

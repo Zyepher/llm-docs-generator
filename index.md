@@ -94,6 +94,7 @@ Development commands:
 ```bash
 npx tsx src/cli.ts discover --source ./docs --output-dir ./reports/local-docs
 npx tsx src/cli.ts discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
+npx tsx src/cli.ts discover --url https://example.com/docs --output-dir ./reports/website
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
 npx tsx src/cli.ts verify --output-dir ./output/swift/v2
@@ -113,15 +114,21 @@ does not pull or mutate the checked-out commit, and it does not run repo
 scripts. Ignored local files in the cache are treated as dirty cache contents,
 so fetches are skipped before any update step can risk those files.
 
-The current CLI does not yet expose `generate --source`, refresh, website
-discovery, source verification, or source-truth codebase docs generation. It
-writes `manifest.json` for successful configured `generate --sdk` tasks and
-verifies current configured SDK manifest source and output file hashes and byte
-sizes only. Markdown / DocC parsing exists in parser modules but is not wired
-as a current CLI generation command. Discovery reports do not generate docs,
-choose sources, score trust, infer authority, or claim source truth. Discovery
-candidates are ordered by deterministic evidence category and normalized path
-for agent review only.
+The current `discover --url` command performs bounded static inspection for one
+explicit HTTP(S) URL. It fetches only the explicit URL, same-origin root
+`/llms.txt`, and same-origin root `/sitemap.xml`; it does not render JavaScript
+or fetch linked candidates. It writes a website discovery report with inspected
+resources, response status/content type/byte counts, crawl policy, extracted
+candidate URLs, evidence/provenance, and warnings.
+
+The current CLI does not yet expose `generate --source`, refresh, source
+verification, or source-truth codebase docs generation. It writes
+`manifest.json` for successful configured `generate --sdk` tasks and verifies
+current configured SDK manifest source and output file hashes and byte sizes
+only. Markdown / DocC parsing exists in parser modules but is not wired as a
+current CLI generation command. Discovery reports do not generate docs, choose
+sources, score trust, infer authority, or claim source truth. Discovery
+candidates are ordered deterministically for agent review only.
 
 The current CLI is implemented in:
 
@@ -140,6 +147,7 @@ Core model and formatting:
 - [src/core/universal-formatter.ts](src/core/universal-formatter.ts)
 - [src/core/manifest.ts](src/core/manifest.ts)
 - [src/core/detector.ts](src/core/detector.ts)
+- [src/core/website-discovery.ts](src/core/website-discovery.ts)
 
 Parsers:
 
@@ -208,7 +216,8 @@ agent intent/source/scope resolution
   source and output hashes. Current `verify` checks those configured SDK
   manifest file hashes and byte sizes only. Local bounded inspection reports are
   available through `discover --source`, and repo cache/inspection reports are
-  available through `discover --repo`; refresh, website, source-code
+  available through `discover --repo`. Bounded explicit URL inspection reports
+  are available through `discover --url`; broader crawling, refresh, source-code
   verification, and source-truth codebase docs remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
