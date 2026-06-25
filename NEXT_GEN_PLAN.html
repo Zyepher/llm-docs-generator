@@ -875,8 +875,9 @@ capabilities:
           <article class="edge">
             <h3>Generated Docs Are Huge</h3>
             <p>
-              Chunk by semantic section, preserve stable IDs, and generate a manifest index. Avoid splitting
-              in the middle of code examples or API operations.
+              Chunk by semantic section, preserve stable IDs, and generate a manifest index. The
+              current CLI implements this only as an opt-in JSONL export for explicit local source
+              generation. Avoid splitting in the middle of code examples or API operations.
             </p>
             <div class="tag-row"><span class="pill">Semantic chunks</span><span class="pill">Stable IDs</span></div>
           </article>
@@ -1005,6 +1006,8 @@ capabilities:
         index.md
         full.md
         manifest.json
+        chunks/
+          semantic-chunks.jsonl
         discovery-report.json
         categories/
           database.md
@@ -1148,7 +1151,7 @@ failure:
                 <li>Add OpenAPI and Swagger parser.</li>
                 <li>Improve MDX cleanup for framework-specific components.</li>
                 <li>Add RST support for Python-style docs.</li>
-                <li>Add semantic chunking with stable chunk IDs.</li>
+                <li>Add semantic chunking with stable chunk IDs, including an opt-in JSONL source export.</li>
               </ul>
             </div>
           </article>

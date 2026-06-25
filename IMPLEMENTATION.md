@@ -83,8 +83,10 @@ llm-docs-generator/
      indivisible code or data blocks
    - Handles empty docs, duplicate sibling node IDs, repeated calls, malformed
      child/content shapes, and deep trees deterministically
-   - Exists as library support only; current CLI generation, manifests, and
-     discovery reports do not yet consume semantic chunks
+   - Available as library support and as an opt-in JSONL export for explicit
+     `generate --source` outputs only; discovery reports, configured SDK
+     generation, source-truth docs, refresh, and broad RAG systems do not
+     consume semantic chunks
 
 6. **Performance Optimizations**
    - O(1) Map-based lookups
@@ -230,7 +232,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       rejection, and `--sdk` mutual exclusion
 - [ ] Supported `--preset` generation
 - [ ] Directory parsing for full swift-book (all chapters)
-- [ ] JSONL export format for embedding pipelines
+- [x] Opt-in JSONL export format for explicit local source docs semantic chunks
 - [x] OpenAPI 3.x / Swagger 2.0 parser foundation for explicit local JSON/YAML
       files
 - [x] Scoped manifest generation for configured OpenRef CLI output
@@ -294,7 +296,8 @@ Current capabilities contract scope:
 - Implemented entries cover `discover --source`, `discover --repo`,
   `discover --url`, `source-truth inspect --source`,
   `source-truth generate --source --output-dir`, read-only `agent context`,
-  explicit local `generate --source` with parser hints, configured
+  explicit local `generate --source` with parser hints and optional
+  `--chunks jsonl`, configured
   `generate --sdk` with optional `--format openref` /
   `--format openref-0.1`, configured SDK `verify`, `list-sdks`, and
   `validate --sdk`.
@@ -308,9 +311,11 @@ Current capabilities contract scope:
   SDK parsed spec output, and configured SDK LLM docs output.
 - Generated-output manifest metadata is currently partial: source docs,
   configured SDK, and source-truth docs manifests record `lineCount` and
-  deterministic `estimatedTokenCount` for explicit generated files, but
-  capabilities output does not claim full manifest expansion, refresh support,
-  source-code verification, or semantic chunk publication.
+  deterministic `estimatedTokenCount` for explicit generated files. Source docs
+  can additionally publish opt-in `chunks/semantic-chunks.jsonl` records for
+  explicit `generate --source` outputs, but capabilities output does not claim
+  full manifest expansion, refresh support, source-code verification, or
+  automatic source selection.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
@@ -385,13 +390,21 @@ Current explicit local source docs generation scope:
 - Source mode parses through the existing parser registry, formats through
   `UniversalFormatter`, writes generated docs under `llm-docs/`, and writes a
   root `manifest.json` only after successful parsing and formatting.
+- `--chunks jsonl` is an opt-in source-mode-only export. When requested, source
+  mode chunks the already parsed DocNode tree with `chunkDocNode` and writes
+  one semantic chunk JSON object per line to `chunks/semantic-chunks.jsonl`.
+  Unsupported `--chunks` values and `--chunks` with `--sdk` fail before output
+  work.
 - The source manifest has mode `local-source-docs` and records generator
   metadata, source input/resolved path/type, format hint and resolved format,
   parser/formatter metadata, deterministic source file hashes and byte sizes,
   a stable directory aggregate hash when applicable, generated output hashes,
-  byte sizes, line counts, deterministic estimated token counts, and warnings.
-- Source mode does not verify generated output later; current `verify` remains
-  scoped to configured-SDK manifests.
+  byte sizes, line counts, deterministic estimated token counts, output
+  kind/name metadata, and warnings. Opt-in chunk JSONL is recorded as a
+  generated text output with kind `semantic-chunks-jsonl`.
+- `verify` supports current `configured-sdk` and `local-source-docs` manifests;
+  source-docs verification checks source files and all generated text outputs,
+  including opt-in chunk JSONL when present.
 
 Current OpenAPI / Swagger parser scope:
 
@@ -459,7 +472,8 @@ Current HTML parser scope:
 Current semantic chunking scope:
 
 - Accepts an existing DocNode tree through the library API exported from
-  `src/index.ts`.
+  `src/index.ts`, and source generation can opt in to JSONL publication with
+  `generate --source ... --chunks jsonl`.
 - Traverses deterministically in preorder without recursive calls, derives
   readable chunk IDs from semantic node paths, and disambiguates duplicate
   sibling node IDs with stable suffixes.
@@ -473,8 +487,10 @@ Current semantic chunking scope:
   blocks produce explicit warnings and oversized metadata.
 - Handles empty documents, repeated calls, malformed content/children shapes,
   traversal cycles, and deep trees deterministically.
-- Does not write JSONL exports, manifests, discovery reports, or generated CLI
-  output yet, and does not select sources or infer authority.
+- The CLI writes JSONL only for explicit source-mode generation when
+  `--chunks jsonl` is requested. It does not write chunk records for discovery,
+  configured SDK generation, source-truth docs, refresh, or any source
+  selection workflow, and it does not select sources or infer authority.
 
 ## Files Modified/Created
 

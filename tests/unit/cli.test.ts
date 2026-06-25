@@ -48,6 +48,7 @@ const servers: Server[] = [];
 interface ManifestFileEntry {
   path: string;
   kind: string;
+  name?: string;
   byteSize: number;
   hash: string;
   lineCount?: number;
@@ -866,6 +867,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toMatch(
       /--format <format>\s+Source parser hint: auto, markdown, mdx, openapi,\s+openref, rst, html; SDK guard: openref or\s+openref-0\.1/
     );
+    expect(stdout).toMatch(/--chunks <format>\s+Source-only semantic chunk export: jsonl/);
     expect(stdout).toMatch(/--preset <name>\s+Planned preset generation input \(unsupported\)/);
     expect(stdout).not.toContain('candidate');
   });
@@ -1044,10 +1046,12 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('generate-source')?.outputFiles).toEqual([
       'manifest.json',
       'llm-docs/*-llms.txt',
+      'chunks/semantic-chunks.jsonl',
     ]);
     expect(implemented.get('generate-source')?.options).toEqual([
       '--source <path>',
       '--format auto|markdown|mdx|openapi|openref|rst|html',
+      '--chunks jsonl',
     ]);
     expect(implemented.get('generate-source')?.limitations).toEqual(
       expect.arrayContaining([
@@ -1057,6 +1061,7 @@ describe('CLI compatibility behavior', () => {
         'no candidate auto-selection',
         'no preset generation',
         'no source selection decision',
+        'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
       ])
     );
     expect(implemented.get('generate-sdk')?.outputFiles).toEqual([
@@ -3495,6 +3500,156 @@ describe('CLI compatibility behavior', () => {
     }
   });
 
+  it('generates opt-in semantic chunk JSONL for local source docs and verifies the manifest', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-chunks-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'chunk-docs.md');
+    const outputDir = join(dir, 'output');
+    const secondOutputDir = join(dir, 'output-second');
+
+    await writeFile(
+      sourcePath,
+      [
+        '# Chunk Docs',
+        '',
+        'Intro text for the document.',
+        '',
+        '## Install',
+        '',
+        'Run setup once.',
+        '',
+        '## Install',
+        '',
+        'Run setup again.',
+        '',
+        '```ts',
+        'export const value = 1;',
+        '```',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const { stdout } = await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      secondOutputDir,
+    ]);
+
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+    const chunkOutput = manifest.generatedOutputs.find(
+      (output) => output.kind === 'semantic-chunks-jsonl'
+    );
+    const llmOutput = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
+
+    expect(stdout).toContain('Local source docs generated');
+    expect(stdout).toContain('Generated files: 2');
+    expect(stdout).toContain('Chunk export: chunks/semantic-chunks.jsonl');
+    expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'chunks/semantic-chunks.jsonl',
+      'llm-docs/chunk-docs-full-llms.txt',
+    ]);
+    expect(chunkOutput).toMatchObject({
+      path: 'chunks/semantic-chunks.jsonl',
+      kind: 'semantic-chunks-jsonl',
+      name: 'semantic chunks JSONL export',
+    });
+    expect(llmOutput).toMatchObject({
+      path: 'llm-docs/chunk-docs-full-llms.txt',
+      kind: 'llm-docs',
+      name: 'agent-readable docs text',
+    });
+
+    if (chunkOutput === undefined) {
+      throw new Error('expected semantic chunk JSONL manifest output');
+    }
+
+    const chunkPath = join(outputDir, chunkOutput.path);
+    const chunkJsonl = await readFile(chunkPath, 'utf-8');
+    const secondChunkJsonl = await readFile(
+      join(secondOutputDir, 'chunks/semantic-chunks.jsonl'),
+      'utf-8'
+    );
+    const lines = chunkJsonl.trimEnd().split('\n');
+    const records = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(chunkJsonl).toBe(secondChunkJsonl);
+    expect(chunkJsonl.endsWith('\n')).toBe(true);
+    expect(records.map((record) => record.id)).toEqual([
+      'chunk-docs/chunk-docs',
+      'chunk-docs/chunk-docs/install',
+      'chunk-docs/chunk-docs/install~2',
+    ]);
+    expect(records.map((record) => record.ordinal)).toEqual([1, 2, 3]);
+
+    for (const [index, record] of records.entries()) {
+      expect(record).toEqual(
+        expect.objectContaining({
+          id: expect.any(String),
+          ordinal: index + 1,
+          title: expect.any(String),
+          path: expect.any(Array),
+          nodePath: expect.any(Array),
+          content: expect.any(String),
+          contentHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+          characterCount: expect.any(Number),
+          estimatedTokenCount: expect.any(Number),
+          warnings: expect.any(Array),
+          metadata: expect.any(Object),
+        })
+      );
+      expect(record.contentHash).toBe(
+        createHash('sha256').update(String(record.content)).digest('hex')
+      );
+      expect(record.characterCount).toBe(String(record.content).length);
+    }
+
+    expect(records[0]?.sourceFormat).toBe('markdown');
+    expect(records[0]?.sourcePath).toBe(sourcePath);
+    expect(String(records[0]?.content)).toContain('# Chunk Docs');
+    expect(String(records[2]?.content)).toContain('```ts\nexport const value = 1;\n```');
+    expect(records[2]?.warnings).toEqual([
+      {
+        code: 'duplicate_node_id',
+        nodePath: ['chunk-docs', 'chunk-docs', 'install~2'],
+        message: 'Duplicate sibling node id "install" was disambiguated as "install~2".',
+        chunkId: 'chunk-docs/chunk-docs/install~2',
+      },
+    ]);
+    expect(chunkOutput.byteSize).toBe(await byteSize(chunkPath));
+    expect(chunkOutput.hash).toBe(await sha256File(chunkPath));
+    expect(chunkOutput.lineCount).toBe(records.length);
+    expect(chunkOutput.estimatedTokenCount).toBe(estimateTextTokens(chunkJsonl));
+
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(verifyResult.stdout).toContain('Manifest verification');
+    expect(verifyResult.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
   it('rejects mixed-format directory source auto-detection before output work', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-mixed-'));
     tempDirs.push(dir);
@@ -3647,6 +3802,36 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).not.toContain('Processing');
     expect(await pathExists(outputDir)).toBe(false);
     expect(await findManifestFiles(configDir)).toEqual([]);
+  });
+
+  it('rejects generate --chunks with configured SDK generation before config or output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-sdk-chunks-'));
+    tempDirs.push(dir);
+    const configDir = join(dir, 'missing-config');
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--sdk',
+      'swift',
+      '--chunks',
+      'jsonl',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate --chunks is supported only for generate --source.'
+    );
+    expect(result.stderr).toContain('[--chunks jsonl]');
+    expect(result.stderr).not.toContain('Fatal error');
+    expect(result.stderr).not.toContain(configDir);
+    expect(result.stdout).not.toContain('Processing');
+    expect(await pathExists(outputDir)).toBe(false);
+    expect(await pathExists(configDir)).toBe(false);
   });
 
   it('rejects generate --format openref without --sdk before config or output work', async () => {
@@ -3854,6 +4039,32 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(outputDir)).toBe(false);
   });
 
+  it('rejects unsupported source-mode chunk export values before output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-chunks-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'docs.md');
+    const outputDir = join(dir, 'output');
+    await writeFile(sourcePath, '# Docs\n', 'utf-8');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourcePath,
+      '--chunks',
+      'xml',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: --chunks xml is not supported for generate --source'
+    );
+    expect(result.stderr).toContain('supported chunk export formats are jsonl');
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
   it('rejects URL-like generate --source inputs without fetching network resources', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-url-'));
     tempDirs.push(dir);
@@ -3901,7 +4112,7 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(outputDir)).toBe(false);
   });
 
-  it('removes stale source docs artifacts after early source-mode validation failures', async () => {
+  it('removes stale source docs and chunk artifacts after early source-mode validation failures', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-early-stale-'));
     tempDirs.push(dir);
     const sourcePath = join(dir, 'docs.md');
@@ -3917,6 +4128,8 @@ describe('CLI compatibility behavior', () => {
       sourcePath,
       '--format',
       'markdown',
+      '--chunks',
+      'jsonl',
       '--output-dir',
       missingOutputDir,
     ]);
@@ -3926,14 +4139,18 @@ describe('CLI compatibility behavior', () => {
       sourcePath,
       '--format',
       'markdown',
+      '--chunks',
+      'jsonl',
       '--output-dir',
       unsupportedFormatOutputDir,
     ]);
 
     expect(await pathExists(join(missingOutputDir, 'manifest.json'))).toBe(true);
     expect(await pathExists(join(missingOutputDir, 'llm-docs'))).toBe(true);
+    expect(await pathExists(join(missingOutputDir, 'chunks'))).toBe(true);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'manifest.json'))).toBe(true);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'llm-docs'))).toBe(true);
+    expect(await pathExists(join(unsupportedFormatOutputDir, 'chunks'))).toBe(true);
 
     const missingResult = await runCliWithExit([
       'generate',
@@ -3964,8 +4181,10 @@ describe('CLI compatibility behavior', () => {
     );
     expect(await pathExists(join(missingOutputDir, 'manifest.json'))).toBe(false);
     expect(await pathExists(join(missingOutputDir, 'llm-docs'))).toBe(false);
+    expect(await pathExists(join(missingOutputDir, 'chunks'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'manifest.json'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'llm-docs'))).toBe(false);
+    expect(await pathExists(join(unsupportedFormatOutputDir, 'chunks'))).toBe(false);
   });
 
   it('does not remove non-source manifests after source-mode validation failures', async () => {
@@ -4870,6 +5089,24 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('Checked files: 0');
     expect(result.stderr).toContain('kind must be parsed-spec-json or llm-docs');
+  });
+
+  it('rejects invalid source docs generated output kinds before checking files', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const outputFile = manifest.generatedOutputs[0];
+
+    if (outputFile === undefined) {
+      throw new Error('expected generated source docs fixture output file');
+    }
+
+    outputFile.kind = 'repo-source';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('kind must be llm-docs or semantic-chunks-jsonl');
   });
 
   it('rejects source docs manifests without source file format metadata', async () => {

@@ -14,7 +14,11 @@ const HASH_PREFIX = 'sha256:';
 export const MANIFEST_SCHEMA_VERSION = '0.1.0';
 export const CONFIGURED_SDK_MODE = 'configured-sdk';
 const SOURCE_DOCS_MODE = 'local-source-docs';
-const GENERATED_OUTPUT_KINDS = new Set<GeneratedOutputKind>(['parsed-spec-json', 'llm-docs']);
+const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS = new Set<GeneratedOutputKind>([
+  'parsed-spec-json',
+  'llm-docs',
+]);
+const SOURCE_DOCS_GENERATED_OUTPUT_KINDS = new Set(['llm-docs', 'semantic-chunks-jsonl']);
 const SOURCE_DOCS_SOURCE_TYPES = new Set(['file', 'directory']);
 const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'auto',
@@ -266,7 +270,7 @@ async function verifyConfiguredSdkManifest(
     fileChecks,
     requireTextMetadata: false,
     rejectSymlinks: false,
-    allowedKinds: GENERATED_OUTPUT_KINDS,
+    allowedKinds: CONFIGURED_SDK_GENERATED_OUTPUT_KINDS,
   });
 
   return runFileChecks(manifestPath, failures, fileChecks);
@@ -427,7 +431,7 @@ async function verifySourceDocsManifest(
     fileChecks,
     requireTextMetadata: true,
     rejectSymlinks: true,
-    allowedKinds: new Set(['llm-docs']),
+    allowedKinds: SOURCE_DOCS_GENERATED_OUTPUT_KINDS,
   });
 
   if (failures.length === 0) {

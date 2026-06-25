@@ -12,7 +12,7 @@ Use this skill when the task is about this repository or about calling the insta
 - Treat the AI agent as the planner and the CLI as the deterministic capability layer.
 - Read `index.md` and `AGENT_CONTEXT.md` before promising support.
 - Run `llm-docs capabilities --json` before assuming a command, mode, output file, or verification feature exists.
-- Do not claim `agent install codex`, `agent doctor`, refresh, broad crawling, source-code verification, or general `generate --source` support unless `capabilities --json` reports it as implemented.
+- Do not claim `agent install codex`, `agent doctor`, refresh, broad crawling, source-code verification, or source-docs chunk export support unless `capabilities --json` reports it as implemented.
 - Do not treat discovery reports as source-selection decisions. They are candidate evidence reports for agent review.
 
 ## Current Safe Workflow
@@ -41,4 +41,4 @@ When modifying this repository:
 
 ## Current CLI Boundary
 
-Implemented modes may include local/repo/URL discovery evidence reports, conservative source-truth evidence extraction/generation, local source docs generation and manifest verification, configured SDK generation and verification, `capabilities --json`, and read-only `agent context` metadata. Treat any broader lifecycle command as unavailable unless the installed CLI says otherwise.
+Implemented modes may include local/repo/URL discovery evidence reports, conservative source-truth evidence extraction/generation, local source docs generation with optional source-only chunk JSONL export and manifest verification, configured SDK generation and verification, `capabilities --json`, and read-only `agent context` metadata. Treat any broader lifecycle command as unavailable unless the installed CLI says otherwise.

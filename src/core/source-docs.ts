@@ -3,6 +3,11 @@ import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
+import {
+  chunkDocNode,
+  type SemanticChunk,
+  type SemanticChunkWarning,
+} from './chunker.js';
 import { detectFormat, getParserForFormat } from './detector.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import { createDocNode, DocNodeType, type DocNode } from './models.js';
@@ -13,6 +18,8 @@ import { FormatType, type Parser } from '../parsers/base.js';
 const HASH_PREFIX = 'sha256:';
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
 const SOURCE_DOCS_OUTPUT_DIR = 'llm-docs';
+const SOURCE_DOCS_CHUNKS_OUTPUT_DIR = 'chunks';
+const SOURCE_DOCS_CHUNKS_JSONL = 'semantic-chunks.jsonl';
 const SOURCE_DOCS_MANIFEST = 'manifest.json';
 const DEFAULT_SOURCE_DOCS_MAX_DEPTH = 16;
 const DEFAULT_SOURCE_DOCS_MAX_ENTRIES = 20000;
@@ -38,6 +45,7 @@ const DISCOVERY_REPORT_MODES = new Set([
 ]);
 
 type SourceDocsSourceType = 'file' | 'directory';
+export type SourceDocsChunksFormat = 'jsonl';
 type SourceDocsResolvedFormat =
   | FormatType.MARKDOWN
   | FormatType.OPENAPI
@@ -55,6 +63,7 @@ export interface GenerateSourceDocsOptions {
   source: string;
   outputDir: string;
   format?: string;
+  chunks?: string;
   generator: SourceDocsGeneratorMetadata;
 }
 
@@ -71,7 +80,8 @@ export interface SourceDocsFileManifestEntry extends SourceDocsBaseFileManifestE
 
 export interface SourceDocsGeneratedOutput {
   path: string;
-  kind: 'llm-docs';
+  kind: 'llm-docs' | 'semantic-chunks-jsonl';
+  name: string;
   byteSize: number;
   hash: string;
   lineCount: number;
@@ -159,6 +169,7 @@ export async function generateSourceDocs(
 
   try {
     const formatHint = parseSourceDocsFormatHint(options.format);
+    const chunksFormat = parseSourceDocsChunksFormat(options.chunks);
     const source = await resolveSourceInput(options.source);
 
     assertFileSourceOutsideSourceDocsArtifacts(source, outputDir);
@@ -181,6 +192,14 @@ export async function generateSourceDocs(
       includeMetadata: false,
     });
     const generatedOutputs = await describeGeneratedOutputs(outputDir, outputPaths);
+    const chunkOutput =
+      chunksFormat === 'jsonl'
+        ? await writeSemanticChunksJsonl(outputDir, root)
+        : undefined;
+    if (chunkOutput !== undefined) {
+      generatedOutputs.push(chunkOutput);
+      generatedOutputs.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+    }
     const manifest = buildSourceDocsManifest({
       source,
       formatHint: formatHint.manifestValue,
@@ -262,6 +281,22 @@ function parseSourceDocsFormatHint(format: string | undefined): ParsedFormatHint
   }
 
   return { manifestValue, parserHint: manifestValue as FormatType };
+}
+
+function parseSourceDocsChunksFormat(chunks: string | undefined): SourceDocsChunksFormat | undefined {
+  if (chunks === undefined) {
+    return undefined;
+  }
+
+  const normalizedChunks = chunks.trim().toLowerCase();
+
+  if (normalizedChunks !== 'jsonl') {
+    throw new Error(
+      `--chunks ${chunks} is not supported for generate --source; supported chunk export formats are jsonl`
+    );
+  }
+
+  return normalizedChunks;
 }
 
 async function resolveSourceInput(sourceInput: string): Promise<ResolvedSourceDocsInput> {
@@ -636,6 +671,7 @@ async function describeGeneratedOutputs(
       return {
         path: relativeOutputPath(outputDir, outputPath),
         kind: 'llm-docs' as const,
+        name: 'agent-readable docs text',
         byteSize: file.byteSize,
         hash: file.hash,
         lineCount: file.lineCount,
@@ -645,6 +681,99 @@ async function describeGeneratedOutputs(
   );
 
   return generatedOutputs.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+}
+
+async function writeSemanticChunksJsonl(
+  outputDir: string,
+  root: DocNode
+): Promise<SourceDocsGeneratedOutput> {
+  const chunksDir = join(outputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
+  const chunksPath = join(chunksDir, SOURCE_DOCS_CHUNKS_JSONL);
+  const chunkResult = chunkDocNode(root);
+  const lines = chunkResult.chunks.map((chunk) =>
+    JSON.stringify(toSemanticChunkJsonlRecord(chunk, chunkResult.warnings))
+  );
+  const jsonl = lines.length === 0 ? '' : `${lines.join('\n')}\n`;
+
+  await mkdir(chunksDir, { recursive: true });
+  await writeFile(chunksPath, jsonl, 'utf-8');
+
+  const file = await describeGeneratedTextOutput(chunksPath);
+
+  return {
+    path: relativeOutputPath(outputDir, chunksPath),
+    kind: 'semantic-chunks-jsonl',
+    name: 'semantic chunks JSONL export',
+    byteSize: file.byteSize,
+    hash: file.hash,
+    lineCount: file.lineCount,
+    estimatedTokenCount: file.estimatedTokenCount,
+  };
+}
+
+function toSemanticChunkJsonlRecord(
+  chunk: SemanticChunk,
+  globalWarnings: SemanticChunkWarning[]
+): SemanticChunk {
+  const warnings = semanticChunkWarningsForRecord(chunk, globalWarnings);
+  const record: SemanticChunk = {
+    id: chunk.id,
+    ordinal: chunk.ordinal,
+    title: chunk.title,
+    path: chunk.path,
+    nodePath: chunk.nodePath,
+    content: chunk.content,
+    contentHash: chunk.contentHash,
+    characterCount: chunk.characterCount,
+    estimatedTokenCount: chunk.estimatedTokenCount,
+    warnings,
+    metadata: chunk.metadata,
+  };
+
+  if (chunk.sourceFormat !== undefined) {
+    record.sourceFormat = chunk.sourceFormat;
+  }
+  if (chunk.sourcePath !== undefined) {
+    record.sourcePath = chunk.sourcePath;
+  }
+
+  return record;
+}
+
+function semanticChunkWarningsForRecord(
+  chunk: SemanticChunk,
+  globalWarnings: SemanticChunkWarning[]
+): SemanticChunkWarning[] {
+  const warnings = [...chunk.warnings];
+
+  for (const warning of globalWarnings) {
+    if (!sameStringArray(warning.nodePath, chunk.nodePath)) {
+      continue;
+    }
+
+    if (warnings.some((existingWarning) => sameSemanticChunkWarning(existingWarning, warning))) {
+      continue;
+    }
+
+    warnings.push({ ...warning, chunkId: chunk.id });
+  }
+
+  return warnings;
+}
+
+function sameSemanticChunkWarning(
+  left: SemanticChunkWarning,
+  right: SemanticChunkWarning
+): boolean {
+  return (
+    left.code === right.code &&
+    left.message === right.message &&
+    sameStringArray(left.nodePath, right.nodePath)
+  );
+}
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function buildSourceDocsManifest(options: {
@@ -807,6 +936,7 @@ async function clearSourceDocsArtifacts(outputDir: string): Promise<void> {
   await Promise.all([
     rm(join(outputDir, SOURCE_DOCS_MANIFEST), { force: true }),
     rm(join(outputDir, SOURCE_DOCS_OUTPUT_DIR), { recursive: true, force: true }),
+    rm(join(outputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR), { recursive: true, force: true }),
   ]);
 }
 
@@ -821,6 +951,7 @@ function assertFileSourceOutsideSourceDocsArtifacts(
   const resolvedOutputDir = resolve(outputDir);
   const manifestPath = join(resolvedOutputDir, SOURCE_DOCS_MANIFEST);
   const llmDocsDir = join(resolvedOutputDir, SOURCE_DOCS_OUTPUT_DIR);
+  const chunksDir = join(resolvedOutputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
 
   if (source.resolvedPath === manifestPath) {
     throw new Error(
@@ -831,6 +962,12 @@ function assertFileSourceOutsideSourceDocsArtifacts(
   if (isSameOrDescendant(llmDocsDir, source.resolvedPath)) {
     throw new Error(
       'generate --source file input must not be inside the source-mode generated docs directory for --output-dir'
+    );
+  }
+
+  if (isSameOrDescendant(chunksDir, source.resolvedPath)) {
+    throw new Error(
+      'generate --source file input must not be inside the source-mode generated chunks directory for --output-dir'
     );
   }
 }
@@ -852,8 +989,13 @@ function isSourceDocsArtifactPath(
   const resolvedSourcePath = resolve(trimmedSourcePath);
   const manifestPath = join(resolvedOutputDir, SOURCE_DOCS_MANIFEST);
   const llmDocsDir = join(resolvedOutputDir, SOURCE_DOCS_OUTPUT_DIR);
+  const chunksDir = join(resolvedOutputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
 
-  return resolvedSourcePath === manifestPath || isSameOrDescendant(llmDocsDir, resolvedSourcePath);
+  return (
+    resolvedSourcePath === manifestPath ||
+    isSameOrDescendant(llmDocsDir, resolvedSourcePath) ||
+    isSameOrDescendant(chunksDir, resolvedSourcePath)
+  );
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {

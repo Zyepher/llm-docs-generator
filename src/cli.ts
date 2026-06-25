@@ -50,6 +50,7 @@ const SOURCE_GENERATE_FORMATS = [
   'rst',
   'html',
 ] as const;
+const SOURCE_GENERATE_CHUNK_FORMATS = ['jsonl'] as const;
 
 const AGENT_CONTEXT_ARTIFACTS = [
   {
@@ -247,10 +248,14 @@ const CAPABILITIES_CONTRACT = {
       mode: 'generate --source',
       status: 'implemented',
       inputBoundary: 'explicit local file or directory',
-      options: ['--source <path>', '--format auto|markdown|mdx|openapi|openref|rst|html'],
-      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt'],
+      options: [
+        '--source <path>',
+        '--format auto|markdown|mdx|openapi|openref|rst|html',
+        '--chunks jsonl',
+      ],
+      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic local source parsing through the registered parser and universal formatter',
+        'deterministic local source parsing through the registered parser and universal formatter, with opt-in semantic chunk JSONL export',
       limitations: [
         'local files and directories only',
         'no URL fetching',
@@ -258,6 +263,7 @@ const CAPABILITIES_CONTRACT = {
         'no candidate auto-selection',
         'no preset generation',
         'no source selection decision',
+        'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
       ],
     },
     {
@@ -504,7 +510,7 @@ function printGenerateRequestFailure(message: string): void {
   console.error(chalk.red(`Generate failed: ${message}`));
   console.error(
     chalk.yellow(
-      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] --output-dir <dir>; generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] [--chunks jsonl] --output-dir <dir>; generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
     )
   );
   console.error(chalk.yellow('Preset generation remains planned/unsupported in the current CLI.'));
@@ -521,6 +527,7 @@ function validateGenerateOptions(options: {
   sdk?: string;
   source?: string;
   format?: string;
+  chunks?: string;
   preset?: string;
 }): GenerateMode {
   if (options.preset !== undefined) {
@@ -546,7 +553,27 @@ function validateGenerateOptions(options: {
       }
     }
 
+    if (options.chunks !== undefined) {
+      const normalizedChunks = options.chunks.trim().toLowerCase();
+
+      if (
+        !SOURCE_GENERATE_CHUNK_FORMATS.some(
+          (supportedFormat) => supportedFormat === normalizedChunks
+        )
+      ) {
+        failGenerateRequest(
+          `--chunks ${options.chunks} is not supported for generate --source; supported chunk export formats are ${SOURCE_GENERATE_CHUNK_FORMATS.join(
+            ', '
+          )}.`
+        );
+      }
+    }
+
     return 'source';
+  }
+
+  if (options.chunks !== undefined) {
+    failGenerateRequest('generate --chunks is supported only for generate --source.');
   }
 
   if (options.format !== undefined) {
@@ -888,6 +915,7 @@ program
     '--format <format>',
     'Source parser hint: auto, markdown, mdx, openapi, openref, rst, html; SDK guard: openref or openref-0.1'
   )
+  .option('--chunks <format>', 'Source-only semantic chunk export: jsonl')
   .option('--preset <name>', 'Planned preset generation input (unsupported)')
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
   .option('--config-dir <dir>', 'Configuration directory', 'config')
@@ -899,6 +927,7 @@ program
       sdk?: string;
       source?: string;
       format?: string;
+      chunks?: string;
       preset?: string;
       sdkVersion: string;
       configDir: string;
@@ -936,8 +965,14 @@ program
           if (options.format !== undefined) {
             sourceDocsOptions.format = options.format;
           }
+          if (options.chunks !== undefined) {
+            sourceDocsOptions.chunks = options.chunks;
+          }
 
           const result = await generateSourceDocs(sourceDocsOptions);
+          const chunkOutput = result.manifest.generatedOutputs.find(
+            (output) => output.kind === 'semantic-chunks-jsonl'
+          );
 
           console.log(chalk.bold('Local source docs generated'));
           console.log(`  Source: ${result.manifest.source.resolvedPath}`);
@@ -945,6 +980,9 @@ program
           console.log(`  Format: ${result.manifest.source.resolvedFormat}`);
           console.log(`  Source files: ${result.manifest.sourceFiles.length}`);
           console.log(`  Generated files: ${result.manifest.generatedOutputs.length}`);
+          if (chunkOutput !== undefined) {
+            console.log(`  Chunk export: ${chalk.cyan(chunkOutput.path)}`);
+          }
           console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
           console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
         } catch (error) {
