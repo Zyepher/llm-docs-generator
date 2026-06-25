@@ -14,6 +14,7 @@ llm-docs-generator/
 │   ├── core/
 │   │   ├── models.ts              ✅ Unified IR (DocNode + ContentBlock)
 │   │   ├── detector.ts            ✅ Auto-detect format
+│   │   ├── chunker.ts             ✅ Deterministic DocNode semantic chunks
 │   │   ├── universal-formatter.ts ✅ IR → LLM-optimized output
 │   │   └── formatter.ts           ✅ Legacy OpenRef formatter (kept for backward compat)
 │   ├── parsers/
@@ -72,7 +73,20 @@ llm-docs-generator/
    - Token-efficient formatting
    - Modular per-category + full combined files
 
-5. **Performance Optimizations**
+5. **Semantic Chunking Library**
+   - Chunks existing DocNode IR by semantic section without merging unrelated
+     siblings
+   - Preserves heading/path context, prose, code fences, and data blocks
+   - Emits stable path-derived IDs, ordinal order, source format/path metadata,
+     content hash, character count, and estimated token count
+   - Supports bounded prose/block splitting and warns honestly for oversized
+     indivisible code or data blocks
+   - Handles empty docs, duplicate sibling node IDs, repeated calls, malformed
+     child/content shapes, and deep trees deterministically
+   - Exists as library support only; current CLI generation, manifests, and
+     discovery reports do not yet consume semantic chunks
+
+6. **Performance Optimizations**
    - O(1) Map-based lookups
    - Streaming writes for large files (>10MB)
    - Array join vs string concatenation
@@ -216,6 +230,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit website `discover --url` bounded inspection report
 - [x] RST parser foundation for explicit local Python-style documentation
 - [x] Static HTML parser foundation for explicit local rendered-HTML fallback
+- [x] Semantic chunking foundation for existing DocNode IR as a library API
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
@@ -306,12 +321,33 @@ Current HTML parser scope:
 - Exists as parser/library support and is not yet a `generate --source` CLI
   workflow.
 
+Current semantic chunking scope:
+
+- Accepts an existing DocNode tree through the library API exported from
+  `src/index.ts`.
+- Traverses deterministically in preorder without recursive calls, derives
+  readable chunk IDs from semantic node paths, and disambiguates duplicate
+  sibling node IDs with stable suffixes.
+- Emits chunk order, title/path metadata, inherited source format/path metadata
+  when present, SHA-256 content hash, character count, estimated token count,
+  split metadata, and warning metadata.
+- Preserves ancestor heading context, section prose, code fences, and data
+  blocks. It does not merge unrelated sibling sections.
+- Splits oversized prose at paragraph, line, sentence, or space boundaries when
+  possible. Code and data blocks remain indivisible; oversized indivisible
+  blocks produce explicit warnings and oversized metadata.
+- Handles empty documents, repeated calls, malformed content/children shapes,
+  traversal cycles, and deep trees deterministically.
+- Does not write JSONL exports, manifests, discovery reports, or generated CLI
+  output yet, and does not select sources or infer authority.
+
 ## Files Modified/Created
 
 **New Core Files:**
 
 - `src/core/models.ts` - Added IR types at top
 - `src/core/detector.ts` - Format detection
+- `src/core/chunker.ts` - Deterministic DocNode semantic chunking
 - `src/core/universal-formatter.ts` - IR-based formatter
 
 **New Parser Files:**

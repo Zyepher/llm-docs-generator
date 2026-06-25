@@ -135,10 +135,14 @@ documented Python-style subset, and records warnings for unsupported
 directives/includes without executing or fetching them. The HTML parser accepts
 local `.html` and `.htm` files and directories containing nested HTML files,
 strips scripts/styles/templates, never renders JavaScript or fetches links, and
-records lower-confidence rendered-HTML fallback metadata. Discovery reports do
-not generate docs, choose sources, assign trust scores, infer authority, or
-claim source truth. Discovery candidates are ordered deterministically for agent
-review only.
+records lower-confidence rendered-HTML fallback metadata. Semantic chunking
+exists as a library API for existing DocNode IR: it emits stable semantic chunk
+records with path-derived IDs, order, source metadata, hashes, sizes, token
+estimates, split metadata, and warnings. Current CLI generation, manifests, and
+discovery reports do not yet consume or publish semantic chunks. Discovery
+reports do not generate docs, choose sources, assign trust scores, infer
+authority, or claim source truth. Discovery candidates are ordered
+deterministically for agent review only.
 
 The current CLI is implemented in:
 
@@ -153,6 +157,7 @@ Package metadata:
 Core model and formatting:
 
 - [src/core/models.ts](src/core/models.ts)
+- [src/core/chunker.ts](src/core/chunker.ts)
 - [src/core/formatter.ts](src/core/formatter.ts)
 - [src/core/universal-formatter.ts](src/core/universal-formatter.ts)
 - [src/core/manifest.ts](src/core/manifest.ts)
