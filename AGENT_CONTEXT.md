@@ -95,19 +95,22 @@ Current implementation:
   stdout. The report uses bounded traversal, does not follow symlinks, skips
   dependency/build directories, records supported file hashes, warnings, and
   conservative TypeScript/JavaScript export facts plus `package.json` and
-  `tsconfig*.json` package/config facts with source file and line ranges.
-  Directly exported top-level declarations may include compact AST signature
-  evidence with bodies and initializer values omitted. Re-exports, export-all
-  declarations, and export assignments remain unresolved. It does not prove
-  claims, infer behavior, infer framework identity, decide source selection, or
-  choose task fit.
+  `tsconfig*.json` package/config facts with source file and line ranges. It
+  also records path-based test/example context facts for inspected supported
+  files whose normalized path or filename matches conservative test, spec,
+  example, demo, sample, or docs/examples signals. Directly exported top-level
+  declarations may include compact AST signature evidence with bodies and
+  initializer values omitted. Re-exports, export-all declarations, and export
+  assignments remain unresolved. It does not parse assertions, execute tests,
+  prove claims, infer behavior, infer framework identity, decide source
+  selection, or choose task fit.
 - Can run `source-truth generate --source <local-file-or-directory>
   --output-dir <dir>` to write an evidence-bound Markdown file, the raw
   evidence report, and a manifest. The command reuses `inspectSourceTruth`,
   accepts only an explicit local source path, and fails with `failure.json`
   referencing `source-truth-report.json` when no extractable export or
-  package/config facts are found. It rejects output directories that are the
-  source path or inside the source path.
+  package/config facts or path-based context facts are found. It rejects output
+  directories that are the source path or inside the source path.
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`, `generate --sdk`, `verify`,
   `list-sdks`, and `validate --sdk`.
@@ -265,11 +268,12 @@ Important current-state rule:
 Do not claim this project can generate accurate or behavior-complete docs from
 code. `source-truth inspect` extracts conservative TypeScript/JavaScript export
 facts, optional direct-declaration AST signature evidence, and `package.json` /
-`tsconfig*.json` package/config facts from an explicit local source path.
-`source-truth generate` formats only those observed facts into Markdown and
-provenance files. These modes do not prove claims, summarize runtime behavior,
-infer framework identity, decide source selection, choose task fit, or resolve
-re-export targets.
+`tsconfig*.json` package/config facts from an explicit local source path. It
+also extracts file-level test/example context facts from explicit path and
+filename signals only. `source-truth generate` formats only those observed facts
+into Markdown and provenance files. These modes do not parse assertions, execute
+tests, prove claims, summarize runtime behavior, infer framework identity,
+decide source selection, choose task fit, or resolve re-export targets.
 
 ### Intent 4: Refresh Or Verify Existing Generated Docs
 
@@ -523,9 +527,11 @@ Do not ask when:
 - Do not generate from a top or first ordered candidate unless the user or
   agent has explicitly selected that candidate or a documented automation flag
   requires it.
-- Do not claim source-truth codebase docs go beyond observed export and
-  package/config facts unless the implementation actually inspects and proves
-  that broader evidence.
+- Do not claim source-truth codebase docs go beyond observed export/signature,
+  package/config, and path/filename test/example context evidence unless the
+  implementation actually inspects and proves that broader evidence. These
+  facts must not be treated as behavior, correctness, authority, task fit, or
+  source-selection proof.
 - Do not mark official docs as source-verified unless implementation files were
   actually inspected.
 - Do not mix unrelated products or SDKs from a monorepo into one output.

@@ -40,6 +40,7 @@ export interface SourceTruthManifestSourceFile {
   exportFactCount: number;
   signatureFactCount?: number;
   configFactCount: number;
+  contextFactCount: number;
   parseDiagnosticCount: number;
 }
 
@@ -129,7 +130,11 @@ export async function generateSourceTruthDocs(
 
   await writeJsonFile(reportPath, report);
 
-  if (report.facts.length === 0 && report.configFacts.length === 0) {
+  if (
+    report.facts.length === 0 &&
+    report.configFacts.length === 0 &&
+    report.contextFacts.length === 0
+  ) {
     await rm(markdownPath, { force: true });
     await rm(manifestPath, { force: true });
     const failure = buildFailure(report, relativeOutputPath(outputDir, reportPath));
@@ -167,7 +172,7 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
   const lines: string[] = [
     '# Observed Local Source Evidence',
     '',
-    'Generated from one explicit local source inspection. This file contains only observed TypeScript/JavaScript top-level export facts and package/config facts reported by the inspector.',
+    'Generated from one explicit local source inspection. This file contains only observed TypeScript/JavaScript top-level export facts, package/config facts, and path-based test/example context facts reported by the inspector.',
     '',
     '## Source',
     '',
@@ -194,6 +199,7 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
     '- Re-export targets and export-all targets are not resolved.',
     '- Package/config facts are reported only from explicit `package.json` and `tsconfig*.json` files within the inspection limits.',
     '- Config line ranges are field-level when the inspector can locate a JSON property or array item; otherwise they use the file line range and say so.',
+    '- Test/example context facts are path/filename-level evidence only; context line ranges cover the whole file.',
     '- Only supported TypeScript/JavaScript, package manifest, and tsconfig files within the inspection limits can contribute facts.',
   ];
 
@@ -269,6 +275,37 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
         lines.push(`  - Value: ${formatMarkdownCodeSpan(String(fact.value))}`);
       }
 
+      lines.push(
+        `  - Lines: ${formatLineRange(
+          fact.provenance.lineRange.start,
+          fact.provenance.lineRange.end
+        )}`
+      );
+      lines.push(
+        `  - Line range granularity: ${formatMarkdownCodeSpan(fact.lineRangeGranularity)}`
+      );
+    }
+
+    lines.push('');
+  }
+
+  lines.push('## Test And Example Context Facts', '');
+
+  const contextFiles = filesWithContextFacts(report.files);
+
+  if (contextFiles.length === 0) {
+    lines.push('No test/example context facts were observed.', '');
+  }
+
+  for (const file of contextFiles) {
+    lines.push(`### ${formatMarkdownCodeSpan(file.path)}`, '');
+
+    for (const fact of file.contextFacts) {
+      lines.push(`- ${formatMarkdownCodeSpan(fact.kind)}`);
+      lines.push(`  - Path: ${formatMarkdownCodeSpan(fact.path)}`);
+      lines.push(`  - Evidence signals: ${formatEvidenceSignals(fact.evidenceSignals)}`);
+      lines.push(`  - Byte size: ${formatMarkdownCodeSpan(String(fact.byteSize))}`);
+      lines.push(`  - SHA-256: ${formatMarkdownCodeSpan(fact.sha256)}`);
       lines.push(
         `  - Lines: ${formatLineRange(
           fact.provenance.lineRange.start,
@@ -372,6 +409,14 @@ function formatSignatureVariables(variables: SourceTruthSignatureVariable[]): st
     .join('; ');
 }
 
+function formatEvidenceSignals(evidenceSignals: string[]): string {
+  if (evidenceSignals.length === 0) {
+    return formatMarkdownCodeSpan('none');
+  }
+
+  return evidenceSignals.map((signal) => formatMarkdownCodeSpan(signal)).join('; ');
+}
+
 function buildManifest(
   report: SourceTruthInspectionReport,
   generatedOutputs: SourceTruthGeneratedOutput[]
@@ -395,10 +440,11 @@ function buildManifest(
       resolvedPath: file.resolvedPath,
       byteSize: file.byteSize,
       hash: formatHash(file.sha256 ?? ''),
-      factCount: file.facts.length + file.configFacts.length,
+      factCount: file.facts.length + file.configFacts.length + file.contextFacts.length,
       exportFactCount: file.facts.length,
       signatureFactCount: file.facts.filter((fact) => fact.signature !== undefined).length,
       configFactCount: file.configFacts.length,
+      contextFactCount: file.contextFacts.length,
       parseDiagnosticCount: file.parseDiagnostics?.length ?? 0,
     })),
     generatedOutputs,
@@ -414,7 +460,7 @@ function buildFailure(
     mode: SOURCE_TRUTH_DOCS_FAILURE_MODE,
     reason: 'no-extractable-source-truth-facts',
     message:
-      'No extractable source-truth export or package/config facts were found for the explicit local source path.',
+      'No extractable source-truth export, package/config, or context facts were found for the explicit local source path.',
     source: {
       input: report.source.input,
       resolvedPath: report.source.resolvedPath,
@@ -440,8 +486,15 @@ function filesWithConfigFacts(files: SourceTruthFileEvidence[]): SourceTruthFile
   return files.filter((file) => file.configFacts.length > 0);
 }
 
+function filesWithContextFacts(files: SourceTruthFileEvidence[]): SourceTruthFileEvidence[] {
+  return files.filter((file) => file.contextFacts.length > 0);
+}
+
 function filesWithAnyFacts(files: SourceTruthFileEvidence[]): SourceTruthFileEvidence[] {
-  return files.filter((file) => file.facts.length > 0 || file.configFacts.length > 0);
+  return files.filter(
+    (file) =>
+      file.facts.length > 0 || file.configFacts.length > 0 || file.contextFacts.length > 0
+  );
 }
 
 async function clearGeneratedArtifacts(outputDir: string): Promise<void> {

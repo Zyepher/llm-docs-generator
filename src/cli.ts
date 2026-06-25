@@ -59,7 +59,7 @@ program
 
 const sourceTruthCommand = program
   .command('source-truth')
-  .description('Inspect explicit local source code and generate bounded source-truth export docs');
+  .description('Inspect explicit local source paths and generate bounded source evidence docs');
 
 sourceTruthCommand
   .command('inspect')
@@ -95,6 +95,7 @@ sourceTruthCommand
       console.log(`  Source: ${result.report.source.resolvedPath}`);
       console.log(`  Export facts: ${result.report.facts.length}`);
       console.log(`  Package/config facts: ${result.report.configFacts.length}`);
+      console.log(`  Context facts: ${result.report.contextFacts.length}`);
       console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
       console.log(`  Markdown: ${chalk.cyan(result.markdownPath)}`);
       console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);

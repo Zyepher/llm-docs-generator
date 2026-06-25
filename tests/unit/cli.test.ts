@@ -832,6 +832,20 @@ describe('CLI compatibility behavior', () => {
     expect(combinedOutput).not.toMatch(/\bselected\b/i);
   });
 
+  it('describes source-truth help as neutral local evidence instead of export-only docs', async () => {
+    const { stdout, stderr } = await runCli(['source-truth', '--help']);
+    const combinedOutput = `${stdout}\n${stderr}`;
+
+    expect(combinedOutput).toContain(
+      'Inspect explicit local source paths and generate bounded source evidence docs'
+    );
+    expect(combinedOutput).not.toContain('source-truth export docs');
+    expect(combinedOutput).not.toContain('export docs');
+    expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(combinedOutput).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(combinedOutput).not.toMatch(/\bverified\b/i);
+  });
+
   it('prints a deterministic source-truth evidence report as JSON for an explicit local source', async () => {
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-source-truth-cli-'));
     tempDirs.push(dir);
@@ -966,6 +980,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Source-truth docs generated');
     expect(stdout).toContain(`Export facts: ${report.facts.length}`);
     expect(stdout).toContain(`Package/config facts: ${report.configFacts.length}`);
+    expect(stdout).toContain(`Context facts: ${report.contextFacts.length}`);
     expect(stderr).not.toContain('Source-truth generation failed');
     expect(report.facts.map((fact) => fact.exportedName)).toEqual(['value', 'renamedValue']);
     expect(report.configFacts).toEqual([]);
@@ -994,6 +1009,7 @@ describe('CLI compatibility behavior', () => {
           factCount: 2,
           exportFactCount: 2,
           configFactCount: 0,
+          contextFactCount: 0,
         },
       ],
     });
@@ -1046,6 +1062,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Source-truth docs generated');
     expect(stdout).toContain('Export facts: 0');
     expect(stdout).toContain(`Package/config facts: ${report.configFacts.length}`);
+    expect(stdout).toContain('Context facts: 0');
     expect(stderr).not.toContain('Source-truth generation failed');
     expect(report.facts).toEqual([]);
     expect(report.configFacts.map((fact) => fact.kind)).toEqual([
@@ -1061,8 +1078,85 @@ describe('CLI compatibility behavior', () => {
         factCount: 3,
         exportFactCount: 0,
         configFactCount: 3,
+        contextFactCount: 0,
       },
     ]);
+  });
+
+  it('generates source-truth docs for context-only evidence through the CLI', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-source-truth-context-cli-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+    const testSource = ['it("keeps evidence path-only", () => {', '  expect(true).toBe(true);', '});', ''].join(
+      '\n'
+    );
+    await writeFile(join(sourceDir, 'tests/path.spec.ts'), testSource, 'utf-8');
+
+    const { stdout, stderr } = await runCli([
+      'source-truth',
+      'generate',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    const report = JSON.parse(
+      await readFile(join(outputDir, 'source-truth-report.json'), 'utf-8')
+    ) as SourceTruthInspectionReport;
+    const manifest = JSON.parse(
+      await readFile(join(outputDir, 'manifest.json'), 'utf-8')
+    ) as SourceTruthDocsManifest;
+    const markdown = await readFile(join(outputDir, 'source-truth.md'), 'utf-8');
+
+    expect(stdout).toContain('Source-truth docs generated');
+    expect(stdout).toContain('Export facts: 0');
+    expect(stdout).toContain('Package/config facts: 0');
+    expect(stdout).toContain('Context facts: 1');
+    expect(stderr).not.toContain('Source-truth generation failed');
+    expect(report.facts).toEqual([]);
+    expect(report.configFacts).toEqual([]);
+    expect(report.contextFacts).toMatchObject([
+      {
+        kind: 'test-file',
+        path: 'tests/path.spec.ts',
+        evidenceSignals: ['filename-pattern:*.spec.*', 'path-segment:tests'],
+        byteSize: Buffer.byteLength(testSource),
+        sha256: createHash('sha256').update(testSource).digest('hex'),
+        provenance: {
+          path: 'tests/path.spec.ts',
+          lineRange: { start: 1, end: 3 },
+        },
+        lineRangeGranularity: 'file',
+        order: 1,
+      },
+    ]);
+    expect(markdown).toContain('## Test And Example Context Facts');
+    expect(markdown).toContain('### `tests/path.spec.ts`');
+    expect(markdown).toContain('- `test-file`');
+    expect(markdown).toContain(
+      '  - Evidence signals: `filename-pattern:*.spec.*`; `path-segment:tests`'
+    );
+    expect(manifest.sourceFiles).toMatchObject([
+      {
+        path: 'tests/path.spec.ts',
+        factCount: 1,
+        exportFactCount: 0,
+        configFactCount: 0,
+        contextFactCount: 1,
+      },
+    ]);
+
+    const combinedOutput = `${stdout}\n${stderr}\n${markdown}\n${JSON.stringify(report)}\n${JSON.stringify(
+      manifest
+    )}`;
+    expect(combinedOutput).not.toContain('expect(true)');
+    expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(combinedOutput).not.toMatch(/\bofficial\b/i);
+    expect(combinedOutput).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(combinedOutput).not.toMatch(/\bverified\b/i);
   });
 
   it('fails source-truth generation with failure details when no facts are found', async () => {
@@ -1099,6 +1193,7 @@ describe('CLI compatibility behavior', () => {
     expect(failure.evidenceReport).toEqual({ path: 'source-truth-report.json' });
     expect(report.facts).toEqual([]);
     expect(report.configFacts).toEqual([]);
+    expect(report.contextFacts).toEqual([]);
   });
 
   it('writes a bounded website discovery report from an explicit URL and same-origin well-known resources', async () => {

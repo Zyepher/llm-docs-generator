@@ -230,7 +230,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit website `discover --url` bounded inspection report
 - [x] Explicit `source-truth inspect --source` deterministic evidence report
       for conservative TypeScript/JavaScript export facts and `package.json` /
-      `tsconfig*.json` package/config facts
+      `tsconfig*.json` package/config facts, plus path-based test/example
+      context facts for inspected supported files
 - [x] Explicit `source-truth generate --source --output-dir` Markdown evidence
       facts with raw evidence report and provenance manifest
 - [x] RST parser foundation for explicit local Python-style documentation
@@ -272,14 +273,16 @@ Current source-truth evidence scope:
   or directory and prints deterministic JSON to stdout. It reports observed
   TypeScript/JavaScript export facts, optional direct-declaration AST signature
   evidence, and package/config facts from `package.json` and `tsconfig*.json`
-  only.
+  only. It also reports file-level test/example context facts using explicit
+  normalized path and filename signals only; it does not parse assertions,
+  execute tests, or infer behavior.
 - `llm-docs source-truth generate --source <path> --output-dir <dir>` accepts
   the same explicit local source boundary, reuses the inspector, and writes
   `source-truth-report.json`, `source-truth.md`, and `manifest.json` on success.
   It rejects output directories that are the source path or inside the source
-  path. If no export or package/config facts are found, it exits non-zero and
-  writes `failure.json` referencing the raw evidence report without producing
-  Markdown.
+  path. If no export, package/config, or context facts are found, it exits
+  non-zero and writes `failure.json` referencing the raw evidence report without
+  producing Markdown.
 - Traversal is bounded by depth, entry, file, and per-file byte limits. It does
   not follow symlinks and skips common dependency/build directories such as
   `node_modules`, `dist`, `build`, `coverage`, and `.git`.
