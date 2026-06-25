@@ -95,15 +95,22 @@ Current implementation:
   stdout. The report uses bounded traversal, does not follow symlinks, skips
   dependency/build directories, records supported file hashes, warnings, and
   conservative TypeScript/JavaScript export facts with source file and line
-  ranges. It does not generate docs, verify claims, infer behavior, decide
-  authority, or choose task fit.
+  ranges. It does not verify claims, infer behavior, decide authority, or
+  choose task fit.
+- Can run `source-truth generate --source <local-file-or-directory>
+  --output-dir <dir>` to write an evidence-bound Markdown export-facts file,
+  the raw evidence report, and a manifest. The command reuses
+  `inspectSourceTruth`, accepts only an explicit local source path, and fails
+  with `failure.json` referencing `source-truth-report.json` when no
+  extractable export facts are found. It rejects output directories that are
+  the source path or inside the source path.
 - Current CLI commands are limited to local/repo/website `discover`,
-  `source-truth inspect`, `generate --sdk`, `verify`, `list-sdks`, and
-  `validate --sdk`.
+  `source-truth inspect`, `source-truth generate`, `generate --sdk`, `verify`,
+  `list-sdks`, and `validate --sdk`.
 - Does not yet implement broad website crawling, refresh, source verification,
-  full next-generation manifests, or source-truth codebase documentation
-  generation. Semantic chunking exists as a library capability for existing
-  DocNode IR only; current CLI generation, manifests, and discovery reports do
+  full next-generation manifests, or behavior-level source documentation from
+  code. Semantic chunking exists as a library capability for existing DocNode IR
+  only; current configured SDK generation, manifests, and discovery reports do
   not yet consume or publish semantic chunk records. Discovery modes are
   inspection foundations only; they do not generate docs, choose sources,
   assign trust scores, infer authority, or claim source truth.
@@ -139,9 +146,9 @@ Use this router before running commands.
 The workflows below describe the approved next-generation product direction.
 When using the current CLI, verify that the needed command exists first. If the
 workflow needs discovery, repo caching, refresh, source verification,
-source-truth codebase docs generation, or manifest data beyond the current
-configured SDK generation manifest hash and size checks, treat it as planned
-work unless source and tests prove it has been implemented.
+behavior-level source documentation, or manifest data beyond the current
+configured SDK and source-truth docs manifests, treat it as planned work unless
+source and tests prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -241,21 +248,22 @@ Agent workflow:
 5. If the agent has resolved an explicit local source path, it may run
    `llm-docs source-truth inspect --source <path>` to obtain bounded factual
    TypeScript/JavaScript export evidence for review.
-6. If source-truth codebase docs mode exists, run it to generate structured
-   facts from implementation source files.
-7. Feed verified structured facts into the LLM-friendly formatter.
+6. If explicit source-truth codebase docs are requested, run
+   `llm-docs source-truth generate --source <path> --output-dir <dir>` to
+   generate conservative export-facts Markdown and provenance files from the
+   inspected implementation source files.
+7. Feed inspected structured facts into the LLM-friendly formatter.
 8. Write provenance with repo URL, commit/tag, source files analyzed, and
    confidence warnings.
 
 Important current-state rule:
 
-If source-truth codebase docs mode is not implemented yet, do not claim this
-project can generate accurate docs from code. A repo discovery report and
-`source-truth inspect` report are only inspectable evidence for agent review.
-The source-truth report currently extracts conservative TypeScript/JavaScript
-export facts from an explicit local source path; it does not verify claims,
-summarize behavior, or generate documentation. Tell the user the generation mode
-is planned and identify the missing implementation.
+Do not claim this project can generate accurate or behavior-complete docs from
+code. `source-truth inspect` extracts conservative TypeScript/JavaScript export
+facts from an explicit local source path. `source-truth generate` formats only
+those observed facts into Markdown and provenance files. These modes do not
+verify claims, summarize runtime behavior, decide authority, choose task fit, or
+resolve re-export targets.
 
 ### Intent 4: Refresh Or Verify Existing Generated Docs
 
@@ -509,7 +517,8 @@ Do not ask when:
 - Do not generate from a top or first ordered candidate unless the user or
   agent has explicitly selected that candidate or a documented automation flag
   requires it.
-- Do not claim source-truth codebase docs are supported unless that mode exists.
+- Do not claim source-truth codebase docs go beyond observed export facts unless
+  the implementation actually inspects and proves that broader evidence.
 - Do not mark official docs as source-verified unless implementation files were
   actually inspected.
 - Do not mix unrelated products or SDKs from a monorepo into one output.
@@ -550,8 +559,9 @@ Source-truth codebase docs:
 
 ```text
 User: Generate docs from this repo and verify against source code.
-Agent: Use repo exploration, resolve version, run source-truth codebase docs
-mode if implemented, then format verified facts with source-file provenance.
+Agent: Use repo exploration, resolve version, run `source-truth generate` for
+observed export facts, and use separate source verification only if implemented
+for the requested claim checks.
 ```
 
 Pinned version:

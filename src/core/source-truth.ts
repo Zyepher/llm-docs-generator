@@ -262,7 +262,7 @@ function validateSourceInput(source: string): void {
 
   if (URL_LIKE_SOURCE_PATTERNS.some((pattern) => pattern.test(source.trim()))) {
     throw new Error(
-      'source-truth inspect --source accepts local file or directory paths only; URL-like and git inputs are not supported'
+      'source-truth --source accepts local file or directory paths only; URL-like and git inputs are not supported'
     );
   }
 }
@@ -563,7 +563,10 @@ function emitMaxEntryWarning(
   state.emittedMaxEntryWarning = true;
 }
 
-function extractTypeScriptJavaScriptFacts(path: string, content: string): {
+function extractTypeScriptJavaScriptFacts(
+  path: string,
+  content: string
+): {
   facts: SourceTruthFact[];
   parseDiagnostics: SourceTruthParseDiagnostic[];
 } {
