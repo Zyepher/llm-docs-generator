@@ -239,6 +239,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
 - [x] Deterministic `capabilities --json` contract for agents with implemented
       and planned/unsupported capabilities separated
+- [x] Read-only `agent context` metadata command for packaged context artifacts
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
@@ -278,12 +279,13 @@ Current capabilities contract scope:
   planned/unsupported entries.
 - Implemented entries cover `discover --source`, `discover --repo`,
   `discover --url`, `source-truth inspect --source`,
-  `source-truth generate --source --output-dir`, configured `generate --sdk`,
-  configured SDK `verify`, `list-sdks`, and `validate --sdk`.
+  `source-truth generate --source --output-dir`, read-only `agent context`,
+  configured `generate --sdk`, configured SDK `verify`, `list-sdks`, and
+  `validate --sdk`.
 - Planned/unsupported entries include general `generate --source`, `refresh`,
   source-code verification for official docs, broad website crawling, automatic
-  source selection, framework/route understanding, and behavior-level generation
-  from source code.
+  source selection, framework/route understanding, behavior-level generation
+  from source code, `agent install codex`, and `agent doctor`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `manifest.json`, `failure.json`, configured SDK parsed spec output, and
@@ -291,6 +293,21 @@ Current capabilities contract scope:
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
+
+Current agent context metadata scope:
+
+- `llm-docs agent context` prints a concise human-readable summary of packaged
+  agent context artifacts and points to `--json`.
+- `llm-docs agent context --json` prints deterministic JSON with schema version
+  `0.1.0`, package name/version metadata, the `llm-docs` binary, and artifact
+  entries for `AGENT_CONTEXT.md` and `index.md`.
+- Each artifact entry includes an artifact id, display name, package-relative
+  path, byte size, SHA-256 hash, and intended use.
+- The command reads only package-local context files, writes only stdout, omits
+  `generatedAt`, performs no network access, and does not probe environment
+  state.
+- The command does not install or register skills, write user config, or
+  implement `agent install codex` or `agent doctor`.
 
 Current source-truth evidence scope:
 

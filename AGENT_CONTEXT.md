@@ -118,9 +118,17 @@ Current implementation:
   fact-family scope, explicit source-truth limitations, and planned/unsupported
   entries. It intentionally omits `generatedAt` and does not inspect sources,
   load config, write files, or perform network work.
+- Can run `agent context` or `agent context --json` to print deterministic
+  metadata for the packaged `AGENT_CONTEXT.md` and `index.md` artifacts. The
+  JSON contract has schema version `0.1.0`, package name/version metadata, the
+  `llm-docs` binary name, package-relative artifact paths, byte sizes, SHA-256
+  hashes, intended uses, and explicit limitations. It reports packaged context
+  metadata only; it does not install or register skills, write user config,
+  probe environment state, or perform network work.
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`, `generate --sdk`, `verify`,
-  `list-sdks`, `validate --sdk`, and `capabilities --json`.
+  `list-sdks`, `validate --sdk`, `capabilities --json`, and read-only
+  `agent context`.
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or behavior-level source documentation from
   code. Semantic chunking exists as a library capability for existing DocNode IR
@@ -427,22 +435,34 @@ skills/
     SKILL.md
 ```
 
-Target helper commands:
+Current helper commands:
 
 ```bash
 llm-docs agent context
+llm-docs agent context --json
+llm-docs capabilities --json
+```
+
+Planned/unsupported helper commands:
+
+```bash
 llm-docs agent install codex
 llm-docs agent doctor
-llm-docs capabilities --json
 ```
 
 Expected behavior:
 
-- `llm-docs agent context` prints agent-readable usage and intent routing.
-- `llm-docs agent install codex` copies bundled skills into the Codex skill
-  directory when supported.
-- `llm-docs agent doctor` checks whether the binary is on `PATH`, bundled
-  skills are available, host skill installation exists, and versions match.
+- `llm-docs agent context` currently prints read-only metadata for the packaged
+  context artifacts and points humans to `--json`.
+- `llm-docs agent context --json` currently prints a deterministic metadata
+  contract for packaged context artifacts only. It does not install/register
+  skills, write user config, probe the environment, or perform network work.
+- `llm-docs agent install codex` is planned/unsupported. A future
+  implementation may copy bundled skills into the Codex skill directory when
+  supported.
+- `llm-docs agent doctor` is planned/unsupported. A future implementation may
+  check whether the binary is on `PATH`, bundled skills are available, host
+  skill installation exists, and versions match.
 - `llm-docs capabilities --json` reports implemented modes so agents do not
   assume planned features exist. This command is currently implemented as a
   static deterministic contract and does not perform hidden environment probing.

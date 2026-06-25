@@ -261,6 +261,26 @@ interface CapabilitiesContract {
   }>;
 }
 
+interface AgentContextContract {
+  schemaVersion: string;
+  mode: string;
+  generator: {
+    packageName: string;
+    packageVersion: string;
+    cliName: string;
+    binary: string;
+  };
+  contextArtifacts: Array<{
+    id: string;
+    name: string;
+    path: string;
+    byteSize: number;
+    sha256: string;
+    intendedUse: string;
+  }>;
+  limitations: string[];
+}
+
 interface CliResult {
   stdout: string;
   stderr: string;
@@ -577,6 +597,16 @@ afterEach(async () => {
 });
 
 describe('CLI compatibility behavior', () => {
+  it('includes agent context files in the npm package file list', async () => {
+    const packageMetadata = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf-8')) as {
+      files: string[];
+    };
+
+    expect(packageMetadata.files).toEqual(
+      expect.arrayContaining(['AGENT_CONTEXT.md', 'index.md'])
+    );
+  });
+
   it('ships built-in SDK config without default local spec paths', async () => {
     const config = JSON.parse(await readFile(join(repoRoot, 'config/sdks.json'), 'utf-8')) as {
       sdks: Record<
@@ -614,8 +644,11 @@ describe('CLI compatibility behavior', () => {
   it('exposes capabilities help and root help for agents', async () => {
     const rootHelp = await runCli(['--help']);
     const capabilitiesHelp = await runCli(['capabilities', '--help']);
+    const agentHelp = await runCli(['agent', '--help']);
+    const agentContextHelp = await runCli(['agent', 'context', '--help']);
 
     expect(rootHelp.stdout).toContain('capabilities');
+    expect(rootHelp.stdout).toContain('agent');
     expect(rootHelp.stdout).toContain('Report implemented and planned CLI capabilities for');
     expect(rootHelp.stdout).toContain('agents');
     expect(capabilitiesHelp.stdout).toContain('Report implemented and planned CLI capabilities for agents');
@@ -623,6 +656,84 @@ describe('CLI compatibility behavior', () => {
     expect(capabilitiesHelp.stdout).toContain(
       'Print the deterministic machine-readable capabilities contract'
     );
+    expect(agentHelp.stdout).toContain('Report read-only agent metadata packaged with this CLI');
+    expect(agentHelp.stdout).toContain('context');
+    expect(agentContextHelp.stdout).toContain('Report packaged read-only agent context metadata');
+    expect(agentContextHelp.stdout).toContain('--json');
+    expect(agentContextHelp.stdout).toContain(
+      'Print deterministic machine-readable agent context metadata'
+    );
+    expect(`${agentHelp.stdout}\n${agentContextHelp.stdout}`).not.toMatch(
+      /\bagent (install|doctor)\b/i
+    );
+  }, 15000);
+
+  it('prints deterministic agent context JSON metadata for packaged artifacts', async () => {
+    const first = await runCli(['agent', 'context', '--json']);
+    const second = await runCli(['agent', 'context', '--json']);
+    const context = JSON.parse(first.stdout) as AgentContextContract;
+    const artifacts = new Map(
+      context.contextArtifacts.map((artifact) => [artifact.id, artifact])
+    );
+
+    expect(first.stdout).toBe(second.stdout);
+    expect(first.stdout.endsWith('\n')).toBe(true);
+    expect(first.stdout).not.toContain('generatedAt');
+    expect(context).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'agent-context-packaged-metadata',
+      generator: {
+        packageName: 'llm-docs-generator',
+        packageVersion: '1.0.0',
+        cliName: 'supabase-llm-docs',
+        binary: 'llm-docs',
+      },
+      limitations: [
+        'Reports packaged context metadata only.',
+        'Does not install or register skills.',
+        'Does not write user config.',
+        'Does not probe environment state.',
+        'Does not perform network access.',
+      ],
+    });
+    expect(context.contextArtifacts.map((artifact) => artifact.id)).toEqual([
+      'agent-context',
+      'project-index',
+    ]);
+    expect(artifacts.get('agent-context')).toMatchObject({
+      name: 'Agent Context',
+      path: 'AGENT_CONTEXT.md',
+      byteSize: await byteSize(join(repoRoot, 'AGENT_CONTEXT.md')),
+      sha256: await sha256FileHex(join(repoRoot, 'AGENT_CONTEXT.md')),
+    });
+    expect(artifacts.get('project-index')).toMatchObject({
+      name: 'Project Index',
+      path: 'index.md',
+      byteSize: await byteSize(join(repoRoot, 'index.md')),
+      sha256: await sha256FileHex(join(repoRoot, 'index.md')),
+    });
+    expect(context.contextArtifacts.every((artifact) => artifact.intendedUse.length > 0)).toBe(
+      true
+    );
+  });
+
+  it('prints concise non-JSON agent context text without installer or doctor claims', async () => {
+    const { stdout, stderr } = await runCli(['agent', 'context']);
+    const output = `${stdout}\n${stderr}`;
+
+    expect(stdout).toContain('llm-docs agent context');
+    expect(stdout).toContain('Schema: 0.1.0');
+    expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
+    expect(stdout).toContain('Binary: llm-docs');
+    expect(stdout).toContain('Agent Context (agent-context)');
+    expect(stdout).toContain('Project Index (project-index)');
+    expect(stdout).toContain('Path: AGENT_CONTEXT.md');
+    expect(stdout).toContain('Path: index.md');
+    expect(stdout).toContain('Does not install or register skills.');
+    expect(stdout).toContain('Use --json for the stable agent metadata contract.');
+    expect(output).not.toMatch(/\bcopies bundled skills\b/i);
+    expect(output).not.toMatch(/\bchecks that the binary is on PATH\b/i);
+    expect(output).not.toMatch(/\bhost skill installation is writable\b/i);
   });
 
   it(
@@ -664,6 +775,7 @@ describe('CLI compatibility behavior', () => {
       'discover-url',
       'source-truth-inspect',
       'source-truth-generate',
+      'agent-context',
       'generate-sdk',
       'verify-configured-sdk',
       'list-sdks',
@@ -677,6 +789,8 @@ describe('CLI compatibility behavior', () => {
       'automatic-source-selection',
       'framework-route-understanding',
       'behavior-level-code-docs',
+      'agent-install-codex',
+      'agent-doctor',
     ]);
     expect(capabilities.implemented.every((capability) => capability.status === 'implemented')).toBe(
       true
@@ -698,6 +812,10 @@ describe('CLI compatibility behavior', () => {
       'manifest.json',
       'failure.json',
     ]);
+    expect(implemented.get('agent-context')?.outputFiles).toEqual(['stdout JSON metadata']);
+    expect(implemented.get('agent-context')?.limitations).toContain(
+      'does not install/register skills'
+    );
     expect(implemented.get('generate-sdk')?.outputFiles).toEqual([
       'manifest.json',
       'parsed/<sdk>-<resolved-version>-spec.json',
@@ -718,6 +836,16 @@ describe('CLI compatibility behavior', () => {
     expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
       'refresh'
     );
+    expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
+      'agent install codex'
+    );
+    expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
+      'agent doctor'
+    );
+    expect(planned.get('agent-install-codex')?.reason).toContain(
+      'no current CLI skill installer'
+    );
+    expect(planned.get('agent-doctor')?.reason).toContain('no current CLI host diagnostics');
   });
 
   it('reports source-truth fact families and explicit limitations', async () => {
@@ -786,8 +914,8 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 9');
-    expect(stdout).toContain('Planned or unsupported modes: 7');
+    expect(stdout).toContain('Implemented modes: 10');
+    expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
 
