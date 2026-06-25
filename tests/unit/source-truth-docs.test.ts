@@ -148,6 +148,8 @@ describe('source-truth docs generation', () => {
         byteSize: Buffer.byteLength(alphaSource),
         hash: `sha256:${sha256(alphaSource)}`,
         factCount: 4,
+        exportFactCount: 4,
+        configFactCount: 0,
         parseDiagnosticCount: 0,
       },
       {
@@ -156,6 +158,8 @@ describe('source-truth docs generation', () => {
         byteSize: Buffer.byteLength(zetaSource),
         hash: `sha256:${sha256(zetaSource)}`,
         factCount: 2,
+        exportFactCount: 2,
+        configFactCount: 0,
         parseDiagnosticCount: 0,
       },
     ]);
@@ -170,6 +174,88 @@ describe('source-truth docs generation', () => {
       expect(output.byteSize).toBe(bytes.byteLength);
       expect(output.hash).toBe(`sha256:${sha256(bytes)}`);
     }
+  });
+
+  it('generates Markdown and manifest provenance for config-only source evidence', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-config-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+
+    const packageJson = [
+      '{',
+      '  "name": "config-only",',
+      '  "version": "0.0.1",',
+      '  "scripts": {',
+      '    "build": "tsc"',
+      '  },',
+      '  "dependencies": {',
+      '    "commander": "^12.0.0"',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    const tsconfigJson = [
+      '{',
+      '  "extends": "./base.json",',
+      '  "compilerOptions": {',
+      '    "strict": true',
+      '  },',
+      '  "include": ["src/**/*.ts"]',
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'package.json'), packageJson, 'utf-8');
+    await writeFile(join(sourceDir, 'tsconfig.json'), tsconfigJson, 'utf-8');
+
+    const result = await generateSourceTruthDocs({ source: sourceDir, outputDir });
+    const markdown = await readFile(join(outputDir, 'source-truth.md'), 'utf-8');
+    const manifest = await readJson<SourceTruthDocsManifest>(join(outputDir, 'manifest.json'));
+
+    expect(result.report.facts).toEqual([]);
+    expect(result.report.configFacts.length).toBeGreaterThan(0);
+    expect(markdown).toContain('# Observed Local Source Evidence');
+    expect(markdown).not.toContain('# Source-Truth Export Facts');
+    expect(markdown).toContain('## Package And Config Facts');
+    expect(markdown).toContain('No TypeScript/JavaScript export facts were observed.');
+    expect(markdown).toContain('### `package.json`');
+    expect(markdown).toContain('### `tsconfig.json`');
+    expect(markdown).toContain('- `commander`');
+    expect(markdown).toContain('  - Group: `dependencies`');
+    expect(markdown).toContain('- `strict`');
+    expect(markdown).toContain('  - Line range granularity: `field`');
+    expect(markdown).toContain(
+      '- No framework identity, routes, task fit, or source selection is inferred.'
+    );
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(/\bverified\b/i);
+
+    expect(
+      manifest.sourceFiles.map((file) => ({
+        path: file.path,
+        factCount: file.factCount,
+        exportFactCount: file.exportFactCount,
+        configFactCount: file.configFactCount,
+        hash: file.hash,
+      }))
+    ).toEqual([
+      {
+        path: 'package.json',
+        factCount: 4,
+        exportFactCount: 0,
+        configFactCount: 4,
+        hash: `sha256:${sha256(packageJson)}`,
+      },
+      {
+        path: 'tsconfig.json',
+        factCount: 4,
+        exportFactCount: 0,
+        configFactCount: 4,
+        hash: `sha256:${sha256(tsconfigJson)}`,
+      },
+    ]);
   });
 
   it('includes inspector warnings and syntax limitations without adding behavior claims', async () => {
@@ -219,7 +305,8 @@ describe('source-truth docs generation', () => {
       schemaVersion: '0.1.0',
       mode: 'source-truth-local-docs-failure',
       reason: 'no-extractable-source-truth-facts',
-      message: 'No extractable source-truth facts were found for the explicit local source path.',
+      message:
+        'No extractable source-truth export or package/config facts were found for the explicit local source path.',
       source: {
         input: sourceDir,
         resolvedPath: sourceDir,

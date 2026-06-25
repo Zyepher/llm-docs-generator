@@ -34,6 +34,8 @@ export interface SourceTruthManifestSourceFile {
   byteSize: number;
   hash: string;
   factCount: number;
+  exportFactCount: number;
+  configFactCount: number;
   parseDiagnosticCount: number;
 }
 
@@ -123,7 +125,7 @@ export async function generateSourceTruthDocs(
 
   await writeJsonFile(reportPath, report);
 
-  if (report.facts.length === 0) {
+  if (report.facts.length === 0 && report.configFacts.length === 0) {
     await rm(markdownPath, { force: true });
     await rm(manifestPath, { force: true });
     const failure = buildFailure(report, relativeOutputPath(outputDir, reportPath));
@@ -159,9 +161,9 @@ export async function generateSourceTruthDocs(
 
 export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): string {
   const lines: string[] = [
-    '# Source-Truth Export Facts',
+    '# Observed Local Source Evidence',
     '',
-    'Generated from one explicit local source inspection. This file contains only observed TypeScript/JavaScript top-level export facts reported by the inspector.',
+    'Generated from one explicit local source inspection. This file contains only observed TypeScript/JavaScript top-level export facts and package/config facts reported by the inspector.',
     '',
     '## Source',
     '',
@@ -184,8 +186,11 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
     '## Warnings And Limitations',
     '',
     '- No runtime behavior is inferred.',
+    '- No framework identity, routes, task fit, or source selection is inferred.',
     '- Re-export targets and export-all targets are not resolved.',
-    '- Only supported TypeScript/JavaScript source files within the inspection limits can contribute facts.',
+    '- Package/config facts are reported only from explicit `package.json` and `tsconfig*.json` files within the inspection limits.',
+    '- Config line ranges are field-level when the inspector can locate a JSON property or array item; otherwise they use the file line range and say so.',
+    '- Only supported TypeScript/JavaScript, package manifest, and tsconfig files within the inspection limits can contribute facts.',
   ];
 
   if (report.warnings.length > 0) {
@@ -198,7 +203,13 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
 
   lines.push('', '## Export Facts', '');
 
-  for (const file of filesWithFacts(report.files)) {
+  const exportFiles = filesWithExportFacts(report.files);
+
+  if (exportFiles.length === 0) {
+    lines.push('No TypeScript/JavaScript export facts were observed.', '');
+  }
+
+  for (const file of exportFiles) {
     lines.push(`### \`${escapeMarkdownCode(file.path)}\``, '');
 
     for (const fact of file.facts) {
@@ -217,6 +228,40 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
       lines.push(
         `  - Lines: \`${fact.provenance.lineRange.start}-${fact.provenance.lineRange.end}\``
       );
+    }
+
+    lines.push('');
+  }
+
+  lines.push('## Package And Config Facts', '');
+
+  const configFiles = filesWithConfigFacts(report.files);
+
+  if (configFiles.length === 0) {
+    lines.push('No package or config facts were observed.', '');
+  }
+
+  for (const file of configFiles) {
+    lines.push(`### \`${escapeMarkdownCode(file.path)}\``, '');
+
+    for (const fact of file.configFacts) {
+      lines.push(`- \`${escapeMarkdownCode(fact.name)}\``);
+      lines.push(`  - Fact kind: \`${fact.kind}\``);
+      lines.push(`  - Config file kind: \`${fact.configFileKind}\``);
+      lines.push(`  - Field path: \`${escapeMarkdownCode(fact.fieldPath)}\``);
+
+      if (fact.group !== undefined) {
+        lines.push(`  - Group: \`${escapeMarkdownCode(fact.group)}\``);
+      }
+
+      if (fact.value !== undefined) {
+        lines.push(`  - Value: \`${escapeMarkdownCode(String(fact.value))}\``);
+      }
+
+      lines.push(
+        `  - Lines: \`${fact.provenance.lineRange.start}-${fact.provenance.lineRange.end}\``
+      );
+      lines.push(`  - Line range granularity: \`${fact.lineRangeGranularity}\``);
     }
 
     lines.push('');
@@ -243,12 +288,14 @@ function buildManifest(
       traversal: report.traversal,
       warnings: report.warnings,
     },
-    sourceFiles: filesWithFacts(report.files).map((file) => ({
+    sourceFiles: filesWithAnyFacts(report.files).map((file) => ({
       path: file.path,
       resolvedPath: file.resolvedPath,
       byteSize: file.byteSize,
       hash: formatHash(file.sha256 ?? ''),
-      factCount: file.facts.length,
+      factCount: file.facts.length + file.configFacts.length,
+      exportFactCount: file.facts.length,
+      configFactCount: file.configFacts.length,
       parseDiagnosticCount: file.parseDiagnostics?.length ?? 0,
     })),
     generatedOutputs,
@@ -263,7 +310,8 @@ function buildFailure(
     schemaVersion: SOURCE_TRUTH_DOCS_SCHEMA_VERSION,
     mode: SOURCE_TRUTH_DOCS_FAILURE_MODE,
     reason: 'no-extractable-source-truth-facts',
-    message: 'No extractable source-truth facts were found for the explicit local source path.',
+    message:
+      'No extractable source-truth export or package/config facts were found for the explicit local source path.',
     source: {
       input: report.source.input,
       resolvedPath: report.source.resolvedPath,
@@ -281,8 +329,16 @@ function buildFailure(
   };
 }
 
-function filesWithFacts(files: SourceTruthFileEvidence[]): SourceTruthFileEvidence[] {
+function filesWithExportFacts(files: SourceTruthFileEvidence[]): SourceTruthFileEvidence[] {
   return files.filter((file) => file.facts.length > 0);
+}
+
+function filesWithConfigFacts(files: SourceTruthFileEvidence[]): SourceTruthFileEvidence[] {
+  return files.filter((file) => file.configFacts.length > 0);
+}
+
+function filesWithAnyFacts(files: SourceTruthFileEvidence[]): SourceTruthFileEvidence[] {
+  return files.filter((file) => file.facts.length > 0 || file.configFacts.length > 0);
 }
 
 async function clearGeneratedArtifacts(outputDir: string): Promise<void> {

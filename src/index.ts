@@ -133,6 +133,10 @@ export {
 } from './core/source-truth.js';
 export type {
   InspectSourceTruthOptions,
+  SourceTruthConfigFact,
+  SourceTruthConfigFactKind,
+  SourceTruthConfigFileKind,
+  SourceTruthConfigLineRangeGranularity,
   SourceTruthFact,
   SourceTruthFactKind,
   SourceTruthFileEvidence,

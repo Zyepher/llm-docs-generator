@@ -93,7 +93,8 @@ sourceTruthCommand
 
       console.log(chalk.bold('Source-truth docs generated'));
       console.log(`  Source: ${result.report.source.resolvedPath}`);
-      console.log(`  Facts: ${result.report.facts.length}`);
+      console.log(`  Export facts: ${result.report.facts.length}`);
+      console.log(`  Package/config facts: ${result.report.configFacts.length}`);
       console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
       console.log(`  Markdown: ${chalk.cyan(result.markdownPath)}`);
       console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);

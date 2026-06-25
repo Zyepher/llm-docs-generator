@@ -45,6 +45,18 @@ const SUPPORTED_SOURCE_EXTENSIONS = new Set([
   '.tsx',
 ]);
 
+const PACKAGE_JSON_FILE_NAME = 'package.json';
+const TSCONFIG_FILE_PATTERN = /^tsconfig(?:\..*)?\.json$/;
+const PACKAGE_DEPENDENCY_FIELDS = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies',
+  'bundledDependencies',
+  'bundleDependencies',
+] as const;
+const TSCONFIG_ARRAY_FIELDS = ['include', 'exclude', 'files'] as const;
+
 export type SourceTruthSourceType = 'file' | 'directory';
 export type SourceTruthFileStatus = 'inspected' | 'skipped';
 export type SourceTruthSkipReason = 'unsupported-extension' | 'oversized' | 'unreadable';
@@ -61,6 +73,21 @@ export type SourceTruthSymbolKind =
   | 'type'
   | 'value'
   | 'unknown';
+export type SourceTruthConfigFileKind = 'package-json' | 'tsconfig-json';
+export type SourceTruthConfigLineRangeGranularity = 'field' | 'file';
+export type SourceTruthConfigFactKind =
+  | 'package-name'
+  | 'package-version'
+  | 'package-type'
+  | 'package-manager'
+  | 'package-bin-name'
+  | 'package-export-key'
+  | 'package-script-name'
+  | 'package-dependency-name'
+  | 'tsconfig-extends'
+  | 'tsconfig-compiler-option'
+  | 'tsconfig-array-count'
+  | 'tsconfig-array-path';
 
 export interface SourceTruthLineRange {
   start: number;
@@ -82,6 +109,18 @@ export interface SourceTruthFact {
   moduleSpecifier?: string;
 }
 
+export interface SourceTruthConfigFact {
+  kind: SourceTruthConfigFactKind;
+  configFileKind: SourceTruthConfigFileKind;
+  fieldPath: string;
+  name: string;
+  value?: string | number;
+  group?: string;
+  provenance: SourceTruthProvenance;
+  lineRangeGranularity: SourceTruthConfigLineRangeGranularity;
+  order: number;
+}
+
 export interface SourceTruthParseDiagnostic {
   code: number;
   category: string;
@@ -97,6 +136,7 @@ export interface SourceTruthFileEvidence {
   sha256?: string;
   supported: boolean;
   facts: SourceTruthFact[];
+  configFacts: SourceTruthConfigFact[];
   parseDiagnostics?: SourceTruthParseDiagnostic[];
   skipReason?: SourceTruthSkipReason;
 }
@@ -126,6 +166,7 @@ export interface SourceTruthInspectionReport {
   traversal: SourceTruthTraversalSettings;
   files: SourceTruthFileEvidence[];
   facts: SourceTruthFact[];
+  configFacts: SourceTruthConfigFact[];
   warnings: string[];
 }
 
@@ -227,6 +268,10 @@ export async function inspectSourceTruth(
   facts.forEach((fact, index) => {
     fact.order = index + 1;
   });
+  const configFacts = files.flatMap((file) => file.configFacts);
+  configFacts.forEach((fact, index) => {
+    fact.order = index + 1;
+  });
 
   return {
     schemaVersion: SOURCE_TRUTH_REPORT_SCHEMA_VERSION,
@@ -251,6 +296,7 @@ export async function inspectSourceTruth(
     },
     files,
     facts,
+    configFacts,
     warnings,
   };
 }
@@ -437,7 +483,7 @@ async function inspectFile(options: {
 
   state.visitedFiles++;
 
-  if (!isSupportedSourceFile(pathForReport)) {
+  if (!isSupportedInspectableFile(pathForReport)) {
     state.skippedFiles++;
     warnings.push(`Skipped unsupported file: ${pathForReport}`);
     files.push({
@@ -447,6 +493,7 @@ async function inspectFile(options: {
       byteSize: stats.size,
       supported: false,
       facts: [],
+      configFacts: [],
       skipReason: 'unsupported-extension',
     });
     return;
@@ -462,6 +509,7 @@ async function inspectFile(options: {
       byteSize: stats.size,
       supported: true,
       facts: [],
+      configFacts: [],
       skipReason: 'oversized',
     });
     return;
@@ -471,7 +519,10 @@ async function inspectFile(options: {
     const contentBytes = await readFile(absolutePath);
     const content = contentBytes.toString('utf-8');
     const sha256 = createHash('sha256').update(contentBytes).digest('hex');
-    const extraction = extractTypeScriptJavaScriptFacts(pathForReport, content);
+    const extraction = isSupportedSourceFile(pathForReport)
+      ? extractTypeScriptJavaScriptFacts(pathForReport, content)
+      : { facts: [], parseDiagnostics: [] };
+    const configExtraction = extractPackageConfigFacts(pathForReport, content);
     const fileEvidence: SourceTruthFileEvidence = {
       path: pathForReport,
       resolvedPath: absolutePath,
@@ -480,6 +531,7 @@ async function inspectFile(options: {
       sha256,
       supported: true,
       facts: extraction.facts,
+      configFacts: configExtraction.facts,
     };
 
     if (extraction.parseDiagnostics.length > 0) {
@@ -487,6 +539,10 @@ async function inspectFile(options: {
       warnings.push(
         `Syntax diagnostics in file: ${pathForReport} (${extraction.parseDiagnostics.length})`
       );
+    }
+
+    for (const warning of configExtraction.warnings) {
+      warnings.push(warning);
     }
 
     state.inspectedFiles++;
@@ -501,6 +557,7 @@ async function inspectFile(options: {
       byteSize: stats.size,
       supported: true,
       facts: [],
+      configFacts: [],
       skipReason: 'unreadable',
     });
   }
@@ -759,6 +816,782 @@ function extractTypeScriptJavaScriptFacts(
   return { facts, parseDiagnostics };
 }
 
+function extractPackageConfigFacts(
+  path: string,
+  content: string
+): {
+  facts: SourceTruthConfigFact[];
+  warnings: string[];
+} {
+  if (isPackageJsonFile(path)) {
+    return extractPackageJsonFacts(path, content);
+  }
+
+  if (isTsConfigJsonFile(path)) {
+    return extractTsConfigJsonFacts(path, content);
+  }
+
+  return { facts: [], warnings: [] };
+}
+
+function extractPackageJsonFacts(
+  path: string,
+  content: string
+): {
+  facts: SourceTruthConfigFact[];
+  warnings: string[];
+} {
+  const parsed = parseStrictJsonObject(content);
+
+  if (parsed === undefined) {
+    return {
+      facts: [],
+      warnings: [`Could not parse package config evidence in file: ${path}`],
+    };
+  }
+
+  const facts: SourceTruthConfigFact[] = [];
+  const locator = createJsonLocator(content);
+
+  addStringFieldFact(facts, {
+    kind: 'package-name',
+    configFileKind: 'package-json',
+    locator,
+    sourcePath: path,
+    object: parsed,
+    fieldPath: ['name'],
+    name: 'name',
+  });
+  addStringFieldFact(facts, {
+    kind: 'package-version',
+    configFileKind: 'package-json',
+    locator,
+    sourcePath: path,
+    object: parsed,
+    fieldPath: ['version'],
+    name: 'version',
+  });
+  addStringFieldFact(facts, {
+    kind: 'package-type',
+    configFileKind: 'package-json',
+    locator,
+    sourcePath: path,
+    object: parsed,
+    fieldPath: ['type'],
+    name: 'type',
+  });
+  addStringFieldFact(facts, {
+    kind: 'package-manager',
+    configFileKind: 'package-json',
+    locator,
+    sourcePath: path,
+    object: parsed,
+    fieldPath: ['packageManager'],
+    name: 'packageManager',
+  });
+
+  const binValue = parsed.bin;
+
+  if (isRecord(binValue)) {
+    for (const binName of sortedKeys(binValue)) {
+      facts.push(
+        buildConfigFact({
+          kind: 'package-bin-name',
+          configFileKind: 'package-json',
+          fieldPath: ['bin', binName],
+          name: binName,
+          locator,
+          sourcePath: path,
+        })
+      );
+    }
+  }
+
+  if (isRecord(parsed.exports)) {
+    for (const exportKey of sortedKeys(parsed.exports)) {
+      facts.push(
+        buildConfigFact({
+          kind: 'package-export-key',
+          configFileKind: 'package-json',
+          fieldPath: ['exports', exportKey],
+          name: exportKey,
+          locator,
+          sourcePath: path,
+        })
+      );
+    }
+  }
+
+  if (isRecord(parsed.scripts)) {
+    for (const scriptName of sortedKeys(parsed.scripts)) {
+      facts.push(
+        buildConfigFact({
+          kind: 'package-script-name',
+          configFileKind: 'package-json',
+          fieldPath: ['scripts', scriptName],
+          name: scriptName,
+          locator,
+          sourcePath: path,
+        })
+      );
+    }
+  }
+
+  for (const dependencyField of PACKAGE_DEPENDENCY_FIELDS) {
+    const dependencyValue = parsed[dependencyField];
+
+    if (isRecord(dependencyValue)) {
+      for (const dependencyName of sortedKeys(dependencyValue)) {
+        facts.push(
+          buildConfigFact({
+            kind: 'package-dependency-name',
+            configFileKind: 'package-json',
+            fieldPath: [dependencyField, dependencyName],
+            name: dependencyName,
+            group: dependencyField,
+            locator,
+            sourcePath: path,
+          })
+        );
+      }
+    } else if (Array.isArray(dependencyValue)) {
+      dependencyValue.forEach((dependencyName, index) => {
+        if (typeof dependencyName === 'string') {
+          facts.push(
+            buildConfigFact({
+              kind: 'package-dependency-name',
+              configFileKind: 'package-json',
+              fieldPath: [dependencyField],
+              name: dependencyName,
+              group: dependencyField,
+              value: dependencyName,
+              arrayStringIndex: index,
+              locator,
+              sourcePath: path,
+            })
+          );
+        }
+      });
+    }
+  }
+
+  return { facts, warnings: [] };
+}
+
+function extractTsConfigJsonFacts(
+  path: string,
+  content: string
+): {
+  facts: SourceTruthConfigFact[];
+  warnings: string[];
+} {
+  const parsed = ts.parseConfigFileTextToJson(path, content);
+
+  if (parsed.error !== undefined || !isRecord(parsed.config)) {
+    return {
+      facts: [],
+      warnings: [`Could not parse tsconfig evidence in file: ${path}`],
+    };
+  }
+
+  const config = parsed.config;
+  const facts: SourceTruthConfigFact[] = [];
+  const locator = createJsonLocator(content);
+
+  addStringFieldFact(facts, {
+    kind: 'tsconfig-extends',
+    configFileKind: 'tsconfig-json',
+    locator,
+    sourcePath: path,
+    object: config,
+    fieldPath: ['extends'],
+    name: 'extends',
+  });
+
+  if (isRecord(config.compilerOptions)) {
+    for (const compilerOptionKey of sortedKeys(config.compilerOptions)) {
+      facts.push(
+        buildConfigFact({
+          kind: 'tsconfig-compiler-option',
+          configFileKind: 'tsconfig-json',
+          fieldPath: ['compilerOptions', compilerOptionKey],
+          name: compilerOptionKey,
+          locator,
+          sourcePath: path,
+        })
+      );
+    }
+  }
+
+  for (const arrayField of TSCONFIG_ARRAY_FIELDS) {
+    const value = config[arrayField];
+
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    facts.push(
+      buildConfigFact({
+        kind: 'tsconfig-array-count',
+        configFileKind: 'tsconfig-json',
+        fieldPath: [arrayField],
+        name: arrayField,
+        value: value.length,
+        group: arrayField,
+        locator,
+        sourcePath: path,
+      })
+    );
+
+    value.forEach((item, index) => {
+      if (typeof item === 'string') {
+        facts.push(
+          buildConfigFact({
+            kind: 'tsconfig-array-path',
+            configFileKind: 'tsconfig-json',
+            fieldPath: [arrayField],
+            name: item,
+            value: item,
+            group: arrayField,
+            arrayStringIndex: index,
+            locator,
+            sourcePath: path,
+          })
+        );
+      }
+    });
+  }
+
+  return { facts, warnings: [] };
+}
+
+function addStringFieldFact(
+  facts: SourceTruthConfigFact[],
+  options: {
+    kind: SourceTruthConfigFactKind;
+    configFileKind: SourceTruthConfigFileKind;
+    locator: JsonLocator;
+    sourcePath: string;
+    object: Record<string, unknown>;
+    fieldPath: string[];
+    name: string;
+  }
+): void {
+  const value = valueAtPath(options.object, options.fieldPath);
+
+  if (typeof value !== 'string') {
+    return;
+  }
+
+  facts.push(
+    buildConfigFact({
+      kind: options.kind,
+      configFileKind: options.configFileKind,
+      fieldPath: options.fieldPath,
+      name: options.name,
+      value,
+      locator: options.locator,
+      sourcePath: options.sourcePath,
+    })
+  );
+}
+
+function buildConfigFact(options: {
+  kind: SourceTruthConfigFactKind;
+  configFileKind: SourceTruthConfigFileKind;
+  fieldPath: string[];
+  name: string;
+  locator: JsonLocator;
+  sourcePath: string;
+  value?: string | number;
+  group?: string;
+  arrayStringIndex?: number;
+}): SourceTruthConfigFact {
+  const propertyLineRange =
+    options.arrayStringIndex === undefined
+      ? options.locator.findPropertyLineRange(options.fieldPath)
+      : options.locator.findArrayStringLineRange(
+          options.fieldPath,
+          options.name,
+          options.arrayStringIndex
+        );
+  const lineRange = propertyLineRange ?? options.locator.fileLineRange;
+  const fact: SourceTruthConfigFact = {
+    kind: options.kind,
+    configFileKind: options.configFileKind,
+    fieldPath: formatJsonFieldPath(options.fieldPath),
+    name: options.name,
+    provenance: {
+      path: options.sourcePath,
+      lineRange,
+    },
+    lineRangeGranularity: propertyLineRange === undefined ? 'file' : 'field',
+    order: 0,
+  };
+
+  if (options.value !== undefined) {
+    fact.value = options.value;
+  }
+
+  if (options.group !== undefined) {
+    fact.group = options.group;
+  }
+
+  return fact;
+}
+
+function parseStrictJsonObject(content: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(content) as unknown;
+
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function valueAtPath(object: Record<string, unknown>, path: string[]): unknown {
+  let current: unknown = object;
+
+  for (const segment of path) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+
+    current = current[segment];
+  }
+
+  return current;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sortedKeys(value: Record<string, unknown>): string[] {
+  return Object.keys(value).sort(compareStringsByCodeUnit);
+}
+
+function formatJsonFieldPath(path: string[]): string {
+  return path
+    .map((segment, index) => {
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment)) {
+        return index === 0 ? segment : `.${segment}`;
+      }
+
+      return `[${JSON.stringify(segment)}]`;
+    })
+    .join('');
+}
+
+type JsonTokenKind = '{' | '}' | '[' | ']' | ':' | ',' | 'string' | 'primitive';
+
+interface JsonToken {
+  kind: JsonTokenKind;
+  start: number;
+  end: number;
+  value?: string;
+}
+
+interface JsonLocator {
+  readonly fileLineRange: SourceTruthLineRange;
+  findPropertyLineRange(propertyPath: string[]): SourceTruthLineRange | undefined;
+  findArrayStringLineRange(
+    propertyPath: string[],
+    value: string,
+    arrayStringIndex: number
+  ): SourceTruthLineRange | undefined;
+}
+
+function createJsonLocator(content: string): JsonLocator {
+  const tokens = tokenizeJsonLike(content);
+  const lineStarts = buildLineStarts(content);
+  const fileLineRange = lineRangeForSpan(lineStarts, 0, content.length);
+
+  return {
+    fileLineRange,
+    findPropertyLineRange(propertyPath: string[]): SourceTruthLineRange | undefined {
+      const tokenMatch = findJsonPropertyToken(tokens, propertyPath);
+
+      return tokenMatch === undefined
+        ? undefined
+        : lineRangeForSpan(lineStarts, tokenMatch.propertyStart, tokenMatch.valueEnd);
+    },
+    findArrayStringLineRange(
+      propertyPath: string[],
+      value: string,
+      arrayStringIndex: number
+    ): SourceTruthLineRange | undefined {
+      const tokenMatch = findJsonPropertyToken(tokens, propertyPath);
+
+      if (tokenMatch === undefined || tokenMatch.valueToken.kind !== '[') {
+        return undefined;
+      }
+
+      let arrayValueIndex = 0;
+
+      for (let index = tokenMatch.valueTokenIndex + 1; index < tokens.length; ) {
+        const token = tokens[index] as JsonToken;
+
+        if (token.kind === ',') {
+          index++;
+          continue;
+        }
+
+        if (token.kind === ']') {
+          return undefined;
+        }
+
+        if (arrayValueIndex === arrayStringIndex) {
+          if (token.kind === 'string' && token.value === value) {
+            return lineRangeForSpan(lineStarts, token.start, token.end);
+          }
+
+          return undefined;
+        }
+
+        index = skipJsonValue(tokens, index) + 1;
+        arrayValueIndex++;
+      }
+
+      return undefined;
+    },
+  };
+}
+
+function findJsonPropertyToken(
+  tokens: JsonToken[],
+  propertyPath: string[]
+):
+  | {
+      propertyStart: number;
+      valueEnd: number;
+      valueToken: JsonToken;
+      valueTokenIndex: number;
+    }
+  | undefined {
+  const rootIndex = tokens.findIndex((token) => token.kind === '{');
+
+  if (rootIndex === -1) {
+    return undefined;
+  }
+
+  return findPropertyInObject(tokens, rootIndex + 1, propertyPath, 0);
+}
+
+function findPropertyInObject(
+  tokens: JsonToken[],
+  startIndex: number,
+  propertyPath: string[],
+  pathIndex: number
+):
+  | {
+      propertyStart: number;
+      valueEnd: number;
+      valueToken: JsonToken;
+      valueTokenIndex: number;
+    }
+  | undefined {
+  let index = startIndex;
+  let lastMatch:
+    | {
+        propertyStart: number;
+        valueEnd: number;
+        valueToken: JsonToken;
+        valueTokenIndex: number;
+      }
+    | undefined;
+
+  while (index < tokens.length) {
+    const token = tokens[index] as JsonToken;
+
+    if (token.kind === '}') {
+      return lastMatch;
+    }
+
+    if (token.kind !== 'string') {
+      index++;
+      continue;
+    }
+
+    const colonIndex = nextNonCommaTokenIndex(tokens, index + 1);
+
+    if (colonIndex === undefined || tokens[colonIndex]?.kind !== ':') {
+      index++;
+      continue;
+    }
+
+    const valueTokenIndex = nextTokenIndex(tokens, colonIndex + 1);
+
+    if (valueTokenIndex === undefined) {
+      return undefined;
+    }
+
+    const valueToken = tokens[valueTokenIndex] as JsonToken;
+    const valueEndIndex = skipJsonValue(tokens, valueTokenIndex);
+    const valueEnd = tokens[valueEndIndex]?.end ?? valueToken.end;
+
+    if (token.value === propertyPath[pathIndex]) {
+      if (pathIndex === propertyPath.length - 1) {
+        lastMatch = {
+          propertyStart: token.start,
+          valueEnd,
+          valueToken,
+          valueTokenIndex,
+        };
+      } else if (valueToken.kind === '{') {
+        const nestedMatch = findPropertyInObject(
+          tokens,
+          valueTokenIndex + 1,
+          propertyPath,
+          pathIndex + 1
+        );
+
+        if (nestedMatch !== undefined) {
+          lastMatch = nestedMatch;
+        }
+      } else {
+        lastMatch = undefined;
+      }
+    }
+
+    index = valueEndIndex + 1;
+  }
+
+  return lastMatch;
+}
+
+function skipJsonValue(tokens: JsonToken[], valueTokenIndex: number): number {
+  const firstToken = tokens[valueTokenIndex] as JsonToken;
+
+  if (firstToken.kind !== '{' && firstToken.kind !== '[') {
+    return valueTokenIndex;
+  }
+
+  const openKind = firstToken.kind;
+  const closeKind = openKind === '{' ? '}' : ']';
+  let depth = 0;
+
+  for (let index = valueTokenIndex; index < tokens.length; index++) {
+    const token = tokens[index] as JsonToken;
+
+    if (token.kind === openKind) {
+      depth++;
+      continue;
+    }
+
+    if (token.kind === closeKind) {
+      depth--;
+
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return valueTokenIndex;
+}
+
+function nextTokenIndex(tokens: JsonToken[], startIndex: number): number | undefined {
+  return startIndex < tokens.length ? startIndex : undefined;
+}
+
+function nextNonCommaTokenIndex(tokens: JsonToken[], startIndex: number): number | undefined {
+  for (let index = startIndex; index < tokens.length; index++) {
+    if (tokens[index]?.kind !== ',') {
+      return index;
+    }
+  }
+
+  return undefined;
+}
+
+function tokenizeJsonLike(content: string): JsonToken[] {
+  const tokens: JsonToken[] = [];
+  let index = 0;
+
+  while (index < content.length) {
+    const char = content[index] as string;
+    const nextChar = content[index + 1];
+
+    if (/\s/.test(char)) {
+      index++;
+      continue;
+    }
+
+    if (char === '/' && nextChar === '/') {
+      index += 2;
+
+      while (index < content.length && content[index] !== '\n') {
+        index++;
+      }
+
+      continue;
+    }
+
+    if (char === '/' && nextChar === '*') {
+      index += 2;
+
+      while (index < content.length && !(content[index] === '*' && content[index + 1] === '/')) {
+        index++;
+      }
+
+      index += 2;
+      continue;
+    }
+
+    if (char === '"') {
+      const stringToken = readJsonStringToken(content, index);
+      tokens.push(stringToken);
+      index = stringToken.end;
+      continue;
+    }
+
+    if (
+      char === '{' ||
+      char === '}' ||
+      char === '[' ||
+      char === ']' ||
+      char === ':' ||
+      char === ','
+    ) {
+      tokens.push({ kind: char, start: index, end: index + 1 });
+      index++;
+      continue;
+    }
+
+    const primitiveToken = readJsonPrimitiveToken(content, index);
+
+    if (primitiveToken !== undefined) {
+      tokens.push(primitiveToken);
+      index = primitiveToken.end;
+      continue;
+    }
+
+    index++;
+  }
+
+  return tokens;
+}
+
+function readJsonStringToken(content: string, start: number): JsonToken {
+  let index = start + 1;
+  let rawValue = '';
+
+  while (index < content.length) {
+    const char = content[index] as string;
+
+    if (char === '\\') {
+      rawValue += char;
+      index++;
+
+      if (index < content.length) {
+        rawValue += content[index] as string;
+        index++;
+      }
+
+      continue;
+    }
+
+    if (char === '"') {
+      return {
+        kind: 'string',
+        start,
+        end: index + 1,
+        value: decodeJsonStringValue(rawValue),
+      };
+    }
+
+    rawValue += char;
+    index++;
+  }
+
+  return {
+    kind: 'string',
+    start,
+    end: content.length,
+    value: decodeJsonStringValue(rawValue),
+  };
+}
+
+function readJsonPrimitiveToken(content: string, start: number): JsonToken | undefined {
+  const remaining = content.slice(start);
+  const literalMatch = /^(?:true|false|null)\b/.exec(remaining);
+
+  if (literalMatch !== null) {
+    const [literal] = literalMatch;
+
+    return {
+      kind: 'primitive',
+      start,
+      end: start + literal.length,
+      value: literal,
+    };
+  }
+
+  const numberMatch = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(remaining);
+
+  if (numberMatch !== null) {
+    const [literal] = numberMatch;
+
+    return {
+      kind: 'primitive',
+      start,
+      end: start + literal.length,
+      value: literal,
+    };
+  }
+
+  return undefined;
+}
+
+function decodeJsonStringValue(rawValue: string): string {
+  try {
+    return JSON.parse(`"${rawValue}"`) as string;
+  } catch {
+    return rawValue;
+  }
+}
+
+function buildLineStarts(content: string): number[] {
+  const lineStarts = [0];
+
+  for (let index = 0; index < content.length; index++) {
+    if (content[index] === '\n') {
+      lineStarts.push(index + 1);
+    }
+  }
+
+  return lineStarts;
+}
+
+function lineRangeForSpan(lineStarts: number[], start: number, end: number): SourceTruthLineRange {
+  return {
+    start: lineNumberForOffset(lineStarts, start),
+    end: lineNumberForOffset(lineStarts, Math.max(start, end - 1)),
+  };
+}
+
+function lineNumberForOffset(lineStarts: number[], offset: number): number {
+  let low = 0;
+  let high = lineStarts.length - 1;
+  let matchedIndex = 0;
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const lineStart = lineStarts[middle] as number;
+
+    if (lineStart <= offset) {
+      matchedIndex = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  return matchedIndex + 1;
+}
+
 function buildParseDiagnostic(
   sourceFile: ts.SourceFile,
   diagnostic: ts.Diagnostic
@@ -856,6 +1689,18 @@ function stringLiteralText(node: ts.Node | undefined): string | undefined {
 
 function isSupportedSourceFile(path: string): boolean {
   return SUPPORTED_SOURCE_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
+function isSupportedInspectableFile(path: string): boolean {
+  return isSupportedSourceFile(path) || isPackageJsonFile(path) || isTsConfigJsonFile(path);
+}
+
+function isPackageJsonFile(path: string): boolean {
+  return basename(path) === PACKAGE_JSON_FILE_NAME;
+}
+
+function isTsConfigJsonFile(path: string): boolean {
+  return TSCONFIG_FILE_PATTERN.test(basename(path));
 }
 
 function scriptKindForPath(path: string): ts.ScriptKind {
