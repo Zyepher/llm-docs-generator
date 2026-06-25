@@ -15,6 +15,28 @@ import { readFile } from 'fs/promises';
 import { marked } from 'marked';
 import type { Token } from 'marked';
 
+type MarkdownSourceSyntax = 'markdown' | 'mdx';
+type MdxDeclarationKind = 'import' | 'export';
+
+const MDX_WRAPPER_COMPONENTS = new Set([
+  'Tabs',
+  'Tab',
+  'TabItem',
+  'Steps',
+  'Step',
+  'Cards',
+  'Card',
+  'Accordion',
+  'AccordionItem',
+  'Callout',
+  'Alert',
+  'Note',
+  'Warning',
+  'Tip',
+]);
+
+const MDX_ADMONITION_COMPONENTS = new Set(['Callout', 'Alert', 'Note', 'Warning', 'Tip']);
+
 /**
  * Parsed markdown document structure
  */
@@ -60,9 +82,14 @@ export class MarkdownParser {
   async parse(): Promise<MarkdownDocument> {
     // Read file
     const content = await readFile(this.filePath, 'utf-8');
+    const sourceSyntax = this.inferSourceSyntax(this.filePath);
 
-    // Clean DocC directives and test comments
-    const cleaned = this.cleanDocCContent(content);
+    // Extract metadata before stripping frontmatter from parseable content
+    const metadata = this.extractMetadata(content);
+    metadata.set('sourceSyntax', sourceSyntax);
+
+    // Clean unsupported Markdown/MDX syntax outside fenced code
+    const cleaned = this.cleanMarkdownContent(content, sourceSyntax);
 
     // Parse with marked
     const tokens = marked.lexer(cleaned);
@@ -73,9 +100,6 @@ export class MarkdownParser {
     // Build hierarchical sections
     const sections = this.buildSections(tokens);
 
-    // Extract metadata
-    const metadata = this.extractMetadata(content);
-
     return {
       path: this.filePath,
       title,
@@ -85,17 +109,33 @@ export class MarkdownParser {
   }
 
   /**
-   * Clean DocC-specific syntax and test comments
+   * Clean Markdown syntax extensions that are not documentation prose.
    *
    * Removes:
+   * - YAML frontmatter from parseable content
    * - @Metadata blocks
    * - <doc:...> cross-references (keep text)
    * - <!-- test comments -->
    * - @Options directives
+   * - MDX imports/exports, wrapper tags, JSX comments, and expression-only lines
    *
-   * Performance: O(n) - single pass with regex
+   * Performance: O(n) - line-oriented pass over text and fenced code segments
    */
-  private cleanDocCContent(content: string): string {
+  private cleanMarkdownContent(content: string, sourceSyntax: MarkdownSourceSyntax): string {
+    const withoutFrontmatter = this.stripYamlFrontmatter(content);
+    return this.cleanOutsideFencedCode(withoutFrontmatter, (segment) => {
+      let cleanedSegment = this.cleanDocCContentSegment(segment);
+      if (sourceSyntax === 'mdx') {
+        cleanedSegment = this.cleanMdxContentSegment(cleanedSegment);
+      }
+      return this.compressBlankLines(cleanedSegment);
+    }).trim();
+  }
+
+  /**
+   * Clean DocC-specific syntax and test comments outside fenced code.
+   */
+  private cleanDocCContentSegment(content: string): string {
     let cleaned = content;
 
     // Remove @Metadata blocks
@@ -110,10 +150,561 @@ export class MarkdownParser {
     // Remove HTML test comments (<!-- ... -->)
     cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
 
-    // Remove empty lines (more than 2 consecutive)
-    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+    return cleaned;
+  }
 
-    return cleaned.trim();
+  /**
+   * Clean common MDX syntax outside fenced code without evaluating expressions.
+   */
+  private cleanMdxContentSegment(content: string): string {
+    const lines = content.split('\n');
+    const output: string[] = [];
+    let inJsxComment = false;
+    let skippingDeclaration: MdxDeclarationKind | null = null;
+    let declarationBalance = 0;
+    let expressionBalance = 0;
+    let pendingComponentLines: string[] | null = null;
+
+    for (const originalLine of lines) {
+      const commentResult = this.stripJsxCommentsFromLine(originalLine, inJsxComment);
+      const line = commentResult.line;
+      inJsxComment = commentResult.inComment;
+      const trimmed = line.trim();
+
+      if (pendingComponentLines !== null) {
+        pendingComponentLines.push(line);
+        if (trimmed.includes('>')) {
+          const replacement = this.cleanMdxComponentLine(
+            pendingComponentLines.map((componentLine) => componentLine.trim()).join(' ')
+          );
+          if (replacement !== undefined) {
+            output.push(...replacement);
+          } else {
+            output.push(...pendingComponentLines);
+          }
+          pendingComponentLines = null;
+        }
+        continue;
+      }
+
+      if (skippingDeclaration !== null) {
+        declarationBalance += this.delimiterBalance(line);
+        if (declarationBalance <= 0) {
+          skippingDeclaration = null;
+          declarationBalance = 0;
+        }
+        continue;
+      }
+
+      if (expressionBalance > 0) {
+        expressionBalance += this.delimiterBalance(line);
+        if (expressionBalance <= 0) {
+          expressionBalance = 0;
+        }
+        continue;
+      }
+
+      if (trimmed === '') {
+        output.push(line);
+        continue;
+      }
+
+      const declarationKind = this.getMdxDeclarationKind(trimmed);
+      if (declarationKind !== null) {
+        declarationBalance = this.delimiterBalance(trimmed);
+        if (this.shouldContinueMdxDeclaration(trimmed, declarationKind, declarationBalance)) {
+          skippingDeclaration = declarationKind;
+        } else {
+          declarationBalance = 0;
+        }
+        continue;
+      }
+
+      if (this.isMdxExpressionOnlyLine(trimmed)) {
+        expressionBalance = this.delimiterBalance(trimmed);
+        if (expressionBalance <= 0) {
+          expressionBalance = 0;
+        }
+        continue;
+      }
+
+      if (this.startsMultilineMdxComponentTag(trimmed)) {
+        pendingComponentLines = [line];
+        continue;
+      }
+
+      const componentReplacement = this.cleanMdxComponentLine(line);
+      if (componentReplacement !== undefined) {
+        output.push(...componentReplacement);
+        continue;
+      }
+
+      output.push(line);
+    }
+
+    if (pendingComponentLines !== null) {
+      output.push(...pendingComponentLines);
+    }
+
+    return output.join('\n');
+  }
+
+  /**
+   * Apply text cleanup only outside fenced code blocks.
+   */
+  private cleanOutsideFencedCode(
+    content: string,
+    cleanSegment: (segment: string) => string
+  ): string {
+    const output: string[] = [];
+    let textLines: string[] = [];
+    let fence: { marker: '`' | '~'; length: number } | null = null;
+
+    const flushText = (): void => {
+      if (textLines.length === 0) {
+        return;
+      }
+
+      const cleaned = cleanSegment(textLines.join('\n'));
+      if (cleaned.length > 0) {
+        output.push(...cleaned.split('\n'));
+      }
+      textLines = [];
+    };
+
+    for (const line of content.split('\n')) {
+      if (fence !== null) {
+        output.push(line);
+        if (this.isClosingFence(line, fence)) {
+          fence = null;
+        }
+        continue;
+      }
+
+      const openingFence = this.getOpeningFence(line);
+      if (openingFence !== null) {
+        flushText();
+        output.push(line);
+        fence = openingFence;
+        continue;
+      }
+
+      textLines.push(line);
+    }
+
+    flushText();
+    return output.join('\n');
+  }
+
+  private stripYamlFrontmatter(content: string): string {
+    return this.readYamlFrontmatter(content)?.contentAfter ?? content;
+  }
+
+  private readYamlFrontmatter(
+    content: string
+  ): { frontmatter: string; contentAfter: string } | null {
+    const withoutBom = content.replace(/^\uFEFF/, '');
+    const lines = withoutBom.split('\n');
+
+    if (lines[0]?.trim() !== '---') {
+      return null;
+    }
+
+    for (let index = 1; index < lines.length; index += 1) {
+      const trimmed = lines[index]?.trim();
+      if (trimmed === '---' || trimmed === '...') {
+        return {
+          frontmatter: lines.slice(1, index).join('\n'),
+          contentAfter: lines.slice(index + 1).join('\n'),
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private compressBlankLines(content: string): string {
+    return content.replace(/\n{3,}/g, '\n\n');
+  }
+
+  private getOpeningFence(line: string): { marker: '`' | '~'; length: number } | null {
+    const match = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    const rawMarker = match?.[1];
+    if (rawMarker === undefined) {
+      return null;
+    }
+
+    const marker = rawMarker[0] as '`' | '~';
+    return { marker, length: rawMarker.length };
+  }
+
+  private isClosingFence(line: string, fence: { marker: '`' | '~'; length: number }): boolean {
+    const match = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
+    const rawMarker = match?.[1];
+    return (
+      rawMarker !== undefined && rawMarker[0] === fence.marker && rawMarker.length >= fence.length
+    );
+  }
+
+  private stripJsxCommentsFromLine(
+    line: string,
+    inComment: boolean
+  ): { line: string; inComment: boolean } {
+    let result = '';
+    let rest = line;
+    let insideComment = inComment;
+
+    while (rest.length > 0) {
+      if (insideComment) {
+        const endIndex = rest.indexOf('*/}');
+        if (endIndex === -1) {
+          return { line: result, inComment: true };
+        }
+        rest = rest.slice(endIndex + 3);
+        insideComment = false;
+        continue;
+      }
+
+      const startIndex = rest.indexOf('{/*');
+      if (startIndex === -1) {
+        result += rest;
+        break;
+      }
+
+      result += rest.slice(0, startIndex);
+      rest = rest.slice(startIndex + 3);
+      insideComment = true;
+    }
+
+    return { line: result, inComment: insideComment };
+  }
+
+  private getMdxDeclarationKind(line: string): MdxDeclarationKind | null {
+    if (
+      /^import\s+/.test(line) &&
+      (/^import\s+['"]/.test(line) ||
+        /\bfrom\s+['"]/.test(line) ||
+        /^import\s+(?:type\s+)?(?:\{|\*|[\w$]+\s*,)/.test(line))
+    ) {
+      return 'import';
+    }
+
+    if (
+      /^export\s+/.test(line) &&
+      /^export\s+(?:\{|\*|default\b|const\b|let\b|var\b|function\b|class\b|type\b|interface\b|enum\b)/.test(
+        line
+      )
+    ) {
+      return 'export';
+    }
+
+    return null;
+  }
+
+  private shouldContinueMdxDeclaration(
+    line: string,
+    kind: MdxDeclarationKind,
+    balance: number
+  ): boolean {
+    if (balance > 0) {
+      return true;
+    }
+
+    if (kind === 'import') {
+      return !this.isMdxDeclarationEnd(line, kind);
+    }
+
+    return /[({[,]\s*$/.test(line);
+  }
+
+  private isMdxDeclarationEnd(line: string, kind: MdxDeclarationKind): boolean {
+    const normalized = this.normalizeMdxDeclarationLine(line);
+
+    if (normalized.endsWith(';')) {
+      return true;
+    }
+
+    if (kind === 'import') {
+      return this.isCompleteMdxImportDeclaration(normalized);
+    }
+
+    return (
+      /^[})\]](?:\s+(?:as\s+const|satisfies\s+[\w.]+))?;?$/.test(normalized) ||
+      /^}\s*from\s+['"][^'"]+['"];?$/.test(normalized)
+    );
+  }
+
+  private normalizeMdxDeclarationLine(line: string): string {
+    return line
+      .replace(/\s+\/\/.*$/, '')
+      .replace(/\s+\/\*.*?\*\/\s*$/, '')
+      .trim();
+  }
+
+  private isCompleteMdxImportDeclaration(line: string): boolean {
+    const importAttributes = String.raw`(?:\s+(?:assert|with)\s+\{.*\})?`;
+    return (
+      new RegExp(String.raw`^import\s+['"][^'"]+['"]${importAttributes}$`).test(line) ||
+      new RegExp(String.raw`\bfrom\s+['"][^'"]+['"]${importAttributes}$`).test(line)
+    );
+  }
+
+  private isMdxExpressionOnlyLine(line: string): boolean {
+    return line.startsWith('{');
+  }
+
+  private startsMultilineMdxComponentTag(line: string): boolean {
+    const match = line.match(/^<([A-Z][\w.]*)\b/);
+    return match?.[1] !== undefined && !line.includes('>');
+  }
+
+  /**
+   * Remove or unwrap one complete MDX component tag line.
+   *
+   * Returns undefined when the line should be preserved as-is.
+   */
+  private cleanMdxComponentLine(line: string): string[] | undefined {
+    const trimmed = line.trim();
+
+    const compactReplacement = this.cleanCompactMdxComponentSequence(trimmed);
+    if (compactReplacement !== undefined) {
+      return compactReplacement;
+    }
+
+    const closingMatch = trimmed.match(/^<\/([A-Z][\w.]*)>\s*;?$/);
+    if (closingMatch?.[1] !== undefined && this.isMdxWrapperComponent(closingMatch[1])) {
+      return [];
+    }
+
+    const pairedMatch = trimmed.match(/^<([A-Z][\w.]*)\b([^>]*)>(.*?)<\/\1>\s*;?$/);
+    if (pairedMatch?.[1] !== undefined) {
+      const component = pairedMatch[1];
+      if (!this.isMdxWrapperComponent(component)) {
+        return undefined;
+      }
+
+      const replacement = this.labelReplacementForComponent(component, pairedMatch[2] ?? '');
+      const innerText = (pairedMatch[3] ?? '').trim();
+      const cleanedInnerText =
+        innerText === ''
+          ? []
+          : this.cleanMdxContentSegment(innerText)
+              .split('\n')
+              .filter((innerLine) => innerLine !== '');
+      return [...replacement, ...cleanedInnerText];
+    }
+
+    const selfClosingMatch = trimmed.match(/^<([A-Z][\w.]*)\b([^>]*)\/>\s*;?$/);
+    if (selfClosingMatch?.[1] !== undefined) {
+      const component = selfClosingMatch[1];
+      const attributes = selfClosingMatch[2] ?? '';
+      const label = this.extractUsefulMdxAttribute(
+        attributes,
+        this.isMdxWrapperComponent(component)
+      );
+      if (label !== undefined) {
+        return [this.formatMdxAttributeLine(component, label)];
+      }
+      return [];
+    }
+
+    const openingMatch = trimmed.match(/^<([A-Z][\w.]*)\b([^>]*)>\s*$/);
+    if (openingMatch?.[1] !== undefined && this.isMdxWrapperComponent(openingMatch[1])) {
+      return this.labelReplacementForComponent(openingMatch[1], openingMatch[2] ?? '');
+    }
+
+    return undefined;
+  }
+
+  private cleanCompactMdxComponentSequence(line: string): string[] | undefined {
+    let remaining = line.replace(/;$/, '').trim();
+    if (!remaining.startsWith('<')) {
+      return undefined;
+    }
+
+    const output: string[] = [];
+
+    while (remaining !== '') {
+      const parsed = this.parseLeadingMdxComponent(remaining);
+      if (parsed === null) {
+        return undefined;
+      }
+
+      if (!this.isMdxWrapperComponent(parsed.component) && !parsed.selfClosing) {
+        return undefined;
+      }
+
+      if (parsed.selfClosing) {
+        const label = this.extractUsefulMdxAttribute(
+          parsed.attributes,
+          this.isMdxWrapperComponent(parsed.component)
+        );
+        if (label !== undefined) {
+          output.push(this.formatMdxAttributeLine(parsed.component, label));
+        }
+      } else {
+        output.push(...this.labelReplacementForComponent(parsed.component, parsed.attributes));
+
+        const inner = parsed.inner.trim();
+        if (inner !== '') {
+          const nested = this.cleanCompactMdxComponentSequence(inner);
+          if (nested !== undefined) {
+            output.push(...nested);
+          } else {
+            output.push(
+              ...this.cleanMdxContentSegment(inner)
+                .split('\n')
+                .filter((innerLine) => innerLine !== '')
+            );
+          }
+        }
+      }
+
+      remaining = parsed.rest.replace(/;$/, '').trim();
+    }
+
+    return output;
+  }
+
+  private parseLeadingMdxComponent(line: string): {
+    component: string;
+    attributes: string;
+    inner: string;
+    rest: string;
+    selfClosing: boolean;
+  } | null {
+    const selfClosingMatch = line.match(/^<([A-Z][\w.]*)\b([^>]*)\/>\s*/);
+    if (selfClosingMatch?.[1] !== undefined) {
+      return {
+        component: selfClosingMatch[1],
+        attributes: selfClosingMatch[2] ?? '',
+        inner: '',
+        rest: line.slice(selfClosingMatch[0].length),
+        selfClosing: true,
+      };
+    }
+
+    const openingMatch = line.match(/^<([A-Z][\w.]*)\b([^>]*)>\s*/);
+    if (openingMatch?.[1] === undefined) {
+      return null;
+    }
+
+    const component = openingMatch[1];
+    const afterOpening = openingMatch[0].length;
+    const tagPattern = new RegExp(String.raw`</?${this.escapeRegExp(component)}\b[^>]*>`, 'g');
+    tagPattern.lastIndex = afterOpening;
+    let depth = 1;
+
+    for (let match = tagPattern.exec(line); match !== null; match = tagPattern.exec(line)) {
+      const tag = match[0];
+      if (tag.startsWith('</')) {
+        depth -= 1;
+      } else if (!tag.endsWith('/>')) {
+        depth += 1;
+      }
+
+      if (depth === 0) {
+        return {
+          component,
+          attributes: openingMatch[2] ?? '',
+          inner: line.slice(afterOpening, match.index),
+          rest: line.slice(match.index + tag.length),
+          selfClosing: false,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private escapeRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private labelReplacementForComponent(component: string, attributes: string): string[] {
+    const label = this.extractUsefulMdxAttribute(attributes, true);
+    if (label === undefined) {
+      return [];
+    }
+
+    return [this.formatMdxAttributeLine(component, label)];
+  }
+
+  private formatMdxAttributeLine(component: string, label: string): string {
+    if (MDX_ADMONITION_COMPONENTS.has(this.baseMdxComponentName(component))) {
+      return `> ${label}`;
+    }
+
+    return `### ${label}`;
+  }
+
+  private extractUsefulMdxAttribute(
+    attributes: string,
+    includeNameAndValue: boolean
+  ): string | undefined {
+    const allowedAttributes = includeNameAndValue
+      ? ['title', 'label', 'name', 'value']
+      : ['title', 'label', 'aria-label', 'alt'];
+    const values = new Map<string, string>();
+    const attributePattern = /([A-Za-z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
+    for (const match of attributes.matchAll(attributePattern)) {
+      const name = match[1];
+      const value = match[2] ?? match[3] ?? '';
+      if (name !== undefined) {
+        values.set(name, value);
+      }
+    }
+
+    for (const name of allowedAttributes) {
+      const safeValue = this.sanitizeMdxAttributeValue(values.get(name));
+      if (safeValue !== undefined) {
+        return safeValue;
+      }
+    }
+
+    return undefined;
+  }
+
+  private sanitizeMdxAttributeValue(value: string | undefined): string | undefined {
+    const normalized = value?.replace(/\s+/g, ' ').trim();
+    if (
+      normalized === undefined ||
+      normalized === '' ||
+      normalized.length > 120 ||
+      /[<>{}\n\r]/.test(normalized)
+    ) {
+      return undefined;
+    }
+
+    return normalized;
+  }
+
+  private isMdxWrapperComponent(component: string): boolean {
+    return MDX_WRAPPER_COMPONENTS.has(this.baseMdxComponentName(component));
+  }
+
+  private baseMdxComponentName(component: string): string {
+    return component.split('.')[0] ?? component;
+  }
+
+  private delimiterBalance(text: string): number {
+    const withoutStrings = text.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, '');
+    let balance = 0;
+
+    for (const char of withoutStrings) {
+      if (char === '{' || char === '(' || char === '[') {
+        balance += 1;
+      } else if (char === '}' || char === ')' || char === ']') {
+        balance -= 1;
+      }
+    }
+
+    return balance;
+  }
+
+  private inferSourceSyntax(filePath: string): MarkdownSourceSyntax {
+    return filePath.toLowerCase().endsWith('.mdx') ? 'mdx' : 'markdown';
   }
 
   /**
@@ -132,7 +723,7 @@ export class MarkdownParser {
     // Fallback to filename
     const parts = filePath.split('/');
     const filename = parts.at(-1) ?? 'document';
-    return filename.replace(/\.md$/, '');
+    return filename.replace(/\.(?:md|mdx|markdown)$/i, '');
   }
 
   /**
@@ -143,9 +734,7 @@ export class MarkdownParser {
   private extractMetadata(content: string): Map<string, unknown> {
     const metadata = new Map<string, unknown>();
 
-    // Check for YAML frontmatter (--- at start)
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    const frontmatter = frontmatterMatch?.[1];
+    const frontmatter = this.readYamlFrontmatter(content)?.frontmatter;
     if (frontmatter !== undefined) {
       // Simple key-value parsing (could use yaml parser for complex cases)
       const lines = frontmatter.split('\n');

@@ -123,6 +123,7 @@ export class FormatDetector {
         return FormatType.OPENAPI;
 
       case 'md':
+      case 'mdx':
       case 'markdown':
         return FormatType.MARKDOWN;
 

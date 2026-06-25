@@ -125,11 +125,13 @@ The current CLI does not yet expose `generate --source`, refresh, source
 verification, or source-truth codebase docs generation. It writes
 `manifest.json` for successful configured `generate --sdk` tasks and verifies
 current configured SDK manifest source and output file hashes and byte sizes
-only. Markdown / DocC and OpenAPI 3.x / Swagger 2.0 parsing exist in parser
-modules but are not wired as current CLI generation commands. Discovery reports
-do not generate docs, choose sources, score trust, infer authority, or claim
-source truth. Discovery candidates are ordered deterministically for agent
-review only.
+only. Markdown / MDX / DocC and OpenAPI 3.x / Swagger 2.0 parsing exist in
+parser modules but are not wired as current CLI generation commands. The
+Markdown parser accepts local `.md`, `.markdown`, and `.mdx` files and
+directories containing them; MDX cleanup is deterministic, preserves fenced
+code, and does not evaluate JSX or imports. Discovery reports do not generate
+docs, choose sources, assign trust scores, infer authority, or claim source
+truth. Discovery candidates are ordered deterministically for agent review only.
 
 The current CLI is implemented in:
 

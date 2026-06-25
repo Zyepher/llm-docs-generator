@@ -65,7 +65,7 @@ function extractIdFromPath(path: string): string {
   const parts = path.split('/');
   const filename = parts.at(-1) ?? 'document';
   return filename
-    .replace(/\.mdx?$/, '')
+    .replace(/\.(?:md|mdx|markdown)$/i, '')
     .toLowerCase()
     .replace(/\s+/g, '-');
 }
@@ -154,12 +154,19 @@ export function convertContent(content: MarkdownContent): ContentBlock {
  * @returns Combined root DocNode
  */
 export function mergeMarkdownDocuments(docs: MarkdownDocument[], rootTitle: string): DocNode {
-  const root = createDocNode(DocNodeType.ROOT, 'root', rootTitle, {
-    metadata: new Map<string, unknown>([
-      ['format', 'markdown'],
-      ['count', docs.length],
-    ]),
-  });
+  const metadata = new Map<string, unknown>([
+    ['format', 'markdown'],
+    ['count', docs.length],
+  ]);
+  const sourceSyntaxes = new Set(docs.map((doc) => doc.metadata.get('sourceSyntax')));
+  if (sourceSyntaxes.size === 1) {
+    const sourceSyntax = sourceSyntaxes.values().next().value;
+    if (sourceSyntax === 'markdown' || sourceSyntax === 'mdx') {
+      metadata.set('sourceSyntax', sourceSyntax);
+    }
+  }
+
+  const root = createDocNode(DocNodeType.ROOT, 'root', rootTitle, { metadata });
 
   // Convert each document to a SECTION node
   root.children = docs.map((doc) =>

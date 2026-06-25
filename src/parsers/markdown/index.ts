@@ -1,8 +1,8 @@
 /**
  * Markdown Parser Implementation
  *
- * Implements the Parser interface for Markdown/DocC files.
- * Handles standard Markdown and Apple's DocC-flavored markdown.
+ * Implements the Parser interface for Markdown/MDX/DocC files.
+ * Handles standard Markdown, MDX cleanup, and Apple's DocC-flavored markdown.
  */
 
 import { BaseParser, FormatType } from '../base.js';
@@ -15,21 +15,21 @@ import { join } from 'path';
 /**
  * Markdown format parser
  *
- * Handles Markdown files including DocC-flavored markdown
+ * Handles Markdown files including MDX and DocC-flavored markdown
  */
 export class MarkdownFormatParser extends BaseParser {
   readonly name = 'Markdown Parser';
   readonly format = FormatType.MARKDOWN;
 
   /**
-   * Detect if source is a Markdown file or directory of Markdown files
+   * Detect if source is a Markdown/MDX file or directory of Markdown/MDX files
    *
    * Performance: O(1) file extension + O(k) content sniffing (k = 100 bytes)
    */
   async detect(sourcePath: string): Promise<boolean> {
     // Check file extension
     const ext = this.getFileExtension(sourcePath);
-    if (ext === 'md' || ext === 'markdown') {
+    if (this.isMarkdownFileExtension(ext)) {
       return await this.fileExists(sourcePath);
     }
 
@@ -38,9 +38,8 @@ export class MarkdownFormatParser extends BaseParser {
       const { stat } = await import('fs/promises');
       const stats = await stat(sourcePath);
       if (stats.isDirectory()) {
-        // Check if directory contains .md files
-        const files = await readdir(sourcePath);
-        return files.some((f) => f.endsWith('.md'));
+        // Check if directory contains Markdown/MDX files
+        return await this.directoryContainsMarkdownFiles(sourcePath);
       }
     } catch {
       return false;
@@ -91,10 +90,10 @@ export class MarkdownFormatParser extends BaseParser {
    * Recursively finds all .md files and combines them
    */
   private async parseDirectory(dirPath: string): Promise<DocNode> {
-    const files = await this.findMarkdownFiles(dirPath);
+    const files = (await this.findMarkdownFiles(dirPath)).sort();
 
     if (files.length === 0) {
-      throw new Error(`No markdown files found in ${dirPath}`);
+      throw new Error(`No markdown or MDX files found in ${dirPath}`);
     }
 
     // Parse all files
@@ -112,7 +111,7 @@ export class MarkdownFormatParser extends BaseParser {
   }
 
   /**
-   * Find all .md files in directory recursively
+   * Find all Markdown/MDX files in directory recursively
    */
   private async findMarkdownFiles(dirPath: string): Promise<string[]> {
     const results: string[] = [];
@@ -125,12 +124,37 @@ export class MarkdownFormatParser extends BaseParser {
         // Recurse into subdirectories
         const subFiles = await this.findMarkdownFiles(fullPath);
         results.push(...subFiles);
-      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      } else if (entry.isFile() && this.isMarkdownFileName(entry.name)) {
         results.push(fullPath);
       }
     }
 
     return results;
+  }
+
+  private async directoryContainsMarkdownFiles(dirPath: string): Promise<boolean> {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name);
+      if (entry.isFile() && this.isMarkdownFileName(entry.name)) {
+        return true;
+      }
+
+      if (entry.isDirectory() && (await this.directoryContainsMarkdownFiles(fullPath))) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isMarkdownFileName(fileName: string): boolean {
+    return this.isMarkdownFileExtension(this.getFileExtension(fileName));
+  }
+
+  private isMarkdownFileExtension(extension: string): boolean {
+    return extension === 'md' || extension === 'mdx' || extension === 'markdown';
   }
 }
 

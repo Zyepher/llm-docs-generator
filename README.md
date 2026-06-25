@@ -45,12 +45,12 @@ The agent resolves the source and scope, then calls deterministic CLI commands:
 
 ```bash
 llm-docs discover --repo https://github.com/tailwindlabs/tailwindcss --version 3 --output-dir ./reports/tailwind-v3
-llm-docs generate --source ./reports/tailwind-v3/discovery-report.json --output-dir ./tailwindcss-v3-agent-docs
+llm-docs generate --source ./reports/tailwind-v3/discovery-report.json --candidate ./reports/tailwind-v3/selected-source.ref.json --output-dir ./tailwindcss-v3-agent-docs
 llm-docs verify --manifest ./tailwindcss-v3-agent-docs/manifest.json
 ```
 
-The CLI never silently decides that a source is authoritative. Discovery and
-scoring produce inspectable reports for the agent to review. Generation uses an
+The CLI never silently decides that a source is authoritative. Discovery
+produces candidate evidence reports for the agent to review. Generation uses an
 explicit source, explicit candidate, or explicit manifest.
 
 ## Capabilities
@@ -142,9 +142,11 @@ The CLI is responsible for:
 - failing clearly when a requested source, format, parser, permission, or mode
   cannot be used
 
-## Source Priority
+## Source Evidence For Agent Review
 
-When several explicit candidates exist, the agent should prefer:
+When several explicit candidates exist, the CLI records factual evidence and the
+agent reviews source intent, version, project context, and task fit. A useful
+review order is:
 
 1. First-party machine-readable specs: OpenAPI, Swagger, OpenRef.
 2. First-party docs source: Markdown, MDX, RST, DocC.
