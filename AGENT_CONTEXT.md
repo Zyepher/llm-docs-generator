@@ -90,8 +90,16 @@ Current implementation:
   report records inspected resources, response status/content type/byte counts,
   crawl policy, extracted candidate URLs, source resource provenance, and
   warnings.
+- Can run `source-truth inspect --source <local-file-or-directory>` for an
+  explicit local source path and print a deterministic JSON evidence report to
+  stdout. The report uses bounded traversal, does not follow symlinks, skips
+  dependency/build directories, records supported file hashes, warnings, and
+  conservative TypeScript/JavaScript export facts with source file and line
+  ranges. It does not generate docs, verify claims, infer behavior, decide
+  authority, or choose task fit.
 - Current CLI commands are limited to local/repo/website `discover`,
-  `generate --sdk`, `verify`, `list-sdks`, and `validate --sdk`.
+  `source-truth inspect`, `generate --sdk`, `verify`, `list-sdks`, and
+  `validate --sdk`.
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or source-truth codebase documentation
   generation. Semantic chunking exists as a library capability for existing
@@ -230,18 +238,24 @@ Agent workflow:
    - existing docs
 4. Prefer existing official docs when present, but verify claims against source
    code when the user asks for source-truth codebase docs.
-5. If source-truth codebase docs mode exists, run it to generate structured
+5. If the agent has resolved an explicit local source path, it may run
+   `llm-docs source-truth inspect --source <path>` to obtain bounded factual
+   TypeScript/JavaScript export evidence for review.
+6. If source-truth codebase docs mode exists, run it to generate structured
    facts from implementation source files.
-6. Feed verified structured facts into the LLM-friendly formatter.
-7. Write provenance with repo URL, commit/tag, source files analyzed, and
+7. Feed verified structured facts into the LLM-friendly formatter.
+8. Write provenance with repo URL, commit/tag, source files analyzed, and
    confidence warnings.
 
 Important current-state rule:
 
 If source-truth codebase docs mode is not implemented yet, do not claim this
-project can generate accurate docs from code. A repo discovery report is only
-inspectable evidence for agent review. Tell the user the generation mode is
-planned and identify the missing implementation.
+project can generate accurate docs from code. A repo discovery report and
+`source-truth inspect` report are only inspectable evidence for agent review.
+The source-truth report currently extracts conservative TypeScript/JavaScript
+export facts from an explicit local source path; it does not verify claims,
+summarize behavior, or generate documentation. Tell the user the generation mode
+is planned and identify the missing implementation.
 
 ### Intent 4: Refresh Or Verify Existing Generated Docs
 
@@ -568,6 +582,7 @@ The following commands are the current regression baseline:
 llm-docs discover --source ./docs --output-dir ./reports/local-docs
 llm-docs discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
 llm-docs discover --url https://example.com/docs --output-dir ./reports/website
+llm-docs source-truth inspect --source ./src
 llm-docs generate --sdk swift --sdk-version v2
 llm-docs generate --sdk all --sdk-version all
 llm-docs verify --output-dir ./output/swift/v2

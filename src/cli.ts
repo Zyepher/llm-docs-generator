@@ -54,6 +54,31 @@ program
   .enablePositionalOptions();
 
 // ============================================================================
+// SOURCE-TRUTH COMMAND
+// ============================================================================
+
+const sourceTruthCommand = program
+  .command('source-truth')
+  .description('Inspect explicit local source code and print a bounded factual evidence report');
+
+sourceTruthCommand
+  .command('inspect')
+  .description('Print deterministic JSON evidence for an explicit local source path')
+  .requiredOption('--source <path>', 'Explicit local file or directory to inspect')
+  .action(async (options: { source: string }) => {
+    try {
+      const { inspectSourceTruth } = await import('./core/source-truth.js');
+      const report = await inspectSourceTruth({ source: options.source });
+
+      console.log(`${JSON.stringify(report, null, 2)}`);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Source-truth inspection failed: ${errorMsg}`));
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
 // DISCOVER COMMAND
 // ============================================================================
 

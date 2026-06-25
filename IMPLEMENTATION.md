@@ -228,6 +228,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit local `discover --source` bounded inspection report
 - [x] Explicit repo `discover --repo` cache and bounded inspection report
 - [x] Explicit website `discover --url` bounded inspection report
+- [x] Explicit `source-truth inspect --source` deterministic evidence report
+      for conservative TypeScript/JavaScript export facts
 - [x] RST parser foundation for explicit local Python-style documentation
 - [x] Static HTML parser foundation for explicit local rendered-HTML fallback
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
@@ -260,6 +262,23 @@ deterministically for agent review only. Repo cache handling is non-destructive;
 clean matching caches fetch remote refs without pulling into the checkout, and cached
 checkouts with local changes or ignored files are warned about and inspected as
 present.
+
+Current source-truth evidence scope:
+
+- `llm-docs source-truth inspect --source <path>` accepts an explicit local file
+  or directory and prints deterministic JSON to stdout.
+- Traversal is bounded by depth, entry, file, and per-file byte limits. It does
+  not follow symlinks and skips common dependency/build directories such as
+  `node_modules`, `dist`, `build`, `coverage`, and `.git`.
+- Supported evidence extraction is intentionally conservative:
+  TypeScript/JavaScript source files only, starting with top-level exports,
+  re-exports, export-all declarations, and export assignments.
+- Every extracted fact cites a normalized source path and line range. Supported
+  inspected files include byte size and SHA-256 hash; unsupported or oversized
+  files are reported as skipped with warnings.
+- The report does not generate documentation, verify existing documentation
+  claims, infer runtime behavior, decide task fit, select sources, assign
+  authority, or summarize behavior beyond observed export facts.
 
 Current OpenAPI / Swagger parser scope:
 
