@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
+import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
   inspectSourceTruth,
   type InspectSourceTruthOptions,
@@ -27,6 +27,8 @@ export interface SourceTruthGeneratedOutput {
   kind: SourceTruthGeneratedOutputKind;
   byteSize: number;
   hash: string;
+  lineCount: number;
+  estimatedTokenCount: number;
 }
 
 export type SourceTruthGeneratedOutputKind = 'source-truth-report-json' | 'source-truth-markdown';
@@ -601,27 +603,20 @@ async function describeGeneratedOutputs(
 ): Promise<SourceTruthGeneratedOutput[]> {
   const describedOutputs = await Promise.all(
     outputs.map(async (output) => {
-      const file = await describeFile(output.path);
+      const file = await describeGeneratedTextOutput(output.path);
 
       return {
         path: relativeOutputPath(outputDir, output.path),
         kind: output.kind,
         byteSize: file.byteSize,
         hash: file.hash,
+        lineCount: file.lineCount,
+        estimatedTokenCount: file.estimatedTokenCount,
       };
     })
   );
 
   return describedOutputs.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
-}
-
-async function describeFile(path: string): Promise<{ byteSize: number; hash: string }> {
-  const [stats, bytes] = await Promise.all([stat(path), readFile(path)]);
-
-  return {
-    byteSize: stats.size,
-    hash: formatHash(createHash('sha256').update(bytes).digest('hex')),
-  };
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {

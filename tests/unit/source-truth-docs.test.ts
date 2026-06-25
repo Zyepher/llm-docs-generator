@@ -16,6 +16,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { describeGeneratedTextOutput } from '../../src/core/generated-output-metadata.js';
 import {
   SourceTruthDocsNoFactsError,
   formatSourceTruthMarkdown,
@@ -41,6 +42,24 @@ function sha256(content: string | Buffer): string {
   return createHash('sha256').update(content).digest('hex');
 }
 
+function countTextLines(text: string): number {
+  if (text.length === 0) {
+    return 0;
+  }
+
+  const newlineCount = Array.from(text).filter((character) => character === '\n').length;
+
+  return text.endsWith('\n') ? newlineCount : newlineCount + 1;
+}
+
+function estimateTextTokens(text: string): number {
+  if (text.length === 0) {
+    return 0;
+  }
+
+  return Math.ceil(Array.from(text).length / 4);
+}
+
 async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, 'utf-8')) as T;
 }
@@ -56,6 +75,21 @@ async function pathExists(path: string): Promise<boolean> {
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe('generated output metadata', () => {
+  it('handles empty generated text files predictably', async () => {
+    const dir = await makeTempDir('llm-docs-generated-output-metadata-');
+    const outputPath = join(dir, 'empty.txt');
+    await writeFile(outputPath, '', 'utf-8');
+
+    await expect(describeGeneratedTextOutput(outputPath)).resolves.toEqual({
+      byteSize: 0,
+      hash: `sha256:${sha256('')}`,
+      lineCount: 0,
+      estimatedTokenCount: 0,
+    });
+  });
 });
 
 describe('source-truth docs generation', () => {
@@ -174,9 +208,12 @@ describe('source-truth docs generation', () => {
 
     for (const output of manifest.generatedOutputs) {
       const bytes = await readFile(join(firstOutputDir, output.path));
+      const text = bytes.toString('utf-8');
 
       expect(output.byteSize).toBe(bytes.byteLength);
       expect(output.hash).toBe(`sha256:${sha256(bytes)}`);
+      expect(output.lineCount).toBe(countTextLines(text));
+      expect(output.estimatedTokenCount).toBe(estimateTextTokens(text));
     }
   });
 

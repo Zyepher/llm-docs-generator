@@ -234,6 +234,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       context facts for inspected supported files
 - [x] Explicit `source-truth generate --source --output-dir` Markdown evidence
       facts with raw evidence report and provenance manifest
+- [x] Partial generated-output RAG metadata for configured SDK and source-truth
+      docs manifests (`lineCount` and deterministic `estimatedTokenCount`)
 - [x] RST parser foundation for explicit local Python-style documentation
 - [x] Static HTML parser foundation for explicit local rendered-HTML fallback
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
@@ -242,7 +244,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Read-only `agent context` metadata command for packaged context and skill
       artifacts
 - [x] Bundled package skill files for current CLI usage and repo/docs discovery
-- [ ] Manifest expansion for RAG, discovery, and refresh systems
+- [ ] Full manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
 - [ ] OpenRef backward compatibility tests
@@ -292,6 +294,11 @@ Current capabilities contract scope:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `manifest.json`, `failure.json`, configured SDK parsed spec output, and
   configured SDK LLM docs output.
+- Generated-output manifest metadata is currently partial: configured SDK and
+  source-truth docs manifests record `lineCount` and deterministic
+  `estimatedTokenCount` for explicit generated files, but capabilities output
+  does not claim full manifest expansion, refresh support, source-code
+  verification, or semantic chunk publication.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.

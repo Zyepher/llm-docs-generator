@@ -167,12 +167,17 @@ facts grouped by normalized source file. If no export, package/config, or
 context facts are extractable, the command exits non-zero and writes
 `failure.json` referencing the raw evidence report instead of Markdown. It
 rejects output directories that are the source path or inside the source path.
+The source-truth docs manifest records generated output hashes, byte sizes, line
+counts, and deterministic estimated token counts.
 
 The current CLI does not yet expose general `generate --source`, refresh, or
 source verification. It writes
-`manifest.json` for successful configured `generate --sdk` tasks and verifies
-current configured SDK manifest source and output file hashes and byte sizes
-only. Markdown / MDX / DocC, RST, static HTML, and OpenAPI 3.x / Swagger 2.0
+`manifest.json` for successful configured `generate --sdk` tasks with generated
+output hashes, byte sizes, line counts, and deterministic estimated token
+counts. Current configured SDK `verify` checks manifest source and output file
+hashes and byte sizes, and validates optional line/token metadata shape when
+present, but does not recompute those counts yet. Markdown / MDX / DocC, RST,
+static HTML, and OpenAPI 3.x / Swagger 2.0
 parsing exist in parser modules but are not wired as current CLI generation
 commands. The Markdown parser accepts local `.md`, `.markdown`, and `.mdx`
 files and directories containing them; MDX cleanup is deterministic, preserves
@@ -185,7 +190,8 @@ strips scripts/styles/templates, never renders JavaScript or fetches links, and
 records lower-confidence rendered-HTML fallback metadata. Semantic chunking
 exists as a library API for existing DocNode IR: it emits stable semantic chunk
 records with path-derived IDs, order, source metadata, hashes, sizes, token
-estimates, split metadata, and warnings. Current CLI generation, manifests, and
+estimates, split metadata, and warnings. Current CLI manifests include only
+partial generated-output line/token metadata; CLI generation, manifests, and
 discovery reports do not yet consume or publish semantic chunks. Discovery
 reports do not generate docs, choose sources, assign trust scores, infer
 authority, or claim source truth. Discovery candidates are ordered
@@ -283,11 +289,14 @@ agent intent/source/scope resolution
   silently upgrade.
 - If the user asks for latest, verify remote state before reusing a cached clone.
 - Successful configured SDK generation currently writes a scoped manifest with
-  source and output hashes. Current `verify` checks those configured SDK
-  manifest file hashes and byte sizes only. Local bounded inspection reports are
-  available through `discover --source`, and repo cache/inspection reports are
-  available through `discover --repo`. Bounded explicit URL inspection reports
-  are available through `discover --url`; the implemented command surface is
+  source and output hashes, byte sizes, line counts, and deterministic
+  estimated token counts for generated outputs. Current `verify` checks those
+  configured SDK manifest file hashes and byte sizes, and validates optional
+  line/token metadata shape when present without recomputing the counts. Local
+  bounded inspection reports are available through `discover --source`, and repo
+  cache/inspection reports are available through `discover --repo`. Bounded
+  explicit URL inspection reports are available through `discover --url`; the
+  implemented command surface is
   available through deterministic `capabilities --json`; bounded local
   TypeScript/JavaScript export, optional AST signature, package/config, and
   path-based test/example context evidence reports are available through
