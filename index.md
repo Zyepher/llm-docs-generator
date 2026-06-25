@@ -100,6 +100,7 @@ npx tsx src/cli.ts source-truth inspect --source ./src
 npx tsx src/cli.ts source-truth generate --source ./src --output-dir ./reports/source-truth
 npx tsx src/cli.ts agent context --json
 npx tsx src/cli.ts generate --source ./docs --format markdown --output-dir ./agent-docs
+npx tsx src/cli.ts generate --source ./docs --format markdown --chunks jsonl --output-dir ./agent-docs
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
 npx tsx src/cli.ts verify --output-dir ./output/swift/v2
@@ -177,11 +178,14 @@ paths, discovery reports, `--source` plus `--sdk`, and all `--preset` requests.
 Its `--format` option is a parser hint supporting `auto`, `markdown`, `mdx`
 through the Markdown parser, `openapi`, `openref`, `rst`, and `html`.
 Successful source generation writes `manifest.json` at the requested output
-root and generated LLM docs under `llm-docs/`. The source manifest records the
+root and generated LLM docs under `llm-docs/`. When `--chunks jsonl` is
+requested, it also writes `chunks/semantic-chunks.jsonl` from the parsed DocNode
+tree. The source manifest records the
 input path, resolved source type, format hint and resolved format, parser and
 formatter metadata, source file paths, formats, hashes and byte sizes,
-directory aggregate hash when applicable, generated output hashes, byte sizes, line counts,
-deterministic estimated token counts, and warnings.
+directory aggregate hash when applicable, generated output hashes, byte sizes,
+line counts, deterministic estimated token counts, output kind/name metadata,
+and warnings.
 
 The current CLI still does not expose refresh or source-code verification. It also
 writes `manifest.json` for successful configured `generate --sdk` tasks with
@@ -195,11 +199,12 @@ output paths, hashes, byte sizes, line counts, and deterministic estimated token
 counts. Discovery reports do not generate docs, choose sources, assign trust
 scores, infer authority, or claim source truth.
 Discovery candidates are ordered deterministically for agent review only.
-Semantic chunking exists as a library API for existing DocNode IR: it emits
-stable semantic chunk records with path-derived IDs, order, source metadata,
-hashes, sizes, token estimates, split metadata, and warnings. Current CLI
-generation, manifests, and discovery reports do not yet consume or publish
-semantic chunks.
+Semantic chunking exists as a library API for existing DocNode IR and as an
+opt-in JSONL export for explicit `generate --source` outputs. It emits stable
+semantic chunk records with path-derived IDs, order, source metadata, hashes,
+sizes, token estimates, split metadata, and warnings. Discovery reports,
+configured SDK generation, source-truth docs, refresh, and source-selection
+workflows do not publish semantic chunks.
 
 The current CLI is implemented in:
 
@@ -302,7 +307,8 @@ agent intent/source/scope resolution
   paths, hashes, byte sizes, line counts, and deterministic estimated token
   counts. Local source docs generation is available through
   `generate --source <local-file-or-directory> --output-dir <dir>` for explicit
-  local Markdown/MDX, OpenAPI, OpenRef, RST, and static HTML inputs. Local
+  local Markdown/MDX, OpenAPI, OpenRef, RST, and static HTML inputs, with
+  optional `--chunks jsonl` semantic chunk JSONL publication. Local
   bounded inspection reports are available through `discover --source`, and
   repo cache/inspection reports are available through `discover --repo`.
   Bounded explicit URL inspection reports are available through `discover

@@ -19,11 +19,13 @@ agent-docs/
   llm-docs/
     docs-full-llms.txt
     docs-api-llms.txt
+  chunks/
+    semantic-chunks.jsonl  # only when --chunks jsonl is requested
 ```
 
-The Markdown files are for the AI agent to read. The JSON files are for trust:
-they record source paths, source file formats, content hashes, parser and
-formatter versions, warnings, and generated files.
+The Markdown files are for the AI agent to read. The JSON and JSONL files are
+for trust: they record source paths, source file formats, content hashes,
+parser and formatter versions, warnings, and generated files.
 
 ## Core Workflow
 
@@ -58,6 +60,7 @@ Current implemented capabilities include:
 - parsers for OpenRef, OpenAPI/Swagger, Markdown, MDX, RST, DocC, and HTML
   fallback extraction from explicit local sources
 - agent-optimized Markdown output for explicit local source generation
+- opt-in semantic chunk JSONL output for explicit local source generation
 - manifests with source provenance, content hashes, generated file hashes,
   parser/formatter metadata, and warnings
 - configured OpenRef SDK generation plus configured-SDK and source-docs manifest
@@ -85,6 +88,7 @@ llm-docs discover --repo https://github.com/supabase/supabase --scope apps/docs 
 llm-docs discover --url https://supabase.com/docs/reference/swift --output-dir ./reports/supabase-swift
 
 llm-docs generate --source ./docs --format markdown --output-dir ./agent-docs
+llm-docs generate --source ./docs --format markdown --chunks jsonl --output-dir ./agent-docs
 llm-docs generate --source ./openapi.yaml --format openapi --output-dir ./api-agent-docs
 
 llm-docs source-truth inspect --source ./src
@@ -161,6 +165,11 @@ sizes. Source-docs verification checks local source path shape and existence,
 recorded source file hashes and byte sizes, generated output paths, hashes,
 byte sizes, line counts, and deterministic estimated token counts. Refresh and
 source-code verification remain planned but are not implemented.
+
+When `generate --source` is run with `--chunks jsonl`, it also writes
+`chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a
+generated text output with kind `semantic-chunks-jsonl`, a bounded descriptive
+name, hash, byte size, line count, and deterministic estimated token count.
 
 ## Source-Truth Codebase Docs
 

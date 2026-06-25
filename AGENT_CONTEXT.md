@@ -67,6 +67,10 @@ Current implementation:
   source format/path metadata when present, character counts, estimated token
   counts, and warnings for oversized indivisible blocks or malformed tree
   shapes.
+- Can opt in to source-docs semantic chunk publication with
+  `generate --source ... --chunks jsonl`. This writes
+  `chunks/semantic-chunks.jsonl` from the already parsed DocNode tree. It does
+  not select sources, crawl, refresh, or infer authority.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks,
   including generated output hashes, byte sizes, line counts, and deterministic
@@ -126,13 +130,15 @@ Current implementation:
   universal formatter. Source mode supports `--format auto`, `markdown`, `mdx`
   through the Markdown parser, `openapi`, `openref`, `rst`, and `html`. It
   accepts local files or directories only, rejects URL-like inputs, missing
-  paths, discovery reports, `--source` plus `--sdk`, and all `--preset`
-  requests, and does not fetch, crawl, select candidates, infer task fit, or
-  decide source selection. Successful source generation writes `manifest.json`
-  plus generated docs under `llm-docs/`; the manifest records source file
-  hashes and byte sizes, a deterministic directory aggregate hash when
-  applicable, parser/formatter metadata, generated output hashes, byte sizes,
-  line counts, deterministic estimated token counts, and warnings.
+  paths, discovery reports, `--source` plus `--sdk`, unsupported `--chunks`
+  values, and all `--preset` requests, and does not fetch, crawl, select
+  candidates, infer task fit, or decide source selection. Successful source
+  generation writes `manifest.json` plus generated docs under `llm-docs/`.
+  With `--chunks jsonl`, it also writes `chunks/semantic-chunks.jsonl`. The
+  manifest records source file hashes and byte sizes, a deterministic directory
+  aggregate hash when applicable, parser/formatter metadata, generated output
+  hashes, byte sizes, line counts, deterministic estimated token counts,
+  output kind/name metadata, and warnings.
 - Can run `capabilities --json` to print a deterministic, machine-readable
   contract of implemented commands and planned/unsupported capabilities for
   agents. The contract has schema version `0.1.0`, package name/version
@@ -155,11 +161,13 @@ Current implementation:
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or behavior-level source documentation from
   code. Semantic chunking exists as a library capability for existing DocNode IR
-  only; current source docs, configured SDK, and source-truth docs manifests
-  include partial generated-output RAG metadata only (`lineCount` and
-  `estimatedTokenCount`) and do not consume or publish semantic chunk records.
-  Discovery reports do not yet include this generated-output metadata.
-  Discovery modes are inspection
+  and as an opt-in JSONL export for explicit `generate --source` outputs only;
+  configured SDK, source-truth docs, and discovery reports do not publish
+  semantic chunk records. Current source docs, configured SDK, and source-truth
+  docs manifests include partial generated-output RAG metadata only
+  (`lineCount` and `estimatedTokenCount`) plus the source-docs opt-in chunk
+  JSONL file when requested. Discovery reports do not yet include this
+  generated-output metadata. Discovery modes are inspection
   foundations only; they do not generate docs, choose sources, assign trust
   scores, infer authority, or claim source truth.
 - Local and repo discovery order candidates by deterministic evidence category
@@ -545,8 +553,9 @@ The current explicit local source generation path writes a source-mode
 `manifest.json` with source path/type, format hint, resolved format,
 parser/formatter metadata, source file paths, source file formats, hashes and
 byte sizes, a deterministic directory aggregate hash when applicable, generated
-file hashes, byte sizes, line counts, deterministic estimated token counts, and
-warnings. The current
+file hashes, byte sizes, line counts, deterministic estimated token counts,
+output kind/name metadata, optional `chunks/semantic-chunks.jsonl` metadata when
+`--chunks jsonl` is requested, and warnings. The current
 configured SDK generation path writes a scoped `manifest.json` with configured
 source details, hashes, parser and formatter metadata, generated file hashes,
 byte sizes, line counts, and deterministic estimated token counts. The current

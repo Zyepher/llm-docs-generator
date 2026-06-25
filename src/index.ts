@@ -183,6 +183,7 @@ export {
 export type {
   GenerateSourceDocsOptions,
   GenerateSourceDocsResult,
+  SourceDocsChunksFormat,
   SourceDocsFileManifestEntry,
   SourceDocsGeneratedOutput,
   SourceDocsGeneratorMetadata,
