@@ -38,7 +38,7 @@ const GENERATOR_NAME = packageJson.name;
 const GENERATOR_VERSION = packageJson.version;
 const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';
 const CAPABILITIES_SCHEMA_VERSION = '0.1.0';
-const AGENT_CONTEXT_SCHEMA_VERSION = '0.1.0';
+const AGENT_CONTEXT_SCHEMA_VERSION = '0.2.0';
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const AGENT_CONTEXT_ARTIFACTS = [
@@ -55,6 +55,23 @@ const AGENT_CONTEXT_ARTIFACTS = [
     path: 'index.md',
     intendedUse:
       'Navigation map for agents, humans, engineers, current CLI commands, and source files.',
+  },
+] as const;
+
+const AGENT_SKILL_ARTIFACTS = [
+  {
+    id: 'llm-docs-generator',
+    name: 'llm-docs-generator',
+    path: 'skills/llm-docs-generator/SKILL.md',
+    intendedUse:
+      'Agent workflow for using and maintaining this CLI while preserving the deterministic CLI boundary.',
+  },
+  {
+    id: 'repo-docs-discovery',
+    name: 'repo-docs-discovery',
+    path: 'skills/repo-docs-discovery/SKILL.md',
+    intendedUse:
+      'Agent workflow for investigating repo, website, package, or local docs targets before calling the CLI with explicit inputs.',
   },
 ] as const;
 
@@ -77,6 +94,7 @@ type AgentContextContract = {
     binary: string;
   };
   contextArtifacts: AgentContextArtifact[];
+  skillArtifacts: AgentContextArtifact[];
   limitations: string[];
 };
 
@@ -207,11 +225,11 @@ const CAPABILITIES_CONTRACT = {
       command: 'agent context',
       mode: 'agent context --json',
       status: 'implemented',
-      inputBoundary: 'packaged context files only',
+      inputBoundary: 'packaged context and skill files only',
       outputFiles: ['stdout JSON metadata'],
-      summary: 'read-only metadata for packaged agent context artifacts',
+      summary: 'read-only metadata for packaged agent context and skill artifacts',
       limitations: [
-        'packaged context metadata only',
+        'packaged context and skill metadata only',
         'does not install/register skills',
         'no user config writes',
         'no environment probing',
@@ -363,8 +381,8 @@ function resolvePackageLocalPath(packageRelativePath: string): string {
   return resolvedPath;
 }
 
-async function readAgentContextArtifact(
-  artifact: (typeof AGENT_CONTEXT_ARTIFACTS)[number]
+async function readPackagedAgentArtifact(
+  artifact: (typeof AGENT_CONTEXT_ARTIFACTS)[number] | (typeof AGENT_SKILL_ARTIFACTS)[number]
 ): Promise<AgentContextArtifact> {
   const artifactPath = resolvePackageLocalPath(artifact.path);
   let content: Buffer;
@@ -377,7 +395,7 @@ async function readAgentContextArtifact(
         ? String((error as { code: unknown }).code)
         : 'unknown';
 
-    throw new Error(`packaged context artifact unavailable (${errorCode}): ${artifact.path}`);
+    throw new Error(`packaged agent artifact unavailable (${errorCode}): ${artifact.path}`);
   }
 
   return {
@@ -401,10 +419,13 @@ async function buildAgentContextContract(): Promise<AgentContextContract> {
       binary: 'llm-docs',
     },
     contextArtifacts: await Promise.all(
-      AGENT_CONTEXT_ARTIFACTS.map((artifact) => readAgentContextArtifact(artifact))
+      AGENT_CONTEXT_ARTIFACTS.map((artifact) => readPackagedAgentArtifact(artifact))
+    ),
+    skillArtifacts: await Promise.all(
+      AGENT_SKILL_ARTIFACTS.map((artifact) => readPackagedAgentArtifact(artifact))
     ),
     limitations: [
-      'Reports packaged context metadata only.',
+      'Reports packaged context and skill metadata only.',
       'Does not install or register skills.',
       'Does not write user config.',
       'Does not probe environment state.',
@@ -481,6 +502,16 @@ agentCommand
       console.log('  Context artifacts:');
 
       for (const artifact of context.contextArtifacts) {
+        console.log(`  - ${artifact.name} (${artifact.id})`);
+        console.log(`    Path: ${artifact.path}`);
+        console.log(`    Size: ${artifact.byteSize} bytes`);
+        console.log(`    SHA-256: ${artifact.sha256}`);
+        console.log(`    Intended use: ${artifact.intendedUse}`);
+      }
+
+      console.log('  Packaged skills:');
+
+      for (const artifact of context.skillArtifacts) {
         console.log(`  - ${artifact.name} (${artifact.id})`);
         console.log(`    Path: ${artifact.path}`);
         console.log(`    Size: ${artifact.byteSize} bytes`);

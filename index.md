@@ -134,13 +134,15 @@ omits `generatedAt` and does not inspect sources, load config, write files, or
 perform network work.
 
 The current `agent context` command prints read-only metadata for packaged
-agent context artifacts. The JSON form reports schema version `0.1.0`, package
-name/version metadata, the `llm-docs` binary, `AGENT_CONTEXT.md` and `index.md`
-package-relative paths, byte sizes, SHA-256 hashes, intended uses, and explicit
-limitations. It reports packaged context metadata only and does not install or
-register skills, write user config, probe the environment, or perform network
-work. `agent install codex` and `agent doctor` remain planned/unsupported and
-are reported that way through `capabilities --json`.
+agent context and skill artifacts. The JSON form reports schema version
+`0.2.0`, package name/version metadata, the `llm-docs` binary,
+`AGENT_CONTEXT.md`, `index.md`, `skills/llm-docs-generator/SKILL.md`, and
+`skills/repo-docs-discovery/SKILL.md` package-relative paths, byte sizes,
+SHA-256 hashes, intended uses, and explicit limitations. It reports packaged
+metadata only and does not install or register skills, write user config, probe
+the environment, or perform network work. `agent install codex` and
+`agent doctor` remain planned/unsupported and are reported that way through
+`capabilities --json`.
 
 The current `source-truth inspect --source` command accepts one explicit local
 file or directory and prints a deterministic JSON evidence report to stdout. It

@@ -119,12 +119,13 @@ Current implementation:
   entries. It intentionally omits `generatedAt` and does not inspect sources,
   load config, write files, or perform network work.
 - Can run `agent context` or `agent context --json` to print deterministic
-  metadata for the packaged `AGENT_CONTEXT.md` and `index.md` artifacts. The
-  JSON contract has schema version `0.1.0`, package name/version metadata, the
-  `llm-docs` binary name, package-relative artifact paths, byte sizes, SHA-256
-  hashes, intended uses, and explicit limitations. It reports packaged context
-  metadata only; it does not install or register skills, write user config,
-  probe environment state, or perform network work.
+  metadata for packaged `AGENT_CONTEXT.md`, `index.md`, and bundled
+  `skills/*/SKILL.md` artifacts. The JSON contract has schema version `0.2.0`,
+  package name/version metadata, the `llm-docs` binary name, package-relative
+  artifact paths, byte sizes, SHA-256 hashes, intended uses, and explicit
+  limitations. It reports packaged context and skill artifact metadata only; it
+  does not install or register skills, write user config, probe environment
+  state, or perform network work.
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`, `generate --sdk`, `verify`,
   `list-sdks`, `validate --sdk`, `capabilities --json`, and read-only
@@ -416,8 +417,8 @@ and manifest writing as those target capabilities are implemented.
 
 Installing the CLI and installing/registering skills are separate concerns.
 
-An npm package can include the CLI, agent context files, and bundled skill files,
-but an AI host will not necessarily load those skills automatically.
+This npm package includes the CLI, agent context files, and bundled skill files,
+but an AI host will not load those skills automatically.
 
 Target package layout:
 
@@ -453,10 +454,12 @@ llm-docs agent doctor
 Expected behavior:
 
 - `llm-docs agent context` currently prints read-only metadata for the packaged
-  context artifacts and points humans to `--json`.
+  context and skill artifacts and points humans to `--json`.
 - `llm-docs agent context --json` currently prints a deterministic metadata
-  contract for packaged context artifacts only. It does not install/register
-  skills, write user config, probe the environment, or perform network work.
+  contract for packaged context and skill artifacts only. It includes
+  `AGENT_CONTEXT.md`, `index.md`, `skills/llm-docs-generator/SKILL.md`, and
+  `skills/repo-docs-discovery/SKILL.md`. It does not install/register skills,
+  write user config, probe the environment, or perform network work.
 - `llm-docs agent install codex` is planned/unsupported. A future
   implementation may copy bundled skills into the Codex skill directory when
   supported.
