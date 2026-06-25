@@ -1,0 +1,381 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { FormatDetector } from '../../src/core/detector.js';
+import {
+  ContentBlockType,
+  DocNodeType,
+  type ContentBlock,
+  type DocNode,
+} from '../../src/core/models.js';
+import { FormatType } from '../../src/parsers/base.js';
+import { HtmlFormatParser, parseHtmlFile } from '../../src/parsers/html/index.js';
+
+const tempDirs: string[] = [];
+
+async function createTempDir(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'llm-docs-html-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+function collectContentBlocks(node: DocNode): ContentBlock[] {
+  return [...node.content, ...node.children.flatMap((child) => collectContentBlocks(child))];
+}
+
+function collectText(node: DocNode): string {
+  const ownContent = node.content.map((block) => block.content).join('\n');
+  const childContent = node.children.map((child) => collectText(child)).join('\n');
+  return [node.title, node.description, ownContent, childContent].filter(Boolean).join('\n');
+}
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe('static HTML parser foundation', () => {
+  it('detects .html/.htm files and registers HTML with the format detector', async () => {
+    const dir = await createTempDir();
+    const htmlPath = join(dir, 'index.html');
+    const htmPath = join(dir, 'legacy.htm');
+    const textPath = join(dir, 'index.txt');
+
+    await writeFile(htmlPath, '<!doctype html><title>Index</title>', 'utf-8');
+    await writeFile(htmPath, '<!doctype html><h1>Legacy</h1>', 'utf-8');
+    await writeFile(textPath, '<!doctype html><h1>Text</h1>', 'utf-8');
+
+    const parser = new HtmlFormatParser();
+    const detector = new FormatDetector();
+
+    expect(await parser.detect(htmlPath)).toBe(true);
+    expect(await parser.detect(htmPath)).toBe(true);
+    expect(await parser.detect(textPath)).toBe(false);
+    expect(await detector.detect(htmlPath)).toBe(FormatType.HTML);
+    expect(await detector.detect(htmPath)).toBe(FormatType.HTML);
+    expect(detector.getAvailableFormats()).toContain(FormatType.HTML);
+  });
+
+  it('parses title/H1 fallback, headings, paragraphs, and lists into DocNode IR', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'guide.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<main>',
+        '<h1>Getting Started</h1>',
+        '<p>Intro &amp; setup prose.</p>',
+        '<h2>Install</h2>',
+        '<p>Use the package installer.</p>',
+        '<ul><li>Download package.</li><li>Run installer.</li></ul>',
+        '<h3>Configure</h3>',
+        '<ol><li>Open settings.</li><li>Save changes.</li></ol>',
+        '<h4>Advanced</h4>',
+        '<p>Enable advanced options.</p>',
+        '<h5>Nested Detail</h5>',
+        '<p>Nested detail prose.</p>',
+        '</main>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+
+    expect(root).toMatchObject({
+      type: DocNodeType.SECTION,
+      title: 'Getting Started',
+    });
+    expect(root.metadata.get('format')).toBe('html');
+    expect(root.metadata.get('sourcePath')).toBe(sourcePath);
+    expect(root.metadata.get('parser')).toBe('html-static-subset');
+    expect(root.metadata.get('sourceKind')).toBe('rendered-html-fallback');
+    expect(root.metadata.get('renderedHtmlFallback')).toBe(true);
+    expect(root.metadata.get('confidence')).toBe('lower');
+    expect(root.metadata.get('parserDetails')).toEqual(
+      expect.objectContaining({
+        javascript: 'not rendered or executed',
+        network: 'no linked resources are fetched',
+      })
+    );
+
+    expect(root.children[0]).toMatchObject({
+      type: DocNodeType.CATEGORY,
+      id: 'install',
+      title: 'Install',
+    });
+    expect(root.children[0]?.children[0]).toMatchObject({
+      type: DocNodeType.OPERATION,
+      id: 'configure',
+      title: 'Configure',
+    });
+    expect(root.children[0]?.children[0]?.children[0]).toMatchObject({
+      type: DocNodeType.ITEM,
+      id: 'advanced',
+      title: 'Advanced',
+    });
+    expect(root.children[0]?.children[0]?.children[0]?.children[0]).toMatchObject({
+      type: DocNodeType.ITEM,
+      id: 'nested-detail',
+      title: 'Nested Detail',
+    });
+
+    expect(parsedText).toContain('Intro & setup prose.');
+    expect(parsedText).toContain('Use the package installer.');
+    expect(parsedText).toContain('- Download package.\n- Run installer.');
+    expect(parsedText).toContain('1. Open settings.\n2. Save changes.');
+    expect(parsedText).toContain('Enable advanced options.');
+    expect(parsedText).toContain('Nested detail prose.');
+  });
+
+  it('parses pre/code blocks as CODE and simple tables as DATA', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'reference.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<html><head><title>Reference</title></head><body>',
+        '<h2>Examples</h2>',
+        '<pre><code class="language-js">const ok = true;\nconsole.log(ok);</code></pre>',
+        '<code data-language="bash">npm test</code>',
+        '<table>',
+        '<thead><tr><th>Name</th><th>Value</th></tr></thead>',
+        '<tbody><tr><td>Status</td><td>Stable</td></tr></tbody>',
+        '</table>',
+        '</body></html>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const blocks = collectContentBlocks(root);
+    const codeBlocks = blocks.filter((block) => block.type === ContentBlockType.CODE);
+    const dataBlocks = blocks.filter((block) => block.type === ContentBlockType.DATA);
+
+    expect(root.title).toBe('Reference');
+    expect(codeBlocks).toEqual([
+      expect.objectContaining({
+        language: 'js',
+        content: 'const ok = true;\nconsole.log(ok);',
+      }),
+      expect.objectContaining({
+        language: 'bash',
+        content: 'npm test',
+      }),
+    ]);
+    expect(dataBlocks).toEqual([
+      expect.objectContaining({
+        content: 'Name | Value\nStatus | Stable',
+      }),
+    ]);
+    expect(dataBlocks[0]?.annotations?.get('type')).toBe('table');
+  });
+
+  it('decodes code block entities exactly once', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'code-entities.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<title>Code Entities</title>',
+        '<pre><code class="language-html">&amp;lt;tag&amp;gt;\n&lt;tag&gt;</code></pre>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const codeBlocks = collectContentBlocks(root).filter(
+      (block) => block.type === ContentBlockType.CODE
+    );
+
+    expect(codeBlocks).toEqual([
+      expect.objectContaining({
+        language: 'html',
+        content: '&lt;tag&gt;\n<tag>',
+      }),
+    ]);
+  });
+
+  it('strips scripts, styles, and templates before extracting prose', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'safe.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<title>Safe Page</title>',
+        '<style>.hidden { display: none; }</style>',
+        '<script>document.body.innerHTML = "EXECUTED";</script>',
+        '<template><p>Hidden template prose.</p></template>',
+        '<p>Visible text.</p>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+    const warnings = root.metadata.get('warnings');
+    const strippedElementCounts = root.metadata.get('strippedElementCounts');
+
+    expect(parsedText).toContain('Visible text.');
+    expect(parsedText).not.toContain('display: none');
+    expect(parsedText).not.toContain('EXECUTED');
+    expect(parsedText).not.toContain('Hidden template prose');
+    expect(JSON.stringify(warnings)).toContain('lower-confidence static rendered HTML fallback');
+    expect(strippedElementCounts).toEqual({ script: 1, style: 1, template: 1 });
+  });
+
+  it('preserves invalid numeric entities without throwing', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'entities.html');
+    const hugeDecimal = '&#999999999999999999999999;';
+    const hugeHex = '&#xFFFFFFFFFFFFFFFF;';
+    const aboveUnicodeRange = '&#1114112;';
+    const surrogate = '&#xD800;';
+
+    await writeFile(
+      sourcePath,
+      [
+        '<title>Entities</title>',
+        `<p>Values: &#65; &#x41; ${hugeDecimal} ${hugeHex} ${aboveUnicodeRange} ${surrogate} remain.</p>`,
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+
+    expect(parsedText).toContain(
+      `Values: A A ${hugeDecimal} ${hugeHex} ${aboveUnicodeRange} ${surrogate} remain.`
+    );
+  });
+
+  it('excludes unclosed stripped container content conservatively', async () => {
+    const dir = await createTempDir();
+    const cases: Array<{ tag: 'script' | 'style' | 'template'; leakedText: string }> = [
+      { tag: 'script', leakedText: 'LEAKED_SCRIPT' },
+      { tag: 'style', leakedText: 'LEAKED_STYLE' },
+      { tag: 'template', leakedText: 'LEAKED_TEMPLATE' },
+    ];
+
+    for (const strippedCase of cases) {
+      const sourcePath = join(dir, `${strippedCase.tag}.html`);
+      await writeFile(
+        sourcePath,
+        [
+          `<title>${strippedCase.tag}</title>`,
+          `<p>${strippedCase.tag} before.</p>`,
+          `<${strippedCase.tag}>${strippedCase.leakedText}`,
+          `<p>${strippedCase.tag} after.</p>`,
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const root = await new HtmlFormatParser().parse(sourcePath);
+      const parsedText = collectText(root);
+      const warnings = root.metadata.get('warnings');
+      const strippedElementCounts = root.metadata.get('strippedElementCounts') as Record<
+        string,
+        number
+      >;
+
+      expect(parsedText).toContain(`${strippedCase.tag} before.`);
+      expect(parsedText).not.toContain(strippedCase.leakedText);
+      expect(parsedText).not.toContain(`${strippedCase.tag} after.`);
+      expect(strippedElementCounts[strippedCase.tag]).toBe(1);
+      expect(JSON.stringify(warnings)).toContain(`Stripped 1 <${strippedCase.tag}> element`);
+    }
+  });
+
+  it('preserves links as text and metadata without fetching linked resources or executing scripts', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'index.html');
+    const linkedPath = join(dir, 'linked.html');
+
+    await writeFile(linkedPath, '<title>Linked Secret</title><p>Fetched content.</p>', 'utf-8');
+    await writeFile(
+      sourcePath,
+      [
+        '<title>Links</title>',
+        '<p>Read <a href="./linked.html">linked page</a>.</p>',
+        '<script>document.body.append("EXECUTED");</script>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+
+    expect(parsedText).toContain('Read linked page (./linked.html).');
+    expect(parsedText).not.toContain('Linked Secret');
+    expect(parsedText).not.toContain('Fetched content');
+    expect(parsedText).not.toContain('EXECUTED');
+    expect(root.metadata.get('links')).toEqual([{ text: 'linked page', href: './linked.html' }]);
+  });
+
+  it('detects and parses nested directories deterministically without following symlinks', async () => {
+    const dir = await createTempDir();
+    const sourceDir = join(dir, 'docs');
+    const nestedDir = join(sourceDir, 'api');
+    const symlinkTarget = join(dir, 'external');
+
+    await mkdir(nestedDir, { recursive: true });
+    await mkdir(symlinkTarget, { recursive: true });
+    await writeFile(join(sourceDir, 'zoo.html'), '<title>Zoo</title><p>Zed.</p>', 'utf-8');
+    await writeFile(join(nestedDir, 'api.htm'), '<title>API</title><p>Reference.</p>', 'utf-8');
+    await writeFile(join(sourceDir, 'notes.txt'), '<title>Notes</title>', 'utf-8');
+    await writeFile(join(symlinkTarget, 'hidden.html'), '<title>Hidden</title>', 'utf-8');
+    await symlink(symlinkTarget, join(sourceDir, 'linked-docs'));
+    await symlink(join(symlinkTarget, 'hidden.html'), join(sourceDir, 'linked-file.html'));
+
+    const parser = new HtmlFormatParser();
+    const detector = new FormatDetector();
+
+    expect(await parser.detect(sourceDir)).toBe(true);
+    expect(await detector.detect(sourceDir)).toBe(FormatType.HTML);
+
+    const root = await parser.parse(sourceDir);
+    const sourcePaths = root.metadata.get('sourcePaths');
+
+    expect(root).toMatchObject({
+      type: DocNodeType.ROOT,
+      title: 'docs',
+    });
+    expect(root.metadata.get('format')).toBe('html');
+    expect(root.metadata.get('sourcePath')).toBe(sourceDir);
+    expect(root.metadata.get('sourceKind')).toBe('rendered-html-fallback');
+    expect(root.metadata.get('count')).toBe(2);
+    expect(sourcePaths).toEqual([join(nestedDir, 'api.htm'), join(sourceDir, 'zoo.html')]);
+    expect(root.children.map((child) => child.title)).toEqual(['API', 'Zoo']);
+    expect(collectText(root)).not.toContain('Hidden');
+  });
+
+  it('rejects non-HTML files and root symlinks through the facade and helper', async () => {
+    const dir = await createTempDir();
+    const textPath = join(dir, 'guide.txt');
+    const targetPath = join(dir, 'target.html');
+    const symlinkPath = join(dir, 'linked.html');
+
+    await writeFile(textPath, '<!doctype html><h1>Guide</h1>', 'utf-8');
+    await writeFile(targetPath, '<title>Linked</title>', 'utf-8');
+    await symlink(targetPath, symlinkPath);
+
+    const parser = new HtmlFormatParser();
+    const detector = new FormatDetector();
+
+    expect(await parser.detect(textPath)).toBe(false);
+    await expect(parser.parse(textPath)).rejects.toThrow(/Unsupported HTML file extension/);
+    await expect(parseHtmlFile(textPath)).rejects.toThrow(/Unsupported HTML file extension/);
+    await expect(detector.detect(textPath)).rejects.toThrow(/Unable to detect format/);
+
+    expect(await parser.detect(symlinkPath)).toBe(false);
+    await expect(parser.parse(symlinkPath)).rejects.toThrow(/Invalid HTML source path/);
+    await expect(parseHtmlFile(symlinkPath)).rejects.toThrow(/Invalid HTML file path/);
+  });
+});

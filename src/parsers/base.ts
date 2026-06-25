@@ -16,6 +16,7 @@ export enum FormatType {
   OPENAPI = 'openapi',
   MARKDOWN = 'markdown',
   RST = 'rst',
+  HTML = 'html',
   AUTO = 'auto',
 }
 
