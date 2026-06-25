@@ -239,7 +239,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
 - [x] Deterministic `capabilities --json` contract for agents with implemented
       and planned/unsupported capabilities separated
-- [x] Read-only `agent context` metadata command for packaged context artifacts
+- [x] Read-only `agent context` metadata command for packaged context and skill
+      artifacts
+- [x] Bundled package skill files for current CLI usage and repo/docs discovery
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
@@ -297,10 +299,12 @@ Current capabilities contract scope:
 Current agent context metadata scope:
 
 - `llm-docs agent context` prints a concise human-readable summary of packaged
-  agent context artifacts and points to `--json`.
+  agent context and skill artifacts and points to `--json`.
 - `llm-docs agent context --json` prints deterministic JSON with schema version
-  `0.1.0`, package name/version metadata, the `llm-docs` binary, and artifact
-  entries for `AGENT_CONTEXT.md` and `index.md`.
+  `0.2.0`, package name/version metadata, the `llm-docs` binary, context
+  artifact entries for `AGENT_CONTEXT.md` and `index.md`, and skill artifact
+  entries for `skills/llm-docs-generator/SKILL.md` and
+  `skills/repo-docs-discovery/SKILL.md`.
 - Each artifact entry includes an artifact id, display name, package-relative
   path, byte size, SHA-256 hash, and intended use.
 - The command reads only package-local context files, writes only stdout, omits
@@ -308,6 +312,10 @@ Current agent context metadata scope:
   state.
 - The command does not install or register skills, write user config, or
   implement `agent install codex` or `agent doctor`.
+- The bundled skill files are current-state instructions for agents. They tell
+  agents to inspect `capabilities --json` before assuming support and preserve
+  the boundary that the agent chooses explicit source/scope/candidate while the
+  CLI reports deterministic evidence.
 
 Current source-truth evidence scope:
 

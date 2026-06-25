@@ -19,7 +19,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -271,6 +271,14 @@ interface AgentContextContract {
     binary: string;
   };
   contextArtifacts: Array<{
+    id: string;
+    name: string;
+    path: string;
+    byteSize: number;
+    sha256: string;
+    intendedUse: string;
+  }>;
+  skillArtifacts: Array<{
     id: string;
     name: string;
     path: string;
@@ -550,6 +558,23 @@ async function findManifestFiles(root: string): Promise<string[]> {
   return found.sort(compareStringsByCodeUnit);
 }
 
+async function listPackageRelativeFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const found: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = join(root, entry.name);
+
+    if (entry.isDirectory()) {
+      found.push(...(await listPackageRelativeFiles(entryPath)));
+    } else {
+      found.push(relative(repoRoot, entryPath).split(sep).join('/'));
+    }
+  }
+
+  return found.sort(compareStringsByCodeUnit);
+}
+
 async function generateSwiftFixture(): Promise<{
   configDir: string;
   outputDir: string;
@@ -603,8 +628,54 @@ describe('CLI compatibility behavior', () => {
     };
 
     expect(packageMetadata.files).toEqual(
-      expect.arrayContaining(['AGENT_CONTEXT.md', 'index.md'])
+      expect.arrayContaining([
+        'AGENT_CONTEXT.md',
+        'index.md',
+        'skills/llm-docs-generator/SKILL.md',
+        'skills/repo-docs-discovery/SKILL.md',
+      ])
     );
+    expect(packageMetadata.files).not.toContain('skills');
+    expect(
+      packageMetadata.files
+        .filter((file) => file.startsWith('skills/'))
+        .sort(compareStringsByCodeUnit)
+    ).toEqual([
+      'skills/llm-docs-generator/SKILL.md',
+      'skills/repo-docs-discovery/SKILL.md',
+    ]);
+  });
+
+  it('ships valid bundled skill frontmatter for agent workflows', async () => {
+    const skillPaths = [
+      'skills/llm-docs-generator/SKILL.md',
+      'skills/repo-docs-discovery/SKILL.md',
+    ];
+
+    for (const skillPath of skillPaths) {
+      const content = await readFile(join(repoRoot, skillPath), 'utf-8');
+      const match = content.match(/^---\n([\s\S]*?)\n---\n/);
+
+      expect(match, `${skillPath} frontmatter`).not.toBeNull();
+
+      const entries = new Map<string, string>();
+
+      for (const line of match?.[1].split('\n') ?? []) {
+        const separatorIndex = line.indexOf(':');
+        expect(separatorIndex, `${skillPath} frontmatter line ${line}`).toBeGreaterThan(0);
+        entries.set(line.slice(0, separatorIndex), line.slice(separatorIndex + 1).trim());
+      }
+
+      expect([...entries.keys()].sort()).toEqual(['description', 'name']);
+      expect(entries.get('name')).toMatch(/^[a-z0-9-]+$/);
+      expect(entries.get('description')).toBeTruthy();
+      expect(content).toContain('llm-docs capabilities --json');
+      expect(content).toContain('agent install codex');
+      expect(content).toContain('agent doctor');
+      expect(content).toMatch(/unsupported unless|unavailable unless|unless .*reports/i);
+      expect(content).not.toContain('automatically register');
+      expect(content).not.toContain('always use the top candidate');
+    }
   });
 
   it('ships built-in SDK config without default local spec paths', async () => {
@@ -680,7 +751,7 @@ describe('CLI compatibility behavior', () => {
     expect(first.stdout.endsWith('\n')).toBe(true);
     expect(first.stdout).not.toContain('generatedAt');
     expect(context).toMatchObject({
-      schemaVersion: '0.1.0',
+      schemaVersion: '0.2.0',
       mode: 'agent-context-packaged-metadata',
       generator: {
         packageName: 'llm-docs-generator',
@@ -689,7 +760,7 @@ describe('CLI compatibility behavior', () => {
         binary: 'llm-docs',
       },
       limitations: [
-        'Reports packaged context metadata only.',
+        'Reports packaged context and skill metadata only.',
         'Does not install or register skills.',
         'Does not write user config.',
         'Does not probe environment state.',
@@ -715,6 +786,27 @@ describe('CLI compatibility behavior', () => {
     expect(context.contextArtifacts.every((artifact) => artifact.intendedUse.length > 0)).toBe(
       true
     );
+    expect(context.skillArtifacts.map((artifact) => artifact.id)).toEqual([
+      'llm-docs-generator',
+      'repo-docs-discovery',
+    ]);
+    expect(context.skillArtifacts.map((artifact) => artifact.path)).toEqual([
+      'skills/llm-docs-generator/SKILL.md',
+      'skills/repo-docs-discovery/SKILL.md',
+    ]);
+    expect(context.skillArtifacts).toHaveLength(2);
+    expect(await listPackageRelativeFiles(join(repoRoot, 'skills'))).toEqual(
+      context.skillArtifacts
+        .map((artifact) => artifact.path)
+        .sort(compareStringsByCodeUnit)
+    );
+
+    for (const artifact of context.skillArtifacts) {
+      expect(artifact.path).toMatch(/^skills\/[a-z0-9-]+\/SKILL\.md$/);
+      expect(artifact.byteSize).toBe(await byteSize(join(repoRoot, artifact.path)));
+      expect(artifact.sha256).toBe(await sha256FileHex(join(repoRoot, artifact.path)));
+      expect(artifact.intendedUse.length).toBeGreaterThan(0);
+    }
   });
 
   it('prints concise non-JSON agent context text without installer or doctor claims', async () => {
@@ -722,13 +814,18 @@ describe('CLI compatibility behavior', () => {
     const output = `${stdout}\n${stderr}`;
 
     expect(stdout).toContain('llm-docs agent context');
-    expect(stdout).toContain('Schema: 0.1.0');
+    expect(stdout).toContain('Schema: 0.2.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
     expect(stdout).toContain('Binary: llm-docs');
     expect(stdout).toContain('Agent Context (agent-context)');
     expect(stdout).toContain('Project Index (project-index)');
+    expect(stdout).toContain('Packaged skills:');
+    expect(stdout).toContain('llm-docs-generator (llm-docs-generator)');
+    expect(stdout).toContain('repo-docs-discovery (repo-docs-discovery)');
     expect(stdout).toContain('Path: AGENT_CONTEXT.md');
     expect(stdout).toContain('Path: index.md');
+    expect(stdout).toContain('Path: skills/llm-docs-generator/SKILL.md');
+    expect(stdout).toContain('Path: skills/repo-docs-discovery/SKILL.md');
     expect(stdout).toContain('Does not install or register skills.');
     expect(stdout).toContain('Use --json for the stable agent metadata contract.');
     expect(output).not.toMatch(/\bcopies bundled skills\b/i);
@@ -815,6 +912,9 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('agent-context')?.outputFiles).toEqual(['stdout JSON metadata']);
     expect(implemented.get('agent-context')?.limitations).toContain(
       'does not install/register skills'
+    );
+    expect(implemented.get('agent-context')?.inputBoundary).toBe(
+      'packaged context and skill files only'
     );
     expect(implemented.get('generate-sdk')?.outputFiles).toEqual([
       'manifest.json',
