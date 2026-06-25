@@ -2,7 +2,7 @@
 
 **Status**: ✅ **COMPLETE AND WORKING**
 
-Successfully implemented a general-purpose, multi-format LLM documentation generator that handles OpenRef YAML (Supabase) and Markdown/MDX/DocC parser inputs.
+Successfully implemented a general-purpose, multi-format LLM documentation generator that handles OpenRef YAML (Supabase), Markdown/MDX/DocC, and RST parser inputs.
 
 ## What Was Built
 
@@ -24,10 +24,14 @@ llm-docs-generator/
 │   │   │   ├── parser.ts          ✅ OpenRef YAML parser
 │   │   │   ├── adapter.ts         ✅ OpenRef → IR adapter
 │   │   │   └── index.ts           ✅ OpenRef wrapper
-│   │   └── markdown/
-│   │       ├── parser.ts          ✅ Markdown/MDX/DocC parser
-│   │       ├── adapter.ts         ✅ Markdown/MDX → IR adapter
-│   │       └── index.ts           ✅ Markdown wrapper
+│   │   ├── markdown/
+│   │   │   ├── parser.ts          ✅ Markdown/MDX/DocC parser
+│   │   │   ├── adapter.ts         ✅ Markdown/MDX → IR adapter
+│   │   │   └── index.ts           ✅ Markdown wrapper
+│   │   └── rst/
+│   │       ├── parser.ts          ✅ deterministic RST subset parser
+│   │       ├── adapter.ts         ✅ RST → IR adapter
+│   │       └── index.ts           ✅ RST wrapper
 │   └── config/
 │       └── presets/
 │           └── swift-book.json    ✅ Swift-book configuration
@@ -47,6 +51,8 @@ llm-docs-generator/
      JSON/YAML files converted to DocNode IR as a parser/library capability
    - **Markdown/MDX/DocC**: local Markdown files, MDX cleanup foundation, and
      Swift Programming Language book
+   - **RST**: explicit local `.rst` files and directories containing `.rst`
+     files parsed as a deterministic Python-style documentation subset
    - Extensible: Add new formats easily
 
 3. **Auto-Detection**
@@ -157,6 +163,17 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - Endpoint details, parameters, request bodies, responses, schema refs, and
   simple examples → deterministic PROSE ContentBlocks
 
+**RST → IR:**
+
+- File → SECTION DocNode with `format: rst` and `sourcePath` metadata
+- Directory → ROOT DocNode containing sorted file SECTION nodes
+- Underline heading adornments → SECTION / CATEGORY / OPERATION / ITEM hierarchy
+- Paragraphs and simple bullet/enumerated lists → deterministic PROSE
+  ContentBlocks
+- Literal blocks and `code-block` / `code` directives → CODE ContentBlocks
+- Unsupported directives/includes → warnings plus safe prose where possible;
+  includes are not executed or fetched
+
 ## Benefits
 
 1. **Reusability**: One tool for multiple doc sources
@@ -177,6 +194,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit local `discover --source` bounded inspection report
 - [x] Explicit repo `discover --repo` cache and bounded inspection report
 - [x] Explicit website `discover --url` bounded inspection report
+- [x] RST parser foundation for explicit local Python-style documentation
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
@@ -233,6 +251,21 @@ Current Markdown / MDX parser scope:
   fences.
 - Does not evaluate JSX, execute imports, fetch network sources, or add
   product-specific MDX rules.
+
+Current RST parser scope:
+
+- Accepts explicit local `.rst` files.
+- Accepts directories containing nested `.rst` files, traverses local
+  filesystem entries deterministically, sorts parsed files, and does not follow
+  symlinked entries.
+- Records `format: rst`, `sourcePath`, parser details, and warnings metadata.
+- Supports underline title/section headings, paragraphs, simple
+  bullet/enumerated lists as prose, literal blocks introduced by `::`, and
+  `.. code-block::` / `.. code::` directives with optional language.
+- Does not execute or fetch includes, run Sphinx/docutils transforms, resolve
+  references, or claim full RST/Sphinx support.
+- Exists as parser/library support and is not yet a `generate --source` CLI
+  workflow.
 
 ## Files Modified/Created
 

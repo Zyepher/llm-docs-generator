@@ -101,10 +101,10 @@
           "description": "Standard library documentation"
         }
       ],
-      "hint": "Likely reStructuredText docs live under Doc. This is a hint only; RST parsing is not implemented yet.",
+      "hint": "Likely reStructuredText docs live under Doc. This is a hint only; the RST parser module supports a deterministic local subset, but this catalog entry remains untested and does not imply CLI source generation.",
       "tested": false,
       "status": "planned",
-      "note": "Requires reStructuredText parser implementation",
+      "note": "Requires agent-selected explicit source conversion workflow before marking tested",
       "maintainer": "Python Software Foundation"
     },
     {

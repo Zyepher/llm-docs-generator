@@ -49,6 +49,11 @@ Current implementation:
   MDX is handled as Markdown parser/library support with deterministic cleanup
   outside fenced code; it does not evaluate JSX, execute imports, or add
   source-specific documentation rules.
+- Can parse local reStructuredText `.rst` files and directories through parser
+  modules. RST support is a deterministic Python-style documentation subset:
+  underline headings, paragraphs, simple lists as prose, literal blocks, and
+  `code-block` / `code` directives. It does not execute includes, fetch
+  content, run Sphinx/docutils transforms, or choose source authority.
 - Can format parsed docs into LLM-friendly text.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks.

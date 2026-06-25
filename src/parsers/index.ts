@@ -5,3 +5,5 @@ export type { MarkdownContent, MarkdownDocument, MarkdownSection } from './markd
 export { OpenApiFormatParser, openApiParser, parseOpenApiFile } from './openapi/index.js';
 export type { ApiVersionInfo } from './openapi/index.js';
 export { OpenRefFormatParser, openRefParser } from './openref/index.js';
+export { RstFormatParser, parseRstFile, rstParser } from './rst/index.js';
+export type { RstDocument } from './rst/index.js';

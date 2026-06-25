@@ -14,6 +14,7 @@ import { FormatType } from '../parsers/base.js';
 import { openApiParser } from '../parsers/openapi/index.js';
 import { openRefParser } from '../parsers/openref/index.js';
 import { markdownParser } from '../parsers/markdown/index.js';
+import { rstParser } from '../parsers/rst/index.js';
 import type { Parser } from '../parsers/base.js';
 
 /**
@@ -29,6 +30,7 @@ export class FormatDetector {
     this.registerParser(openRefParser);
     this.registerParser(openApiParser);
     this.registerParser(markdownParser);
+    this.registerParser(rstParser);
   }
 
   /**
@@ -126,6 +128,9 @@ export class FormatDetector {
       case 'mdx':
       case 'markdown':
         return FormatType.MARKDOWN;
+
+      case 'rst':
+        return FormatType.RST;
 
       default:
         return FormatType.AUTO;
