@@ -56,6 +56,15 @@ const PACKAGE_DEPENDENCY_FIELDS = [
   'bundleDependencies',
 ] as const;
 const TSCONFIG_ARRAY_FIELDS = ['include', 'exclude', 'files'] as const;
+const TEST_CONTEXT_PATH_SEGMENTS = ['__tests__', 'test', 'tests'] as const;
+const EXAMPLE_CONTEXT_PATH_SEGMENTS = [
+  'example',
+  'examples',
+  'demo',
+  'demos',
+  'sample',
+  'samples',
+] as const;
 const MAX_SIGNATURE_TEXT_LENGTH = 500;
 const MAX_SIGNATURE_DETAIL_TEXT_LENGTH = 240;
 const MAX_SIGNATURE_NAME_LENGTH = 120;
@@ -87,6 +96,8 @@ export type SourceTruthSignatureDeclarationKind =
 export type SourceTruthVariableDeclarationKind = 'const' | 'let' | 'var';
 export type SourceTruthConfigFileKind = 'package-json' | 'tsconfig-json';
 export type SourceTruthConfigLineRangeGranularity = 'field' | 'file';
+export type SourceTruthContextFactKind = 'test-file' | 'example-file';
+export type SourceTruthContextLineRangeGranularity = 'file';
 export type SourceTruthConfigFactKind =
   | 'package-name'
   | 'package-version'
@@ -165,6 +176,17 @@ export interface SourceTruthConfigFact {
   order: number;
 }
 
+export interface SourceTruthContextFact {
+  kind: SourceTruthContextFactKind;
+  path: string;
+  evidenceSignals: string[];
+  byteSize: number;
+  sha256: string;
+  provenance: SourceTruthProvenance;
+  lineRangeGranularity: SourceTruthContextLineRangeGranularity;
+  order: number;
+}
+
 export interface SourceTruthParseDiagnostic {
   code: number;
   category: string;
@@ -181,6 +203,7 @@ export interface SourceTruthFileEvidence {
   supported: boolean;
   facts: SourceTruthFact[];
   configFacts: SourceTruthConfigFact[];
+  contextFacts: SourceTruthContextFact[];
   parseDiagnostics?: SourceTruthParseDiagnostic[];
   skipReason?: SourceTruthSkipReason;
 }
@@ -211,6 +234,7 @@ export interface SourceTruthInspectionReport {
   files: SourceTruthFileEvidence[];
   facts: SourceTruthFact[];
   configFacts: SourceTruthConfigFact[];
+  contextFacts: SourceTruthContextFact[];
   warnings: string[];
 }
 
@@ -316,6 +340,10 @@ export async function inspectSourceTruth(
   configFacts.forEach((fact, index) => {
     fact.order = index + 1;
   });
+  const contextFacts = files.flatMap((file) => file.contextFacts);
+  contextFacts.forEach((fact, index) => {
+    fact.order = index + 1;
+  });
 
   return {
     schemaVersion: SOURCE_TRUTH_REPORT_SCHEMA_VERSION,
@@ -341,6 +369,7 @@ export async function inspectSourceTruth(
     files,
     facts,
     configFacts,
+    contextFacts,
     warnings,
   };
 }
@@ -538,6 +567,7 @@ async function inspectFile(options: {
       supported: false,
       facts: [],
       configFacts: [],
+      contextFacts: [],
       skipReason: 'unsupported-extension',
     });
     return;
@@ -554,6 +584,7 @@ async function inspectFile(options: {
       supported: true,
       facts: [],
       configFacts: [],
+      contextFacts: [],
       skipReason: 'oversized',
     });
     return;
@@ -567,6 +598,12 @@ async function inspectFile(options: {
       ? extractTypeScriptJavaScriptFacts(pathForReport, content)
       : { facts: [], parseDiagnostics: [] };
     const configExtraction = extractPackageConfigFacts(pathForReport, content);
+    const contextFacts = extractPathContextFacts({
+      path: pathForReport,
+      byteSize: stats.size,
+      sha256,
+      content,
+    });
     const fileEvidence: SourceTruthFileEvidence = {
       path: pathForReport,
       resolvedPath: absolutePath,
@@ -576,6 +613,7 @@ async function inspectFile(options: {
       supported: true,
       facts: extraction.facts,
       configFacts: configExtraction.facts,
+      contextFacts,
     };
 
     if (extraction.parseDiagnostics.length > 0) {
@@ -602,6 +640,7 @@ async function inspectFile(options: {
       supported: true,
       facts: [],
       configFacts: [],
+      contextFacts: [],
       skipReason: 'unreadable',
     });
   }
@@ -882,6 +921,91 @@ function extractPackageConfigFacts(
   }
 
   return { facts: [], warnings: [] };
+}
+
+function extractPathContextFacts(options: {
+  path: string;
+  byteSize: number;
+  sha256: string;
+  content: string;
+}): SourceTruthContextFact[] {
+  const testSignals = contextTestEvidenceSignals(options.path);
+  const exampleSignals = contextExampleEvidenceSignals(options.path);
+  const kind: SourceTruthContextFactKind | undefined =
+    testSignals.length > 0 ? 'test-file' : exampleSignals.length > 0 ? 'example-file' : undefined;
+
+  if (kind === undefined) {
+    return [];
+  }
+
+  const evidenceSignals =
+    kind === 'test-file' ? [...testSignals, ...exampleSignals] : exampleSignals;
+
+  return [
+    {
+      kind,
+      path: options.path,
+      evidenceSignals,
+      byteSize: options.byteSize,
+      sha256: options.sha256,
+      provenance: {
+        path: options.path,
+        lineRange: lineRangeForSpan(buildLineStarts(options.content), 0, options.content.length),
+      },
+      lineRangeGranularity: 'file',
+      order: 0,
+    },
+  ];
+}
+
+function contextTestEvidenceSignals(path: string): string[] {
+  const normalizedPath = path.toLowerCase();
+  const segments = normalizedPath.split('/');
+  const filename = segments[segments.length - 1] ?? normalizedPath;
+  const signals: string[] = [];
+
+  if (filename.includes('.test.')) {
+    signals.push('filename-pattern:*.test.*');
+  }
+
+  if (filename.includes('.spec.')) {
+    signals.push('filename-pattern:*.spec.*');
+  }
+
+  for (const segment of TEST_CONTEXT_PATH_SEGMENTS) {
+    if (segments.includes(segment)) {
+      signals.push(`path-segment:${segment}`);
+    }
+  }
+
+  return signals;
+}
+
+function contextExampleEvidenceSignals(path: string): string[] {
+  const segments = path.toLowerCase().split('/');
+  const signals: string[] = [];
+
+  for (const segment of EXAMPLE_CONTEXT_PATH_SEGMENTS) {
+    if (segments.includes(segment)) {
+      signals.push(`path-segment:${segment}`);
+    }
+  }
+
+  if (hasAdjacentPathSegments(segments, 'docs', 'examples')) {
+    signals.push('path-segment:docs/examples');
+  }
+
+  return signals;
+}
+
+function hasAdjacentPathSegments(segments: string[], first: string, second: string): boolean {
+  for (let index = 0; index < segments.length - 1; index++) {
+    if (segments[index] === first && segments[index + 1] === second) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function extractPackageJsonFacts(

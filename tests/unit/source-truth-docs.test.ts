@@ -151,6 +151,7 @@ describe('source-truth docs generation', () => {
         exportFactCount: 4,
         signatureFactCount: 2,
         configFactCount: 0,
+        contextFactCount: 0,
         parseDiagnosticCount: 0,
       },
       {
@@ -162,6 +163,7 @@ describe('source-truth docs generation', () => {
         exportFactCount: 2,
         signatureFactCount: 1,
         configFactCount: 0,
+        contextFactCount: 0,
         parseDiagnosticCount: 0,
       },
     ]);
@@ -365,6 +367,7 @@ describe('source-truth docs generation', () => {
         exportFactCount: file.exportFactCount,
         signatureFactCount: file.signatureFactCount,
         configFactCount: file.configFactCount,
+        contextFactCount: file.contextFactCount,
         hash: file.hash,
       }))
     ).toEqual([
@@ -374,6 +377,7 @@ describe('source-truth docs generation', () => {
         exportFactCount: 0,
         signatureFactCount: 0,
         configFactCount: 4,
+        contextFactCount: 0,
         hash: `sha256:${sha256(packageJson)}`,
       },
       {
@@ -382,8 +386,75 @@ describe('source-truth docs generation', () => {
         exportFactCount: 0,
         signatureFactCount: 0,
         configFactCount: 4,
+        contextFactCount: 0,
         hash: `sha256:${sha256(tsconfigJson)}`,
       },
+    ]);
+  });
+
+  it('generates Markdown and manifest provenance for context-only source evidence', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-context-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(join(sourceDir, 'examples'), { recursive: true });
+
+    const exampleSource = ['const localExample = true;', ''].join('\n');
+    await writeFile(join(sourceDir, 'examples/usage.ts'), exampleSource, 'utf-8');
+
+    const result = await generateSourceTruthDocs({ source: sourceDir, outputDir });
+    const markdown = await readFile(join(outputDir, 'source-truth.md'), 'utf-8');
+    const manifest = await readJson<SourceTruthDocsManifest>(join(outputDir, 'manifest.json'));
+
+    expect(result.report.facts).toEqual([]);
+    expect(result.report.configFacts).toEqual([]);
+    expect(result.report.contextFacts.map((fact) => fact.kind)).toEqual(['example-file']);
+    expect(result.report.contextFacts[0]).toMatchObject({
+      path: 'examples/usage.ts',
+      evidenceSignals: ['path-segment:examples'],
+      byteSize: Buffer.byteLength(exampleSource),
+      sha256: sha256(exampleSource),
+      provenance: {
+        path: 'examples/usage.ts',
+        lineRange: { start: 1, end: 1 },
+      },
+      lineRangeGranularity: 'file',
+      order: 1,
+    });
+    expect(markdown).toContain('No TypeScript/JavaScript export facts were observed.');
+    expect(markdown).toContain('No package or config facts were observed.');
+    expect(markdown).toContain('## Test And Example Context Facts');
+    expect(markdown).toContain('### `examples/usage.ts`');
+    expect(markdown).toContain('- `example-file`');
+    expect(markdown).toContain('  - Path: `examples/usage.ts`');
+    expect(markdown).toContain('  - Evidence signals: `path-segment:examples`');
+    expect(markdown).toContain(`  - SHA-256: \`${sha256(exampleSource)}\``);
+    expect(markdown).toContain('  - Line range granularity: `file`');
+    expect(markdown).toContain(
+      '- Test/example context facts are path/filename-level evidence only; context line ranges cover the whole file.'
+    );
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(/\bverified\b/i);
+    expect(markdown).not.toMatch(/\bbehavior summary\b/i);
+
+    expect(manifest.sourceFiles).toEqual([
+      {
+        path: 'examples/usage.ts',
+        resolvedPath: join(sourceDir, 'examples/usage.ts'),
+        byteSize: Buffer.byteLength(exampleSource),
+        hash: `sha256:${sha256(exampleSource)}`,
+        factCount: 1,
+        exportFactCount: 0,
+        signatureFactCount: 0,
+        configFactCount: 0,
+        contextFactCount: 1,
+        parseDiagnosticCount: 0,
+      },
+    ]);
+    expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'source-truth-report.json',
+      'source-truth.md',
     ]);
   });
 
@@ -435,7 +506,7 @@ describe('source-truth docs generation', () => {
       mode: 'source-truth-local-docs-failure',
       reason: 'no-extractable-source-truth-facts',
       message:
-        'No extractable source-truth export or package/config facts were found for the explicit local source path.',
+        'No extractable source-truth export, package/config, or context facts were found for the explicit local source path.',
       source: {
         input: sourceDir,
         resolvedPath: sourceDir,
@@ -450,6 +521,8 @@ describe('source-truth docs generation', () => {
       join(outputDir, failure.evidenceReport.path)
     );
     expect(report.facts).toEqual([]);
+    expect(report.configFacts).toEqual([]);
+    expect(report.contextFacts).toEqual([]);
     expect(report.warnings).toEqual(['Skipped unsupported file: notes.md']);
   });
 

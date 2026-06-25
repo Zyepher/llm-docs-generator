@@ -600,6 +600,7 @@ describe('source-truth inspection', () => {
         supported: file.supported,
         skipReason: file.skipReason,
         facts: file.facts.length,
+        contextFacts: file.contextFacts.length,
       }))
     ).toEqual([
       {
@@ -608,6 +609,7 @@ describe('source-truth inspection', () => {
         supported: true,
         skipReason: 'oversized',
         facts: 0,
+        contextFacts: 0,
       },
       {
         path: 'notes.md',
@@ -615,6 +617,7 @@ describe('source-truth inspection', () => {
         supported: false,
         skipReason: 'unsupported-extension',
         facts: 0,
+        contextFacts: 0,
       },
       {
         path: 'small.js',
@@ -622,9 +625,11 @@ describe('source-truth inspection', () => {
         supported: true,
         skipReason: 'oversized',
         facts: 0,
+        contextFacts: 0,
       },
     ]);
     expect(report.facts).toEqual([]);
+    expect(report.contextFacts).toEqual([]);
     expect(report.traversal).toMatchObject({
       inspectedFiles: 0,
       skippedFiles: 3,
@@ -636,6 +641,149 @@ describe('source-truth inspection', () => {
       'Skipped oversized file: small.js (27 bytes)',
     ]);
     expect(report.files.every((file) => file.sha256 === undefined)).toBe(true);
+  });
+
+  it('reports path-based test and example context facts without behavior inference', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-context-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+    await mkdir(join(sourceDir, 'docs/examples'), { recursive: true });
+    await mkdir(join(sourceDir, 'samples'), { recursive: true });
+    await mkdir(join(sourceDir, 'src'), { recursive: true });
+
+    const testSource = ['describe("widget", () => {', '  expect(true).toBe(true);', '});', ''].join(
+      '\n'
+    );
+    const docsExampleSource = ['const docsExample = true;', ''].join('\n');
+    const sampleSource = ['const sample = true;', ''].join('\n');
+    const plainSource = ['const plain = true;', ''].join('\n');
+    await writeFile(join(sourceDir, 'tests/widget.test.ts'), testSource, 'utf-8');
+    await writeFile(join(sourceDir, 'docs/examples/usage.ts'), docsExampleSource, 'utf-8');
+    await writeFile(join(sourceDir, 'samples/widget.ts'), sampleSource, 'utf-8');
+    await writeFile(join(sourceDir, 'src/plain.ts'), plainSource, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(report.facts).toEqual([]);
+    expect(report.configFacts).toEqual([]);
+    expect(report.contextFacts.map((fact) => fact.path)).toEqual([
+      'docs/examples/usage.ts',
+      'samples/widget.ts',
+      'tests/widget.test.ts',
+    ]);
+    expect(
+      report.contextFacts.map(
+        ({
+          kind,
+          path,
+          evidenceSignals,
+          byteSize,
+          sha256,
+          provenance,
+          lineRangeGranularity,
+          order,
+        }) => ({
+          kind,
+          path,
+          evidenceSignals,
+          byteSize,
+          sha256,
+          provenance,
+          lineRangeGranularity,
+          order,
+        })
+      )
+    ).toEqual([
+      {
+        kind: 'example-file',
+        path: 'docs/examples/usage.ts',
+        evidenceSignals: ['path-segment:examples', 'path-segment:docs/examples'],
+        byteSize: Buffer.byteLength(docsExampleSource),
+        sha256: sha256(docsExampleSource),
+        provenance: {
+          path: 'docs/examples/usage.ts',
+          lineRange: { start: 1, end: 1 },
+        },
+        lineRangeGranularity: 'file',
+        order: 1,
+      },
+      {
+        kind: 'example-file',
+        path: 'samples/widget.ts',
+        evidenceSignals: ['path-segment:samples'],
+        byteSize: Buffer.byteLength(sampleSource),
+        sha256: sha256(sampleSource),
+        provenance: {
+          path: 'samples/widget.ts',
+          lineRange: { start: 1, end: 1 },
+        },
+        lineRangeGranularity: 'file',
+        order: 2,
+      },
+      {
+        kind: 'test-file',
+        path: 'tests/widget.test.ts',
+        evidenceSignals: ['filename-pattern:*.test.*', 'path-segment:tests'],
+        byteSize: Buffer.byteLength(testSource),
+        sha256: sha256(testSource),
+        provenance: {
+          path: 'tests/widget.test.ts',
+          lineRange: { start: 1, end: 3 },
+        },
+        lineRangeGranularity: 'file',
+        order: 3,
+      },
+    ]);
+    expect(report.files.find((file) => file.path === 'src/plain.ts')?.contextFacts).toEqual([]);
+
+    const serializedContextFacts = JSON.stringify(report.contextFacts);
+    expect(serializedContextFacts).not.toContain('describe');
+    expect(serializedContextFacts).not.toContain('expect');
+    expect(serializedContextFacts).not.toMatch(/\bframework\b/i);
+    expect(serializedContextFacts).not.toMatch(/\broutes?\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bbehavior\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bverified\b/i);
+  });
+
+  it('preserves all matched factual context signals on mixed test/example paths', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-mixed-context-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(join(sourceDir, 'examples'), { recursive: true });
+
+    const source = ['test("mixed path", () => {', '  expect(true).toBe(true);', '});', ''].join(
+      '\n'
+    );
+    await writeFile(join(sourceDir, 'examples/widget.test.ts'), source, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(report.facts).toEqual([]);
+    expect(report.configFacts).toEqual([]);
+    expect(report.contextFacts).toHaveLength(1);
+    expect(report.contextFacts[0]).toMatchObject({
+      kind: 'test-file',
+      path: 'examples/widget.test.ts',
+      evidenceSignals: ['filename-pattern:*.test.*', 'path-segment:examples'],
+      byteSize: Buffer.byteLength(source),
+      sha256: sha256(source),
+      provenance: {
+        path: 'examples/widget.test.ts',
+        lineRange: { start: 1, end: 3 },
+      },
+      lineRangeGranularity: 'file',
+      order: 1,
+    });
+
+    const serializedContextFacts = JSON.stringify(report.contextFacts);
+    expect(serializedContextFacts).not.toContain('expect(true)');
+    expect(serializedContextFacts).not.toMatch(/\bframework\b/i);
+    expect(serializedContextFacts).not.toMatch(/\broutes?\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bbehavior\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bverified\b/i);
   });
 
   it('extracts conservative package manifest evidence with field provenance', async () => {

@@ -129,20 +129,23 @@ uses bounded traversal, skips common dependency/build directories, does not
 follow symlinks, records hashes for inspected supported files, and extracts
 conservative top-level TypeScript/JavaScript export facts plus `package.json`
 and `tsconfig*.json` package/config facts with normalized source paths and line
-ranges. Directly exported top-level declarations may include compact AST
-signature evidence with bodies and initializer values omitted. Re-exports,
-export-all declarations, and export assignments remain unresolved. It does not
+ranges. It also reports path-based test/example context facts for inspected
+supported files whose normalized path or filename matches conservative test,
+spec, example, demo, sample, or docs/examples signals. Directly exported
+top-level declarations may include compact AST signature evidence with bodies
+and initializer values omitted. Re-exports, export-all declarations, and export
+assignments remain unresolved. It does not parse assertions, execute tests,
 prove claims, infer runtime behavior, infer framework identity, decide task fit,
 summarize behavior, or select sources.
 
 The current `source-truth generate --source --output-dir` command accepts one
 explicit local file or directory, reuses the source-truth inspector, and writes
 `source-truth-report.json`, `source-truth.md`, and `manifest.json`. The Markdown
-contains observed export facts and package/config facts grouped by normalized
-source file. If no export or package/config facts are extractable, the command
-exits non-zero and writes `failure.json` referencing the raw evidence report
-instead of Markdown. It rejects output directories that are the source path or
-inside the source path.
+contains observed export facts, package/config facts, and test/example context
+facts grouped by normalized source file. If no export, package/config, or
+context facts are extractable, the command exits non-zero and writes
+`failure.json` referencing the raw evidence report instead of Markdown. It
+rejects output directories that are the source path or inside the source path.
 
 The current CLI does not yet expose general `generate --source`, refresh, or
 source verification. It writes
@@ -264,11 +267,12 @@ agent intent/source/scope resolution
   available through `discover --source`, and repo cache/inspection reports are
   available through `discover --repo`. Bounded explicit URL inspection reports
   are available through `discover --url`; bounded local TypeScript/JavaScript
-  export, optional AST signature, and package/config evidence reports are available through
-  `source-truth inspect --source`, and evidence-bound Markdown is available
-  through `source-truth generate --source --output-dir`. Broader crawling,
-  refresh, source-code verification, and behavior-level source documentation
-  remain planned.
+  export, optional AST signature, package/config, and path-based test/example
+  context evidence reports are available through `source-truth inspect --source`,
+  and evidence-bound Markdown is available through
+  `source-truth generate --source --output-dir`. Broader crawling, refresh,
+  source-code verification, and behavior-level source documentation remain
+  planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL
