@@ -270,8 +270,9 @@ Current source-truth evidence scope:
 
 - `llm-docs source-truth inspect --source <path>` accepts an explicit local file
   or directory and prints deterministic JSON to stdout. It reports observed
-  TypeScript/JavaScript export facts and package/config facts from
-  `package.json` and `tsconfig*.json` only.
+  TypeScript/JavaScript export facts, optional direct-declaration AST signature
+  evidence, and package/config facts from `package.json` and `tsconfig*.json`
+  only.
 - `llm-docs source-truth generate --source <path> --output-dir <dir>` accepts
   the same explicit local source boundary, reuses the inspector, and writes
   `source-truth-report.json`, `source-truth.md`, and `manifest.json` on success.
@@ -284,15 +285,17 @@ Current source-truth evidence scope:
   `node_modules`, `dist`, `build`, `coverage`, and `.git`.
 - Supported evidence extraction is intentionally conservative:
   TypeScript/JavaScript source files only, starting with top-level exports,
-  re-exports, export-all declarations, and export assignments.
+  re-exports, export-all declarations, and export assignments. Signature
+  evidence is emitted only for directly exported top-level declarations and
+  omits function/class bodies and variable initializer values.
 - Every extracted fact cites a normalized source path and line range. Supported
   inspected files include byte size and SHA-256 hash; unsupported or oversized
   files are reported as skipped with warnings.
 - Generated source-truth Markdown groups observed facts by normalized source
-  file and lists export facts plus package/config facts with line ranges and
-  warnings/limitations. It does not verify existing documentation claims, infer
-  runtime behavior, decide task fit, select sources, assign authority, or
-  summarize behavior beyond observed export and package/config facts.
+  file and lists export facts, optional signature evidence, and package/config
+  facts with line ranges and warnings/limitations. It does not prove existing
+  documentation claims, infer runtime behavior, decide task fit, select sources,
+  or summarize behavior beyond observed export and package/config facts.
 
 Current OpenAPI / Swagger parser scope:
 

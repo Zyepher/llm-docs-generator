@@ -95,9 +95,12 @@ Current implementation:
   stdout. The report uses bounded traversal, does not follow symlinks, skips
   dependency/build directories, records supported file hashes, warnings, and
   conservative TypeScript/JavaScript export facts plus `package.json` and
-  `tsconfig*.json` package/config facts with source file and line ranges. It
-  does not verify claims, infer behavior, infer framework identity, decide
-  authority, or choose task fit.
+  `tsconfig*.json` package/config facts with source file and line ranges.
+  Directly exported top-level declarations may include compact AST signature
+  evidence with bodies and initializer values omitted. Re-exports, export-all
+  declarations, and export assignments remain unresolved. It does not prove
+  claims, infer behavior, infer framework identity, decide source selection, or
+  choose task fit.
 - Can run `source-truth generate --source <local-file-or-directory>
   --output-dir <dir>` to write an evidence-bound Markdown file, the raw
   evidence report, and a manifest. The command reuses `inspectSourceTruth`,
@@ -261,11 +264,12 @@ Important current-state rule:
 
 Do not claim this project can generate accurate or behavior-complete docs from
 code. `source-truth inspect` extracts conservative TypeScript/JavaScript export
-facts and `package.json` / `tsconfig*.json` package/config facts from an
-explicit local source path. `source-truth generate` formats only those observed
-facts into Markdown and provenance files. These modes do not verify claims,
-summarize runtime behavior, infer framework identity, decide authority, choose
-task fit, or resolve re-export targets.
+facts, optional direct-declaration AST signature evidence, and `package.json` /
+`tsconfig*.json` package/config facts from an explicit local source path.
+`source-truth generate` formats only those observed facts into Markdown and
+provenance files. These modes do not prove claims, summarize runtime behavior,
+infer framework identity, decide source selection, choose task fit, or resolve
+re-export targets.
 
 ### Intent 4: Refresh Or Verify Existing Generated Docs
 

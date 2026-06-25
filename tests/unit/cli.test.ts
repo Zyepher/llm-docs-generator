@@ -840,9 +840,13 @@ describe('CLI compatibility behavior', () => {
     await mkdir(sourceDir, { recursive: true });
     await writeFile(
       join(sourceDir, 'index.ts'),
-      ['export const value = 1;', 'export function makeValue() {', '  return value;', '}', ''].join(
-        '\n'
-      ),
+      [
+        'export const value: number = 1;',
+        'export function makeValue(input: string): number {',
+        '  return value;',
+        '}',
+        '',
+      ].join('\n'),
       'utf-8'
     );
 
@@ -897,6 +901,28 @@ describe('CLI compatibility behavior', () => {
         },
       },
     ]);
+    expect(report.facts[0]?.signature).toEqual({
+      declarationKind: 'variable',
+      text: 'export const value: number',
+      variableKind: 'const',
+      variables: [{ name: 'value', type: 'number' }],
+    });
+    expect(report.facts[1]?.signature).toEqual({
+      declarationKind: 'function',
+      text: 'export function makeValue(input: string): number',
+      name: 'makeValue',
+      parameters: [
+        {
+          name: 'input',
+          type: 'string',
+          optional: false,
+          rest: false,
+          hasDefault: false,
+        },
+      ],
+      returnType: 'number',
+    });
+    expect(stdout).not.toContain('return value');
     expect(stdout).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(stdout).not.toMatch(/\bofficial\b/i);
     expect(stdout).not.toMatch(/\bcorrect(?:ness)?\b/i);

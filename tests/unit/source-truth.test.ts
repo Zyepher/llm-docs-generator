@@ -169,6 +169,420 @@ describe('source-truth inspection', () => {
     ]);
   });
 
+  it('adds bounded AST signature evidence for direct exported declarations only', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-signatures-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    const declarationsSource = [
+      'export function makeResult(',
+      '  input: string,',
+      '  count?: number,',
+      "  mode: 'fast' | 'slow' = 'fast',",
+      '  ...flags: string[]',
+      '): Promise<Result> {',
+      "  return Promise.resolve({ input, count, mode, flags });",
+      '}',
+      'export const typedValue: number = 123;',
+      'export let implicitValue = compute();',
+      'export interface Options extends BaseOptions {',
+      '  enabled: boolean;',
+      '  label?: string;',
+      '}',
+      'export type Result = { input: string; count?: number };',
+      'export enum Mode {',
+      '  Fast,',
+      '  Slow,',
+      '}',
+      'export class Service extends BaseService implements Runnable, Disposable {',
+      '  start(): void {}',
+      '  stop(): void {}',
+      '}',
+      "export { makeResult as renamedResult };",
+      "export * from './other';",
+      'export default makeResult;',
+      '',
+    ].join('\n');
+    const defaultFunctionSource = [
+      'export default function namedDefault(input: string): void {',
+      '  console.log(input);',
+      '}',
+      '',
+    ].join('\n');
+    const defaultClassSource = ['export default class {', '  run(): void {}', '}', ''].join('\n');
+
+    await writeFile(join(sourceDir, 'declarations.ts'), declarationsSource, 'utf-8');
+    await writeFile(join(sourceDir, 'default-class.ts'), defaultClassSource, 'utf-8');
+    await writeFile(join(sourceDir, 'default-function.ts'), defaultFunctionSource, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    const makeResult = report.facts.find((fact) => fact.name === 'makeResult');
+    expect(makeResult?.signature).toEqual({
+      declarationKind: 'function',
+      text: "export function makeResult(input: string, count?: number, mode: 'fast' | 'slow', ...flags: string[]): Promise<Result>",
+      name: 'makeResult',
+      parameters: [
+        {
+          name: 'input',
+          type: 'string',
+          optional: false,
+          rest: false,
+          hasDefault: false,
+        },
+        {
+          name: 'count',
+          type: 'number',
+          optional: true,
+          rest: false,
+          hasDefault: false,
+        },
+        {
+          name: 'mode',
+          type: "'fast' | 'slow'",
+          optional: true,
+          rest: false,
+          hasDefault: true,
+        },
+        {
+          name: 'flags',
+          type: 'string[]',
+          optional: false,
+          rest: true,
+          hasDefault: false,
+        },
+      ],
+      returnType: 'Promise<Result>',
+    });
+    expect(makeResult?.signature?.text).not.toContain('return');
+    expect(makeResult?.signature?.text).not.toContain("= 'fast'");
+
+    const typedValue = report.facts.find((fact) => fact.name === 'typedValue');
+    expect(typedValue?.signature).toEqual({
+      declarationKind: 'variable',
+      text: 'export const typedValue: number',
+      variableKind: 'const',
+      variables: [{ name: 'typedValue', type: 'number' }],
+    });
+    expect(typedValue?.signature?.text).not.toContain('123');
+
+    const implicitValue = report.facts.find((fact) => fact.name === 'implicitValue');
+    expect(implicitValue?.signature).toEqual({
+      declarationKind: 'variable',
+      text: 'export let implicitValue',
+      variableKind: 'let',
+      variables: [{ name: 'implicitValue' }],
+    });
+    expect(implicitValue?.signature?.text).not.toContain('compute');
+
+    const options = report.facts.find((fact) => fact.name === 'Options');
+    expect(options?.signature).toEqual({
+      declarationKind: 'interface',
+      text: 'export interface Options extends BaseOptions',
+      name: 'Options',
+      memberCount: 2,
+      heritage: {
+        extends: ['BaseOptions'],
+      },
+    });
+
+    const result = report.facts.find((fact) => fact.name === 'Result');
+    expect(result?.signature).toEqual({
+      declarationKind: 'type',
+      text: 'export type Result = { input: string; count?: number; }',
+      name: 'Result',
+      type: '{ input: string; count?: number; }',
+      memberCount: 2,
+    });
+
+    const mode = report.facts.find((fact) => fact.name === 'Mode');
+    expect(mode?.signature).toEqual({
+      declarationKind: 'enum',
+      text: 'export enum Mode',
+      name: 'Mode',
+      memberCount: 2,
+    });
+
+    const service = report.facts.find((fact) => fact.name === 'Service');
+    expect(service?.signature).toEqual({
+      declarationKind: 'class',
+      text: 'export class Service extends BaseService implements Runnable, Disposable',
+      name: 'Service',
+      memberCount: 2,
+      heritage: {
+        extends: ['BaseService'],
+        implements: ['Runnable', 'Disposable'],
+      },
+    });
+    expect(service?.signature?.text).not.toContain('start');
+
+    const defaultFunction = report.facts.find(
+      (fact) => fact.name === 'namedDefault' && fact.exportedName === 'default'
+    );
+    expect(defaultFunction?.signature).toEqual({
+      declarationKind: 'function',
+      text: 'export default function namedDefault(input: string): void',
+      name: 'namedDefault',
+      parameters: [
+        {
+          name: 'input',
+          type: 'string',
+          optional: false,
+          rest: false,
+          hasDefault: false,
+        },
+      ],
+      returnType: 'void',
+    });
+
+    const defaultClass = report.facts.find(
+      (fact) => fact.symbolKind === 'class' && fact.exportedName === 'default'
+    );
+    expect(defaultClass).toMatchObject({
+      name: 'default',
+      exportedName: 'default',
+    });
+    expect(defaultClass?.signature).toEqual({
+      declarationKind: 'class',
+      text: 'export default class',
+      memberCount: 1,
+    });
+
+    expect(
+      report.facts
+        .filter((fact) => fact.kind !== 'exported-symbol')
+        .map(({ kind, exportedName, signature }) => ({ kind, exportedName, signature }))
+    ).toEqual([
+      {
+        kind: 're-exported-symbol',
+        exportedName: 'renamedResult',
+        signature: undefined,
+      },
+      {
+        kind: 'export-all',
+        exportedName: '*',
+        signature: undefined,
+      },
+      {
+        kind: 'export-assignment',
+        exportedName: 'default',
+        signature: undefined,
+      },
+    ]);
+  });
+
+  it('sanitizes destructuring defaults from signature evidence', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-destructuring-signatures-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      [
+        'export function fromInput({ token = getSecret(), nested: { id = makeId() }, ...rest }: Options, [first = getFirst(), second]: string[], plain = getPlain()): void {}',
+        'export const { value = getValue(), alias: renamed = getRenamed(), nested: { deep = getDeep() } }: Shape = loadShape();',
+        'export const [first = getArrayFirst(), second]: Items = loadItems();',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const functionFact = report.facts.find((fact) => fact.name === 'fromInput');
+    const objectVariableFact = report.facts.find((fact) => fact.name.startsWith('{ value'));
+    const arrayVariableFact = report.facts.find((fact) => fact.name.startsWith('[first'));
+
+    expect(functionFact?.signature).toEqual({
+      declarationKind: 'function',
+      text: 'export function fromInput({ token, nested: { id }, ...rest }: Options, [first, second]: string[], plain): void',
+      name: 'fromInput',
+      parameters: [
+        {
+          name: '{ token, nested: { id }, ...rest }',
+          type: 'Options',
+          optional: false,
+          rest: false,
+          hasDefault: true,
+        },
+        {
+          name: '[first, second]',
+          type: 'string[]',
+          optional: false,
+          rest: false,
+          hasDefault: true,
+        },
+        {
+          name: 'plain',
+          optional: true,
+          rest: false,
+          hasDefault: true,
+        },
+      ],
+      returnType: 'void',
+    });
+    expect(objectVariableFact).toMatchObject({
+      name: '{ value, alias: renamed, nested: { deep } }',
+      signature: {
+        declarationKind: 'variable',
+        text: 'export const { value, alias: renamed, nested: { deep } }: Shape',
+        variableKind: 'const',
+        variables: [{ name: '{ value, alias: renamed, nested: { deep } }', type: 'Shape' }],
+      },
+    });
+    expect(arrayVariableFact).toMatchObject({
+      name: '[first, second]',
+      signature: {
+        declarationKind: 'variable',
+        text: 'export const [first, second]: Items',
+        variableKind: 'const',
+        variables: [{ name: '[first, second]', type: 'Items' }],
+      },
+    });
+
+    const serializedFacts = JSON.stringify(report.facts);
+    expect(serializedFacts).not.toContain('getSecret');
+    expect(serializedFacts).not.toContain('makeId');
+    expect(serializedFacts).not.toContain('getFirst');
+    expect(serializedFacts).not.toContain('getPlain');
+    expect(serializedFacts).not.toContain('getValue');
+    expect(serializedFacts).not.toContain('getRenamed');
+    expect(serializedFacts).not.toContain('getDeep');
+    expect(serializedFacts).not.toContain('loadShape');
+    expect(serializedFacts).not.toContain('getArrayFirst');
+    expect(serializedFacts).not.toContain('loadItems');
+  });
+
+  it('strips inline comments from signature type evidence', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-commented-signatures-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      [
+        'export type CommentedAlias = {',
+        '  /** field docs */',
+        '  value: /* value type */ string;',
+        '};',
+        'export function commented(input: /* parameter type */ Input</* parameter generic */ Item>): /* return type */ Output</* return generic */ Item> {',
+        '  return input as unknown as Output<Item>;',
+        '}',
+        'export interface CommentedInterface extends /* heritage comment */ BaseInterface</* heritage generic */ Item> {',
+        '  value: string;',
+        '}',
+        'export class CommentedClass extends /* base comment */ BaseClass</* base generic */ Item> implements /* implement comment */ Runnable</* implement generic */ Item> {',
+        '  run(): void {}',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const alias = report.facts.find((fact) => fact.name === 'CommentedAlias');
+    const fn = report.facts.find((fact) => fact.name === 'commented');
+    const iface = report.facts.find((fact) => fact.name === 'CommentedInterface');
+    const cls = report.facts.find((fact) => fact.name === 'CommentedClass');
+
+    expect(alias?.signature?.text).toContain('export type CommentedAlias =');
+    expect(alias?.signature?.type).toContain('value: string');
+    expect(fn?.signature?.parameters?.[0]).toMatchObject({
+      name: 'input',
+      type: 'Input<Item>',
+    });
+    expect(fn?.signature?.returnType).toBe('Output<Item>');
+    expect(fn?.signature?.text).toBe(
+      'export function commented(input: Input<Item>): Output<Item>'
+    );
+    expect(iface?.signature?.heritage).toEqual({
+      extends: ['BaseInterface<Item>'],
+    });
+    expect(cls?.signature?.heritage).toEqual({
+      extends: ['BaseClass<Item>'],
+      implements: ['Runnable<Item>'],
+    });
+
+    const serializedSignatures = JSON.stringify(report.facts.map((fact) => fact.signature));
+    expect(serializedSignatures).not.toContain('field docs');
+    expect(serializedSignatures).not.toContain('value type');
+    expect(serializedSignatures).not.toContain('parameter type');
+    expect(serializedSignatures).not.toContain('parameter generic');
+    expect(serializedSignatures).not.toContain('return type');
+    expect(serializedSignatures).not.toContain('return generic');
+    expect(serializedSignatures).not.toContain('heritage comment');
+    expect(serializedSignatures).not.toContain('heritage generic');
+    expect(serializedSignatures).not.toContain('base comment');
+    expect(serializedSignatures).not.toContain('base generic');
+    expect(serializedSignatures).not.toContain('implement comment');
+    expect(serializedSignatures).not.toContain('implement generic');
+  });
+
+  it('preserves repeated whitespace inside literal tokens in signature evidence', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-literal-whitespace-signatures-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      [
+        'export type StringLiteral = "alpha  beta";',
+        'export type TemplateLiteral = `alpha  ${string}  beta`;',
+        'export function literalFunction(input: "left  right"): `done  ${string}` {',
+        '  return "" as `done  ${string}`;',
+        '}',
+        'export const { "quoted  key": quotedValue }: Shape = loadShape();',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const stringLiteral = report.facts.find((fact) => fact.name === 'StringLiteral');
+    const templateLiteral = report.facts.find((fact) => fact.name === 'TemplateLiteral');
+    const literalFunction = report.facts.find((fact) => fact.name === 'literalFunction');
+    const quotedBinding = report.facts.find((fact) => fact.name.includes('quoted  key'));
+
+    expect(stringLiteral?.signature).toMatchObject({
+      text: 'export type StringLiteral = "alpha  beta"',
+      type: '"alpha  beta"',
+    });
+    expect(templateLiteral?.signature).toMatchObject({
+      text: 'export type TemplateLiteral = `alpha  ${string}  beta`',
+      type: '`alpha  ${string}  beta`',
+    });
+    expect(literalFunction?.signature).toMatchObject({
+      text: 'export function literalFunction(input: "left  right"): `done  ${string}`',
+      parameters: [
+        {
+          name: 'input',
+          type: '"left  right"',
+          optional: false,
+          rest: false,
+          hasDefault: false,
+        },
+      ],
+      returnType: '`done  ${string}`',
+    });
+    expect(quotedBinding).toMatchObject({
+      name: '{ "quoted  key": quotedValue }',
+      signature: {
+        text: 'export const { "quoted  key": quotedValue }: Shape',
+        variables: [{ name: '{ "quoted  key": quotedValue }', type: 'Shape' }],
+      },
+    });
+
+    const serializedSignatures = JSON.stringify(report.facts.map((fact) => fact.signature));
+    expect(serializedSignatures).toContain('alpha  beta');
+    expect(serializedSignatures).toContain('alpha  ${string}  beta');
+    expect(serializedSignatures).toContain('left  right');
+    expect(serializedSignatures).toContain('done  ${string}');
+    expect(serializedSignatures).toContain('quoted  key');
+    expect(serializedSignatures).not.toContain('alpha beta');
+    expect(serializedSignatures).not.toContain('left right');
+    expect(serializedSignatures).not.toContain('done ${string}');
+    expect(serializedSignatures).not.toContain('quoted key');
+  });
+
   it('reports unsupported and oversized files without extracting facts', async () => {
     const dir = await makeTempDir('llm-docs-source-truth-skips-');
     const sourceDir = join(dir, 'source');

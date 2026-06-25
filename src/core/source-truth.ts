@@ -56,6 +56,10 @@ const PACKAGE_DEPENDENCY_FIELDS = [
   'bundleDependencies',
 ] as const;
 const TSCONFIG_ARRAY_FIELDS = ['include', 'exclude', 'files'] as const;
+const MAX_SIGNATURE_TEXT_LENGTH = 500;
+const MAX_SIGNATURE_DETAIL_TEXT_LENGTH = 240;
+const MAX_SIGNATURE_NAME_LENGTH = 120;
+const SIGNATURE_PRINTER = ts.createPrinter({ removeComments: true });
 
 export type SourceTruthSourceType = 'file' | 'directory';
 export type SourceTruthFileStatus = 'inspected' | 'skipped';
@@ -73,6 +77,14 @@ export type SourceTruthSymbolKind =
   | 'type'
   | 'value'
   | 'unknown';
+export type SourceTruthSignatureDeclarationKind =
+  | 'class'
+  | 'enum'
+  | 'function'
+  | 'interface'
+  | 'type'
+  | 'variable';
+export type SourceTruthVariableDeclarationKind = 'const' | 'let' | 'var';
 export type SourceTruthConfigFileKind = 'package-json' | 'tsconfig-json';
 export type SourceTruthConfigLineRangeGranularity = 'field' | 'file';
 export type SourceTruthConfigFactKind =
@@ -99,6 +111,37 @@ export interface SourceTruthProvenance {
   lineRange: SourceTruthLineRange;
 }
 
+export interface SourceTruthSignatureParameter {
+  name: string;
+  optional: boolean;
+  rest: boolean;
+  hasDefault: boolean;
+  type?: string;
+}
+
+export interface SourceTruthSignatureVariable {
+  name: string;
+  type?: string;
+}
+
+export interface SourceTruthSignatureHeritage {
+  extends?: string[];
+  implements?: string[];
+}
+
+export interface SourceTruthSignatureEvidence {
+  declarationKind: SourceTruthSignatureDeclarationKind;
+  text: string;
+  name?: string;
+  parameters?: SourceTruthSignatureParameter[];
+  returnType?: string;
+  variableKind?: SourceTruthVariableDeclarationKind;
+  variables?: SourceTruthSignatureVariable[];
+  heritage?: SourceTruthSignatureHeritage;
+  type?: string;
+  memberCount?: number;
+}
+
 export interface SourceTruthFact {
   kind: SourceTruthFactKind;
   symbolKind: SourceTruthSymbolKind;
@@ -107,6 +150,7 @@ export interface SourceTruthFact {
   provenance: SourceTruthProvenance;
   order: number;
   moduleSpecifier?: string;
+  signature?: SourceTruthSignatureEvidence;
 }
 
 export interface SourceTruthConfigFact {
@@ -649,7 +693,7 @@ function extractTypeScriptJavaScriptFacts(
       }
 
       for (const declaration of statement.declarationList.declarations) {
-        const name = bindingNameToText(declaration.name);
+        const name = bindingNameToText(declaration.name, sourceFile);
 
         facts.push(
           buildFact({
@@ -659,6 +703,7 @@ function extractTypeScriptJavaScriptFacts(
             exportedName: hasDefaultModifier(statement) ? 'default' : name,
             sourceFile,
             node: declaration,
+            signature: buildVariableSignature(statement, declaration, sourceFile),
           })
         );
       }
@@ -680,6 +725,7 @@ function extractTypeScriptJavaScriptFacts(
           exportedName: hasDefaultModifier(statement) ? 'default' : name,
           sourceFile,
           node: statement,
+          signature: buildFunctionSignature(statement, sourceFile),
         })
       );
       continue;
@@ -699,6 +745,7 @@ function extractTypeScriptJavaScriptFacts(
           exportedName: hasDefaultModifier(statement) ? 'default' : name,
           sourceFile,
           node: statement,
+          signature: buildClassSignature(statement, sourceFile),
         })
       );
       continue;
@@ -717,6 +764,7 @@ function extractTypeScriptJavaScriptFacts(
           exportedName: statement.name.text,
           sourceFile,
           node: statement,
+          signature: buildInterfaceSignature(statement, sourceFile),
         })
       );
       continue;
@@ -735,6 +783,7 @@ function extractTypeScriptJavaScriptFacts(
           exportedName: statement.name.text,
           sourceFile,
           node: statement,
+          signature: buildTypeAliasSignature(statement, sourceFile),
         })
       );
       continue;
@@ -753,6 +802,7 @@ function extractTypeScriptJavaScriptFacts(
           exportedName: statement.name.text,
           sourceFile,
           node: statement,
+          signature: buildEnumSignature(statement),
         })
       );
       continue;
@@ -1617,6 +1667,396 @@ function buildParseDiagnostic(
   return parseDiagnostic;
 }
 
+function buildFunctionSignature(
+  node: ts.FunctionDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureEvidence {
+  const parameters = node.parameters.map((parameter) =>
+    buildParameterSignature(parameter, sourceFile)
+  );
+  const returnType = node.type
+    ? compactNodeText(node.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+    : undefined;
+  const name = node.name?.text;
+  const functionKeyword = node.asteriskToken ? 'function*' : 'function';
+  const text = compactSignatureText(
+    `${modifierPrefix(node, ['export', 'default', 'declare', 'async'])}${functionKeyword}${
+      name ? ` ${name}` : ''
+    }${typeParametersText(node.typeParameters, sourceFile)}(${node.parameters
+      .map((parameter) => parameterText(parameter, sourceFile))
+      .join(', ')})${returnType ? `: ${returnType}` : ''}`
+  );
+  const signature: SourceTruthSignatureEvidence = {
+    declarationKind: 'function',
+    text,
+    parameters,
+  };
+
+  if (name !== undefined) {
+    signature.name = name;
+  }
+
+  if (returnType !== undefined) {
+    signature.returnType = returnType;
+  }
+
+  return signature;
+}
+
+function buildVariableSignature(
+  statement: ts.VariableStatement,
+  declaration: ts.VariableDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureEvidence {
+  const variableKind = variableDeclarationKind(statement.declarationList);
+  const variable = buildVariableSignatureDetail(declaration, sourceFile);
+  const text = compactSignatureText(
+    `${modifierPrefix(statement, ['export', 'declare'])}${variableKind} ${variableText(
+      declaration,
+      sourceFile
+    )}`
+  );
+
+  return {
+    declarationKind: 'variable',
+    text,
+    variableKind,
+    variables: [variable],
+  };
+}
+
+function buildClassSignature(
+  node: ts.ClassDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureEvidence {
+  const name = node.name?.text;
+  const heritage = buildHeritageEvidence(node.heritageClauses, sourceFile);
+  const signature: SourceTruthSignatureEvidence = {
+    declarationKind: 'class',
+    text: compactSignatureText(
+      `${modifierPrefix(node, ['export', 'default', 'declare', 'abstract'])}class${
+        name ? ` ${name}` : ''
+      }${typeParametersText(node.typeParameters, sourceFile)}${heritageText(heritage)}`
+    ),
+    memberCount: node.members.length,
+  };
+
+  if (name !== undefined) {
+    signature.name = name;
+  }
+
+  if (heritage !== undefined) {
+    signature.heritage = heritage;
+  }
+
+  return signature;
+}
+
+function buildInterfaceSignature(
+  node: ts.InterfaceDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureEvidence {
+  const heritage = buildHeritageEvidence(node.heritageClauses, sourceFile);
+  const signature: SourceTruthSignatureEvidence = {
+    declarationKind: 'interface',
+    text: compactSignatureText(
+      `${modifierPrefix(node, ['export', 'declare'])}interface ${
+        node.name.text
+      }${typeParametersText(node.typeParameters, sourceFile)}${heritageText(heritage)}`
+    ),
+    name: node.name.text,
+    memberCount: node.members.length,
+  };
+
+  if (heritage !== undefined) {
+    signature.heritage = heritage;
+  }
+
+  return signature;
+}
+
+function buildTypeAliasSignature(
+  node: ts.TypeAliasDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureEvidence {
+  const typeText = compactNodeText(node.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH);
+  const signature: SourceTruthSignatureEvidence = {
+    declarationKind: 'type',
+    text: compactSignatureText(
+      `${modifierPrefix(node, ['export', 'declare'])}type ${
+        node.name.text
+      }${typeParametersText(node.typeParameters, sourceFile)} = ${typeText}`
+    ),
+    name: node.name.text,
+    type: typeText,
+  };
+
+  if (ts.isTypeLiteralNode(node.type)) {
+    signature.memberCount = node.type.members.length;
+  }
+
+  return signature;
+}
+
+function buildEnumSignature(node: ts.EnumDeclaration): SourceTruthSignatureEvidence {
+  return {
+    declarationKind: 'enum',
+    text: compactSignatureText(
+      `${modifierPrefix(node, ['export', 'declare', 'const'])}enum ${node.name.text}`
+    ),
+    name: node.name.text,
+    memberCount: node.members.length,
+  };
+}
+
+function buildParameterSignature(
+  parameter: ts.ParameterDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureParameter {
+  const name = bindingNameToText(parameter.name, sourceFile);
+  const type = parameter.type
+    ? compactNodeText(parameter.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+    : undefined;
+  const optional = parameter.questionToken !== undefined || parameter.initializer !== undefined;
+  const rest = parameter.dotDotDotToken !== undefined;
+  const hasDefault = parameter.initializer !== undefined || bindingNameHasDefault(parameter.name);
+
+  if (type !== undefined) {
+    return { name, type, optional, rest, hasDefault };
+  }
+
+  return { name, optional, rest, hasDefault };
+}
+
+function buildVariableSignatureDetail(
+  declaration: ts.VariableDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureVariable {
+  const name = bindingNameToText(declaration.name, sourceFile);
+  const type = declaration.type
+    ? compactNodeText(declaration.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+    : undefined;
+
+  if (type !== undefined) {
+    return { name, type };
+  }
+
+  return { name };
+}
+
+function buildHeritageEvidence(
+  clauses: readonly ts.HeritageClause[] | undefined,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureHeritage | undefined {
+  if (clauses === undefined || clauses.length === 0) {
+    return undefined;
+  }
+
+  const heritage: SourceTruthSignatureHeritage = {};
+
+  for (const clause of clauses) {
+    const types = clause.types.map((type) =>
+      compactNodeText(type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+    );
+
+    if (types.length === 0) {
+      continue;
+    }
+
+    if (clause.token === ts.SyntaxKind.ExtendsKeyword) {
+      heritage.extends = [...(heritage.extends ?? []), ...types];
+    }
+
+    if (clause.token === ts.SyntaxKind.ImplementsKeyword) {
+      heritage.implements = [...(heritage.implements ?? []), ...types];
+    }
+  }
+
+  if (heritage.extends === undefined && heritage.implements === undefined) {
+    return undefined;
+  }
+
+  return heritage;
+}
+
+function parameterText(parameter: ts.ParameterDeclaration, sourceFile: ts.SourceFile): string {
+  const name = bindingNameToText(parameter.name, sourceFile);
+  const type = parameter.type
+    ? compactNodeText(parameter.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+    : undefined;
+  const rest = parameter.dotDotDotToken ? '...' : '';
+  const optional = parameter.questionToken ? '?' : '';
+
+  return `${rest}${name}${optional}${type ? `: ${type}` : ''}`;
+}
+
+function variableText(declaration: ts.VariableDeclaration, sourceFile: ts.SourceFile): string {
+  const name = bindingNameToText(declaration.name, sourceFile);
+  const type = declaration.type
+    ? compactNodeText(declaration.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+    : undefined;
+
+  return `${name}${type ? `: ${type}` : ''}`;
+}
+
+function typeParametersText(
+  typeParameters: readonly ts.TypeParameterDeclaration[] | undefined,
+  sourceFile: ts.SourceFile
+): string {
+  if (typeParameters === undefined || typeParameters.length === 0) {
+    return '';
+  }
+
+  return `<${typeParameters
+    .map((typeParameter) =>
+      compactNodeText(typeParameter, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+    )
+    .join(', ')}>`;
+}
+
+function heritageText(heritage: SourceTruthSignatureHeritage | undefined): string {
+  if (heritage === undefined) {
+    return '';
+  }
+
+  const parts: string[] = [];
+
+  if (heritage.extends !== undefined && heritage.extends.length > 0) {
+    parts.push(`extends ${heritage.extends.join(', ')}`);
+  }
+
+  if (heritage.implements !== undefined && heritage.implements.length > 0) {
+    parts.push(`implements ${heritage.implements.join(', ')}`);
+  }
+
+  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
+}
+
+function variableDeclarationKind(
+  declarationList: ts.VariableDeclarationList
+): SourceTruthVariableDeclarationKind {
+  if ((declarationList.flags & ts.NodeFlags.Const) !== 0) {
+    return 'const';
+  }
+
+  if ((declarationList.flags & ts.NodeFlags.Let) !== 0) {
+    return 'let';
+  }
+
+  return 'var';
+}
+
+function modifierPrefix(
+  node: ts.Node,
+  modifiers: readonly ('abstract' | 'async' | 'const' | 'declare' | 'default' | 'export')[]
+): string {
+  const words = modifiers.filter((modifier) => hasModifier(node, modifierSyntaxKind(modifier)));
+
+  return words.length > 0 ? `${words.join(' ')} ` : '';
+}
+
+function modifierSyntaxKind(
+  modifier: 'abstract' | 'async' | 'const' | 'declare' | 'default' | 'export'
+): ts.SyntaxKind {
+  switch (modifier) {
+    case 'abstract':
+      return ts.SyntaxKind.AbstractKeyword;
+    case 'async':
+      return ts.SyntaxKind.AsyncKeyword;
+    case 'const':
+      return ts.SyntaxKind.ConstKeyword;
+    case 'declare':
+      return ts.SyntaxKind.DeclareKeyword;
+    case 'default':
+      return ts.SyntaxKind.DefaultKeyword;
+    case 'export':
+      return ts.SyntaxKind.ExportKeyword;
+  }
+}
+
+function compactNodeText(node: ts.Node, sourceFile: ts.SourceFile, maxLength: number): string {
+  return compactText(
+    SIGNATURE_PRINTER.printNode(ts.EmitHint.Unspecified, node, sourceFile),
+    maxLength
+  );
+}
+
+function compactSignatureText(text: string): string {
+  return compactText(text, MAX_SIGNATURE_TEXT_LENGTH);
+}
+
+function compactText(text: string, maxLength: number): string {
+  const compacted = compactWhitespaceOutsideLiterals(text);
+
+  if (compacted.length <= maxLength) {
+    return compacted;
+  }
+
+  return `${compacted.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function compactWhitespaceOutsideLiterals(text: string): string {
+  let compacted = '';
+  let quote: '"' | "'" | '`' | undefined;
+  let escaped = false;
+  let pendingSpace = false;
+
+  for (const character of text) {
+    if (quote !== undefined) {
+      compacted += character;
+
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = undefined;
+      }
+
+      continue;
+    }
+
+    if (character === '"' || character === "'" || character === '`') {
+      if (pendingSpace && compacted.length > 0) {
+        compacted += ' ';
+      }
+
+      pendingSpace = false;
+      quote = character;
+      compacted += character;
+      continue;
+    }
+
+    if (isSignatureWhitespace(character)) {
+      if (compacted.length > 0) {
+        pendingSpace = true;
+      }
+
+      continue;
+    }
+
+    if (pendingSpace && compacted.length > 0) {
+      compacted += ' ';
+    }
+
+    pendingSpace = false;
+    compacted += character;
+  }
+
+  return compacted;
+}
+
+function isSignatureWhitespace(character: string): boolean {
+  return (
+    character === ' ' ||
+    character === '\n' ||
+    character === '\r' ||
+    character === '\t' ||
+    character === '\f' ||
+    character === '\v'
+  );
+}
+
 function buildFact(options: {
   kind: SourceTruthFactKind;
   symbolKind: SourceTruthSymbolKind;
@@ -1625,8 +2065,10 @@ function buildFact(options: {
   sourceFile: ts.SourceFile;
   node: ts.Node;
   moduleSpecifier?: string | undefined;
+  signature?: SourceTruthSignatureEvidence | undefined;
 }): SourceTruthFact {
-  const { kind, symbolKind, name, exportedName, sourceFile, node, moduleSpecifier } = options;
+  const { kind, symbolKind, name, exportedName, sourceFile, node, moduleSpecifier, signature } =
+    options;
   const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
   const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
   const fact: SourceTruthFact = {
@@ -1648,31 +2090,126 @@ function buildFact(options: {
     fact.moduleSpecifier = moduleSpecifier;
   }
 
+  if (signature !== undefined) {
+    fact.signature = signature;
+  }
+
   return fact;
 }
 
-function hasExportModifier(node: ts.Node): boolean {
+function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
   return (
     ts.canHaveModifiers(node) &&
-    (ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ??
-      false)
+    (ts.getModifiers(node)?.some((modifier) => modifier.kind === kind) ?? false)
   );
+}
+
+function hasExportModifier(node: ts.Node): boolean {
+  return hasModifier(node, ts.SyntaxKind.ExportKeyword);
 }
 
 function hasDefaultModifier(node: ts.Node): boolean {
-  return (
-    ts.canHaveModifiers(node) &&
-    (ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ??
-      false)
-  );
+  return hasModifier(node, ts.SyntaxKind.DefaultKeyword);
 }
 
-function bindingNameToText(name: ts.BindingName): string {
+function bindingNameToText(name: ts.BindingName, sourceFile: ts.SourceFile): string {
   if (ts.isIdentifier(name)) {
     return name.text;
   }
 
-  return name.getText();
+  return compactText(sanitizedBindingPatternText(name, sourceFile), MAX_SIGNATURE_NAME_LENGTH);
+}
+
+function sanitizedBindingPatternText(
+  pattern: ts.ObjectBindingPattern | ts.ArrayBindingPattern,
+  sourceFile: ts.SourceFile
+): string {
+  if (ts.isObjectBindingPattern(pattern)) {
+    return `{ ${pattern.elements
+      .map((element) => bindingElementToText(element, sourceFile))
+      .join(', ')} }`;
+  }
+
+  return `[${pattern.elements
+    .map((element) => {
+      if (ts.isOmittedExpression(element)) {
+        return '';
+      }
+
+      return bindingElementToText(element, sourceFile);
+    })
+    .join(', ')}]`;
+}
+
+function bindingElementToText(element: ts.BindingElement, sourceFile: ts.SourceFile): string {
+  const restPrefix = element.dotDotDotToken ? '...' : '';
+  const name = ts.isIdentifier(element.name)
+    ? element.name.text
+    : sanitizedBindingPatternText(element.name, sourceFile);
+
+  if (element.propertyName === undefined) {
+    return `${restPrefix}${name}`;
+  }
+
+  return `${restPrefix}${propertyNameToText(element.propertyName, sourceFile)}: ${name}`;
+}
+
+function propertyNameToText(name: ts.PropertyName, sourceFile: ts.SourceFile): string {
+  if (ts.isIdentifier(name)) {
+    return name.text;
+  }
+
+  if (ts.isStringLiteral(name)) {
+    return JSON.stringify(name.text);
+  }
+
+  if (ts.isNumericLiteral(name)) {
+    return name.text;
+  }
+
+  if (ts.isNoSubstitutionTemplateLiteral(name)) {
+    return JSON.stringify(name.text);
+  }
+
+  if (ts.isComputedPropertyName(name)) {
+    return '[computed]';
+  }
+
+  return compactNodeText(name, sourceFile, MAX_SIGNATURE_NAME_LENGTH);
+}
+
+function bindingNameHasDefault(name: ts.BindingName): boolean {
+  if (ts.isIdentifier(name)) {
+    return false;
+  }
+
+  return bindingPatternHasDefault(name);
+}
+
+function bindingPatternHasDefault(pattern: ts.ObjectBindingPattern | ts.ArrayBindingPattern): boolean {
+  if (ts.isObjectBindingPattern(pattern)) {
+    return pattern.elements.some((element) => bindingElementHasDefault(element));
+  }
+
+  return pattern.elements.some((element) => {
+    if (ts.isOmittedExpression(element)) {
+      return false;
+    }
+
+    return bindingElementHasDefault(element);
+  });
+}
+
+function bindingElementHasDefault(element: ts.BindingElement): boolean {
+  if (element.initializer !== undefined) {
+    return true;
+  }
+
+  if (ts.isIdentifier(element.name)) {
+    return false;
+  }
+
+  return bindingPatternHasDefault(element.name);
 }
 
 function stringLiteralText(node: ts.Node | undefined): string | undefined {

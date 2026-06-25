@@ -7,6 +7,9 @@ import {
   type InspectSourceTruthOptions,
   type SourceTruthFileEvidence,
   type SourceTruthInspectionReport,
+  type SourceTruthSignatureEvidence,
+  type SourceTruthSignatureParameter,
+  type SourceTruthSignatureVariable,
   type SourceTruthSourceType,
   type SourceTruthTraversalSettings,
 } from './source-truth.js';
@@ -35,6 +38,7 @@ export interface SourceTruthManifestSourceFile {
   hash: string;
   factCount: number;
   exportFactCount: number;
+  signatureFactCount?: number;
   configFactCount: number;
   parseDiagnosticCount: number;
 }
@@ -167,21 +171,21 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
     '',
     '## Source',
     '',
-    `- Input: \`${escapeMarkdownCode(report.source.input)}\``,
-    `- Resolved path: \`${escapeMarkdownCode(report.source.resolvedPath)}\``,
-    `- Type: \`${report.source.type}\``,
+    `- Input: ${formatMarkdownCodeSpan(report.source.input)}`,
+    `- Resolved path: ${formatMarkdownCodeSpan(report.source.resolvedPath)}`,
+    `- Type: ${formatMarkdownCodeSpan(report.source.type)}`,
     '',
     '## Inspection Limits',
     '',
-    `- Follow symlinks: \`${String(report.traversal.followSymlinks)}\``,
-    `- Max depth: \`${report.traversal.maxDepth}\``,
-    `- Max entries: \`${report.traversal.maxEntries}\``,
-    `- Max files: \`${report.traversal.maxFiles}\``,
-    `- Max file bytes: \`${report.traversal.maxFileBytes}\``,
-    `- Visited files: \`${report.traversal.visitedFiles}\``,
-    `- Inspected files: \`${report.traversal.inspectedFiles}\``,
-    `- Skipped files: \`${report.traversal.skippedFiles}\``,
-    `- Truncated: \`${String(report.traversal.truncated)}\``,
+    `- Follow symlinks: ${formatMarkdownCodeSpan(String(report.traversal.followSymlinks))}`,
+    `- Max depth: ${formatMarkdownCodeSpan(String(report.traversal.maxDepth))}`,
+    `- Max entries: ${formatMarkdownCodeSpan(String(report.traversal.maxEntries))}`,
+    `- Max files: ${formatMarkdownCodeSpan(String(report.traversal.maxFiles))}`,
+    `- Max file bytes: ${formatMarkdownCodeSpan(String(report.traversal.maxFileBytes))}`,
+    `- Visited files: ${formatMarkdownCodeSpan(String(report.traversal.visitedFiles))}`,
+    `- Inspected files: ${formatMarkdownCodeSpan(String(report.traversal.inspectedFiles))}`,
+    `- Skipped files: ${formatMarkdownCodeSpan(String(report.traversal.skippedFiles))}`,
+    `- Truncated: ${formatMarkdownCodeSpan(String(report.traversal.truncated))}`,
     '',
     '## Warnings And Limitations',
     '',
@@ -210,23 +214,30 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
   }
 
   for (const file of exportFiles) {
-    lines.push(`### \`${escapeMarkdownCode(file.path)}\``, '');
+    lines.push(`### ${formatMarkdownCodeSpan(file.path)}`, '');
 
     for (const fact of file.facts) {
-      lines.push(`- \`${escapeMarkdownCode(fact.exportedName)}\``);
-      lines.push(`  - Fact kind: \`${fact.kind}\``);
-      lines.push(`  - Symbol kind: \`${fact.symbolKind}\``);
+      lines.push(`- ${formatMarkdownCodeSpan(fact.exportedName)}`);
+      lines.push(`  - Fact kind: ${formatMarkdownCodeSpan(fact.kind)}`);
+      lines.push(`  - Symbol kind: ${formatMarkdownCodeSpan(fact.symbolKind)}`);
 
       if (fact.name !== fact.exportedName) {
-        lines.push(`  - Original name: \`${escapeMarkdownCode(fact.name)}\``);
+        lines.push(`  - Original name: ${formatMarkdownCodeSpan(fact.name)}`);
       }
 
       if (fact.moduleSpecifier !== undefined) {
-        lines.push(`  - Module specifier: \`${escapeMarkdownCode(fact.moduleSpecifier)}\``);
+        lines.push(`  - Module specifier: ${formatMarkdownCodeSpan(fact.moduleSpecifier)}`);
+      }
+
+      if (fact.signature !== undefined) {
+        appendSignatureEvidence(lines, fact.signature);
       }
 
       lines.push(
-        `  - Lines: \`${fact.provenance.lineRange.start}-${fact.provenance.lineRange.end}\``
+        `  - Lines: ${formatLineRange(
+          fact.provenance.lineRange.start,
+          fact.provenance.lineRange.end
+        )}`
       );
     }
 
@@ -242,32 +253,123 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
   }
 
   for (const file of configFiles) {
-    lines.push(`### \`${escapeMarkdownCode(file.path)}\``, '');
+    lines.push(`### ${formatMarkdownCodeSpan(file.path)}`, '');
 
     for (const fact of file.configFacts) {
-      lines.push(`- \`${escapeMarkdownCode(fact.name)}\``);
-      lines.push(`  - Fact kind: \`${fact.kind}\``);
-      lines.push(`  - Config file kind: \`${fact.configFileKind}\``);
-      lines.push(`  - Field path: \`${escapeMarkdownCode(fact.fieldPath)}\``);
+      lines.push(`- ${formatMarkdownCodeSpan(fact.name)}`);
+      lines.push(`  - Fact kind: ${formatMarkdownCodeSpan(fact.kind)}`);
+      lines.push(`  - Config file kind: ${formatMarkdownCodeSpan(fact.configFileKind)}`);
+      lines.push(`  - Field path: ${formatMarkdownCodeSpan(fact.fieldPath)}`);
 
       if (fact.group !== undefined) {
-        lines.push(`  - Group: \`${escapeMarkdownCode(fact.group)}\``);
+        lines.push(`  - Group: ${formatMarkdownCodeSpan(fact.group)}`);
       }
 
       if (fact.value !== undefined) {
-        lines.push(`  - Value: \`${escapeMarkdownCode(String(fact.value))}\``);
+        lines.push(`  - Value: ${formatMarkdownCodeSpan(String(fact.value))}`);
       }
 
       lines.push(
-        `  - Lines: \`${fact.provenance.lineRange.start}-${fact.provenance.lineRange.end}\``
+        `  - Lines: ${formatLineRange(
+          fact.provenance.lineRange.start,
+          fact.provenance.lineRange.end
+        )}`
       );
-      lines.push(`  - Line range granularity: \`${fact.lineRangeGranularity}\``);
+      lines.push(
+        `  - Line range granularity: ${formatMarkdownCodeSpan(fact.lineRangeGranularity)}`
+      );
     }
 
     lines.push('');
   }
 
   return `${lines.join('\n').trimEnd()}\n`;
+}
+
+function appendSignatureEvidence(lines: string[], signature: SourceTruthSignatureEvidence): void {
+  lines.push('  - Signature evidence:');
+  lines.push(`    - Declaration kind: ${formatMarkdownCodeSpan(signature.declarationKind)}`);
+  lines.push(`    - Text: ${formatMarkdownCodeSpan(signature.text)}`);
+
+  if (signature.name !== undefined) {
+    lines.push(`    - Name: ${formatMarkdownCodeSpan(signature.name)}`);
+  }
+
+  if (signature.parameters !== undefined) {
+    lines.push(`    - Parameters: ${formatSignatureParameters(signature.parameters)}`);
+  }
+
+  if (signature.returnType !== undefined) {
+    lines.push(`    - Return type: ${formatMarkdownCodeSpan(signature.returnType)}`);
+  }
+
+  if (signature.variableKind !== undefined) {
+    lines.push(`    - Variable kind: ${formatMarkdownCodeSpan(signature.variableKind)}`);
+  }
+
+  if (signature.variables !== undefined) {
+    lines.push(`    - Variables: ${formatSignatureVariables(signature.variables)}`);
+  }
+
+  if (signature.heritage !== undefined) {
+    if (signature.heritage.extends !== undefined) {
+      lines.push(
+        `    - Extends: ${signature.heritage.extends
+          .map((value) => formatMarkdownCodeSpan(value))
+          .join('; ')}`
+      );
+    }
+
+    if (signature.heritage.implements !== undefined) {
+      lines.push(
+        `    - Implements: ${signature.heritage.implements
+          .map((value) => formatMarkdownCodeSpan(value))
+          .join('; ')}`
+      );
+    }
+  }
+
+  if (signature.type !== undefined) {
+    lines.push(`    - Type: ${formatMarkdownCodeSpan(signature.type)}`);
+  }
+
+  if (signature.memberCount !== undefined) {
+    lines.push(`    - Member count: ${formatMarkdownCodeSpan(String(signature.memberCount))}`);
+  }
+}
+
+function formatSignatureParameters(parameters: SourceTruthSignatureParameter[]): string {
+  if (parameters.length === 0) {
+    return formatMarkdownCodeSpan('none');
+  }
+
+  return parameters.map((parameter) => formatSignatureParameter(parameter)).join('; ');
+}
+
+function formatSignatureParameter(parameter: SourceTruthSignatureParameter): string {
+  const text = `${parameter.rest ? '...' : ''}${parameter.name}${
+    parameter.type ? `: ${parameter.type}` : ''
+  }`;
+
+  return `${formatMarkdownCodeSpan(text)} (optional: ${formatMarkdownCodeSpan(
+    String(parameter.optional)
+  )}, rest: ${formatMarkdownCodeSpan(String(parameter.rest))}, default: ${formatMarkdownCodeSpan(
+    String(parameter.hasDefault)
+  )})`;
+}
+
+function formatSignatureVariables(variables: SourceTruthSignatureVariable[]): string {
+  if (variables.length === 0) {
+    return formatMarkdownCodeSpan('none');
+  }
+
+  return variables
+    .map((variable) =>
+      variable.type
+        ? formatMarkdownCodeSpan(`${variable.name}: ${variable.type}`)
+        : formatMarkdownCodeSpan(variable.name)
+    )
+    .join('; ');
 }
 
 function buildManifest(
@@ -295,6 +397,7 @@ function buildManifest(
       hash: formatHash(file.sha256 ?? ''),
       factCount: file.facts.length + file.configFacts.length,
       exportFactCount: file.facts.length,
+      signatureFactCount: file.facts.filter((fact) => fact.signature !== undefined).length,
       configFactCount: file.configFacts.length,
       parseDiagnosticCount: file.parseDiagnostics?.length ?? 0,
     })),
@@ -476,8 +579,33 @@ function formatHash(hash: string): string {
   return `sha256:${hash}`;
 }
 
-function escapeMarkdownCode(value: string): string {
-  return value.replace(/`/g, '\\`');
+function formatLineRange(start: number, end: number): string {
+  return formatMarkdownCodeSpan(`${start}-${end}`);
+}
+
+function formatMarkdownCodeSpan(value: string): string {
+  const longestBacktickRun = longestRun(value, '`');
+  const delimiter = '`'.repeat(longestBacktickRun + 1);
+  const needsPadding = value.includes('`') || /^\s|\s$/.test(value);
+  const content = needsPadding ? ` ${value} ` : value;
+
+  return `${delimiter}${content}${delimiter}`;
+}
+
+function longestRun(value: string, character: string): number {
+  let longest = 0;
+  let current = 0;
+
+  for (const valueCharacter of value) {
+    if (valueCharacter === character) {
+      current++;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+
+  return longest;
 }
 
 function escapeMarkdownText(value: string): string {
