@@ -95,6 +95,7 @@ Development commands:
 npx tsx src/cli.ts discover --source ./docs --output-dir ./reports/local-docs
 npx tsx src/cli.ts discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
 npx tsx src/cli.ts discover --url https://example.com/docs --output-dir ./reports/website
+npx tsx src/cli.ts capabilities --json
 npx tsx src/cli.ts source-truth inspect --source ./src
 npx tsx src/cli.ts source-truth generate --source ./src --output-dir ./reports/source-truth
 npx tsx src/cli.ts list-sdks
@@ -122,6 +123,14 @@ explicit HTTP(S) URL. It fetches only the explicit URL, same-origin root
 or fetch linked candidates. It writes a website discovery report with inspected
 resources, response status/content type/byte counts, crawl policy, extracted
 candidate URLs, evidence/provenance, and warnings.
+
+The current `capabilities --json` command prints a deterministic
+machine-readable contract for agents. The contract includes schema version
+`0.1.0`, package name/version metadata, product-boundary metadata, implemented
+commands, source-truth fact-family scope and limitations, planned/unsupported
+capabilities, and stable output file names where they exist. It intentionally
+omits `generatedAt` and does not inspect sources, load config, write files, or
+perform network work.
 
 The current `source-truth inspect --source` command accepts one explicit local
 file or directory and prints a deterministic JSON evidence report to stdout. It
@@ -266,10 +275,11 @@ agent intent/source/scope resolution
   manifest file hashes and byte sizes only. Local bounded inspection reports are
   available through `discover --source`, and repo cache/inspection reports are
   available through `discover --repo`. Bounded explicit URL inspection reports
-  are available through `discover --url`; bounded local TypeScript/JavaScript
-  export, optional AST signature, package/config, and path-based test/example
-  context evidence reports are available through `source-truth inspect --source`,
-  and evidence-bound Markdown is available through
+  are available through `discover --url`; the implemented command surface is
+  available through deterministic `capabilities --json`; bounded local
+  TypeScript/JavaScript export, optional AST signature, package/config, and
+  path-based test/example context evidence reports are available through
+  `source-truth inspect --source`, and evidence-bound Markdown is available through
   `source-truth generate --source --output-dir`. Broader crawling, refresh,
   source-code verification, and behavior-level source documentation remain
   planned.

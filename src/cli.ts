@@ -34,6 +34,249 @@ const CLI_NAME = 'supabase-llm-docs';
 const GENERATOR_NAME = packageJson.name;
 const GENERATOR_VERSION = packageJson.version;
 const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';
+const CAPABILITIES_SCHEMA_VERSION = '0.1.0';
+
+const CAPABILITIES_CONTRACT = {
+  schemaVersion: CAPABILITIES_SCHEMA_VERSION,
+  generator: {
+    packageName: GENERATOR_NAME,
+    packageVersion: GENERATOR_VERSION,
+    cliName: CLI_NAME,
+    binary: 'llm-docs',
+  },
+  productBoundary: {
+    cliRole: 'deterministic-scriptable-capability-layer',
+    agentRole: 'intelligent-planner',
+    sourceAuthority: 'agent-owned',
+    taskFit: 'agent-owned',
+    sourceSelection: 'agent-owned-explicit-decision',
+    discoveryReports: 'candidate-evidence-not-source-selection',
+    statement:
+      'The CLI accepts explicit inputs and reports deterministic facts. The agent owns source authority, task fit, and selected source decisions.',
+  },
+  implemented: [
+    {
+      id: 'discover-source',
+      command: 'discover',
+      mode: 'discover --source',
+      status: 'implemented',
+      inputBoundary: 'explicit local file or directory',
+      outputFiles: ['discovery-report.json'],
+      summary: 'bounded local source inspection with deterministic candidate file evidence',
+      limitations: [
+        'candidate evidence for agent review only',
+        'no docs generation',
+        'no source selection',
+        'no trust scoring',
+      ],
+    },
+    {
+      id: 'discover-repo',
+      command: 'discover',
+      mode: 'discover --repo',
+      status: 'implemented',
+      inputBoundary: 'explicit git URL or explicit local git repository',
+      options: ['--scope <path>', '--cache-dir <dir>', '--output-dir <dir>'],
+      outputFiles: ['discovery-report.json'],
+      summary:
+        'bounded repository inspection with stable cache reuse and optional repo-relative scope',
+      limitations: [
+        'candidate evidence for agent review only',
+        'no repo script execution',
+        'no docs generation',
+        'no source selection',
+        'no trust scoring',
+      ],
+    },
+    {
+      id: 'discover-url',
+      command: 'discover',
+      mode: 'discover --url',
+      status: 'implemented',
+      inputBoundary: 'explicit http or https URL',
+      outputFiles: ['discovery-report.json'],
+      summary:
+        'bounded static website inspection for the explicit URL plus same-origin /llms.txt and /sitemap.xml',
+      limitations: [
+        'candidate evidence for agent review only',
+        'no linked candidate fetching',
+        'no JavaScript rendering',
+        'no broad crawling',
+        'no source selection',
+      ],
+    },
+    {
+      id: 'source-truth-inspect',
+      command: 'source-truth inspect',
+      mode: 'source-truth inspect --source',
+      status: 'implemented',
+      inputBoundary: 'explicit local file or directory',
+      outputFiles: ['stdout JSON evidence report'],
+      factFamilies: [
+        'export facts',
+        'optional direct-declaration AST signatures',
+        'package/config facts',
+        'path/filename test/example context facts',
+      ],
+      summary: 'deterministic local evidence extraction for conservative observed facts',
+      limitations: [
+        'no behavior inference',
+        'no assertion parsing',
+        'no test execution',
+        'no framework inference',
+        'no route inference',
+        'no re-export resolution',
+        'local explicit sources only',
+      ],
+    },
+    {
+      id: 'source-truth-generate',
+      command: 'source-truth generate',
+      mode: 'source-truth generate --source --output-dir',
+      status: 'implemented',
+      inputBoundary: 'explicit local file or directory',
+      outputFiles: [
+        'source-truth-report.json',
+        'source-truth.md',
+        'manifest.json',
+        'failure.json',
+      ],
+      factFamilies: [
+        'export facts',
+        'optional direct-declaration AST signatures',
+        'package/config facts',
+        'path/filename test/example context facts',
+      ],
+      summary: 'evidence-bound Markdown and provenance files from source-truth inspection',
+      limitations: [
+        'no behavior inference',
+        'no assertion parsing',
+        'no test execution',
+        'no framework inference',
+        'no route inference',
+        'no re-export resolution',
+        'local explicit sources only',
+      ],
+    },
+    {
+      id: 'generate-sdk',
+      command: 'generate',
+      mode: 'generate --sdk',
+      status: 'implemented',
+      inputBoundary: 'configured SDK manifest entry',
+      outputFiles: [
+        'manifest.json',
+        'parsed/<sdk>-<resolved-version>-spec.json',
+        'llm-docs/*-llms.txt',
+      ],
+      summary: 'configured OpenRef SDK generation through the existing compatibility flow',
+      limitations: [
+        'configured SDKs only',
+        'no general generate --source CLI mode',
+        'no discovery report consumption',
+      ],
+    },
+    {
+      id: 'verify-configured-sdk',
+      command: 'verify',
+      mode: 'verify --manifest or verify --output-dir',
+      status: 'implemented',
+      inputBoundary: 'configured-sdk manifest.json',
+      outputFiles: ['stdout verification result'],
+      summary: 'hash and byte-size verification for configured SDK manifests',
+      limitations: [
+        'configured-sdk manifests only',
+        'no refresh',
+        'no repo freshness check',
+        'no source-code verification',
+      ],
+    },
+    {
+      id: 'list-sdks',
+      command: 'list-sdks',
+      mode: 'list-sdks',
+      status: 'implemented',
+      inputBoundary: 'configured SDK directory',
+      outputFiles: ['stdout SDK list'],
+      summary: 'list configured SDKs and versions',
+      limitations: ['no source discovery', 'no generation'],
+    },
+    {
+      id: 'validate-sdk',
+      command: 'validate',
+      mode: 'validate --sdk',
+      status: 'implemented',
+      inputBoundary: 'configured SDK manifest entry',
+      outputFiles: ['stdout validation result'],
+      summary: 'fetch and parse a configured SDK OpenRef spec',
+      limitations: ['configured SDKs only', 'no docs generation'],
+    },
+  ],
+  sourceTruth: {
+    status: 'implemented-conservative-local-evidence',
+    supportedFactFamilies: [
+      'export facts',
+      'optional direct-declaration AST signatures',
+      'package/config facts',
+      'path/filename test/example context facts',
+    ],
+    limitations: [
+      'no behavior inference',
+      'no assertion parsing',
+      'no test execution',
+      'no framework inference',
+      'no route inference',
+      'no re-export resolution',
+      'local explicit sources only',
+    ],
+  },
+  plannedUnsupported: [
+    {
+      id: 'generate-source',
+      command: 'generate --source',
+      status: 'planned-unsupported',
+      reason:
+        'top-level general generate --source is not implemented; explicit local source evidence generation is available only through source-truth generate --source --output-dir',
+    },
+    {
+      id: 'refresh',
+      command: 'refresh',
+      status: 'planned-unsupported',
+      reason: 'no current CLI refresh workflow',
+    },
+    {
+      id: 'source-code-verification',
+      command: 'source verification for official docs',
+      status: 'planned-unsupported',
+      reason: 'no current claim verification workflow against implementation source files',
+    },
+    {
+      id: 'broad-crawling',
+      command: 'broad website crawling',
+      status: 'planned-unsupported',
+      reason: 'website discovery is bounded to explicit URL plus fixed same-origin well-known resources',
+    },
+    {
+      id: 'automatic-source-selection',
+      command: 'automatic source selection',
+      status: 'planned-unsupported',
+      reason: 'agents review candidate evidence and explicitly choose sources',
+    },
+    {
+      id: 'framework-route-understanding',
+      command: 'framework or route understanding',
+      status: 'planned-unsupported',
+      reason: 'source-truth inspection does not infer framework identity or routes',
+    },
+    {
+      id: 'behavior-level-code-docs',
+      command: 'behavior-level generation from source code',
+      status: 'planned-unsupported',
+      reason:
+        'source-truth generation is limited to observed export, signature, package/config, and path context facts',
+    },
+  ],
+} as const;
 
 function resolvePlannedOutputVersion(
   sdkName: string,
@@ -52,6 +295,28 @@ program
   .description('Generate LLM-optimized documentation from Supabase SDK specifications')
   .version(GENERATOR_VERSION)
   .enablePositionalOptions();
+
+// ============================================================================
+// CAPABILITIES COMMAND
+// ============================================================================
+
+program
+  .command('capabilities')
+  .description('Report implemented and planned CLI capabilities for agents')
+  .option('--json', 'Print the deterministic machine-readable capabilities contract')
+  .action((options: { json?: boolean }) => {
+    if (options.json === true) {
+      console.log(JSON.stringify(CAPABILITIES_CONTRACT, null, 2));
+      return;
+    }
+
+    console.log(chalk.bold('llm-docs capabilities'));
+    console.log(`  Schema: ${CAPABILITIES_SCHEMA_VERSION}`);
+    console.log(`  Package: ${GENERATOR_NAME}@${GENERATOR_VERSION}`);
+    console.log(`  Implemented modes: ${CAPABILITIES_CONTRACT.implemented.length}`);
+    console.log(`  Planned or unsupported modes: ${CAPABILITIES_CONTRACT.plannedUnsupported.length}`);
+    console.log('  Use --json for the stable agent contract.');
+  });
 
 // ============================================================================
 // SOURCE-TRUTH COMMAND

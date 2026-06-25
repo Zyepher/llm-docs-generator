@@ -111,9 +111,16 @@ Current implementation:
   referencing `source-truth-report.json` when no extractable export or
   package/config facts or path-based context facts are found. It rejects output
   directories that are the source path or inside the source path.
+- Can run `capabilities --json` to print a deterministic, machine-readable
+  contract of implemented commands and planned/unsupported capabilities for
+  agents. The contract has schema version `0.1.0`, package name/version
+  metadata, product-boundary metadata, implemented command entries, source-truth
+  fact-family scope, explicit source-truth limitations, and planned/unsupported
+  entries. It intentionally omits `generatedAt` and does not inspect sources,
+  load config, write files, or perform network work.
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`, `generate --sdk`, `verify`,
-  `list-sdks`, and `validate --sdk`.
+  `list-sdks`, `validate --sdk`, and `capabilities --json`.
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or behavior-level source documentation from
   code. Semantic chunking exists as a library capability for existing DocNode IR
@@ -437,7 +444,8 @@ Expected behavior:
 - `llm-docs agent doctor` checks whether the binary is on `PATH`, bundled
   skills are available, host skill installation exists, and versions match.
 - `llm-docs capabilities --json` reports implemented modes so agents do not
-  assume planned features exist.
+  assume planned features exist. This command is currently implemented as a
+  static deterministic contract and does not perform hidden environment probing.
 
 When an agent is in another directory and receives a prompt such as "Generate
 LLM docs for Tailwind CSS," the installed skill is what should tell the agent to
@@ -605,6 +613,7 @@ The following commands are the current regression baseline:
 llm-docs discover --source ./docs --output-dir ./reports/local-docs
 llm-docs discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
 llm-docs discover --url https://example.com/docs --output-dir ./reports/website
+llm-docs capabilities --json
 llm-docs source-truth inspect --source ./src
 llm-docs generate --sdk swift --sdk-version v2
 llm-docs generate --sdk all --sdk-version all

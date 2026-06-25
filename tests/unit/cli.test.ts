@@ -219,6 +219,48 @@ interface WebsiteDiscoveryReport {
   warnings: string[];
 }
 
+interface CapabilitiesContract {
+  schemaVersion: string;
+  generator: {
+    packageName: string;
+    packageVersion: string;
+    cliName: string;
+    binary: string;
+  };
+  productBoundary: {
+    cliRole: string;
+    agentRole: string;
+    sourceAuthority: string;
+    taskFit: string;
+    sourceSelection: string;
+    discoveryReports: string;
+    statement: string;
+  };
+  implemented: Array<{
+    id: string;
+    command: string;
+    mode: string;
+    status: string;
+    inputBoundary: string;
+    outputFiles: string[];
+    summary: string;
+    limitations: string[];
+    factFamilies?: string[];
+    options?: string[];
+  }>;
+  sourceTruth: {
+    status: string;
+    supportedFactFamilies: string[];
+    limitations: string[];
+  };
+  plannedUnsupported: Array<{
+    id: string;
+    command: string;
+    status: string;
+    reason: string;
+  }>;
+}
+
 interface CliResult {
   stdout: string;
   stderr: string;
@@ -567,6 +609,186 @@ describe('CLI compatibility behavior', () => {
     const { stdout } = await runCli(['--version']);
 
     expect(stdout.trim()).toBe('1.0.0');
+  });
+
+  it('exposes capabilities help and root help for agents', async () => {
+    const rootHelp = await runCli(['--help']);
+    const capabilitiesHelp = await runCli(['capabilities', '--help']);
+
+    expect(rootHelp.stdout).toContain('capabilities');
+    expect(rootHelp.stdout).toContain('Report implemented and planned CLI capabilities for');
+    expect(rootHelp.stdout).toContain('agents');
+    expect(capabilitiesHelp.stdout).toContain('Report implemented and planned CLI capabilities for agents');
+    expect(capabilitiesHelp.stdout).toContain('--json');
+    expect(capabilitiesHelp.stdout).toContain(
+      'Print the deterministic machine-readable capabilities contract'
+    );
+  });
+
+  it(
+    'prints a deterministic capabilities JSON contract without generatedAt',
+    async () => {
+      const first = await runCli(['capabilities', '--json']);
+      const second = await runCli(['capabilities', '--json']);
+      const capabilities = JSON.parse(first.stdout) as CapabilitiesContract;
+
+      expect(first.stdout).toBe(second.stdout);
+      expect(first.stdout.endsWith('\n')).toBe(true);
+      expect(first.stdout).not.toContain('generatedAt');
+      expect(capabilities).toMatchObject({
+        schemaVersion: '0.1.0',
+        generator: {
+          packageName: 'llm-docs-generator',
+          packageVersion: '1.0.0',
+          cliName: 'supabase-llm-docs',
+          binary: 'llm-docs',
+        },
+      });
+    },
+    15000
+  );
+
+  it('separates implemented capabilities from planned or unsupported capabilities', async () => {
+    const { stdout } = await runCli(['capabilities', '--json']);
+    const capabilities = JSON.parse(stdout) as CapabilitiesContract;
+    const implemented = new Map(
+      capabilities.implemented.map((capability) => [capability.id, capability])
+    );
+    const planned = new Map(
+      capabilities.plannedUnsupported.map((capability) => [capability.id, capability])
+    );
+
+    expect([...implemented.keys()]).toEqual([
+      'discover-source',
+      'discover-repo',
+      'discover-url',
+      'source-truth-inspect',
+      'source-truth-generate',
+      'generate-sdk',
+      'verify-configured-sdk',
+      'list-sdks',
+      'validate-sdk',
+    ]);
+    expect([...planned.keys()]).toEqual([
+      'generate-source',
+      'refresh',
+      'source-code-verification',
+      'broad-crawling',
+      'automatic-source-selection',
+      'framework-route-understanding',
+      'behavior-level-code-docs',
+    ]);
+    expect(capabilities.implemented.every((capability) => capability.status === 'implemented')).toBe(
+      true
+    );
+    expect(
+      capabilities.plannedUnsupported.every(
+        (capability) => capability.status === 'planned-unsupported'
+      )
+    ).toBe(true);
+    expect(implemented.get('discover-source')?.outputFiles).toEqual(['discovery-report.json']);
+    expect(implemented.get('discover-repo')?.outputFiles).toEqual(['discovery-report.json']);
+    expect(implemented.get('discover-url')?.outputFiles).toEqual(['discovery-report.json']);
+    expect(implemented.get('source-truth-inspect')?.outputFiles).toEqual([
+      'stdout JSON evidence report',
+    ]);
+    expect(implemented.get('source-truth-generate')?.outputFiles).toEqual([
+      'source-truth-report.json',
+      'source-truth.md',
+      'manifest.json',
+      'failure.json',
+    ]);
+    expect(implemented.get('generate-sdk')?.outputFiles).toEqual([
+      'manifest.json',
+      'parsed/<sdk>-<resolved-version>-spec.json',
+      'llm-docs/*-llms.txt',
+    ]);
+    expect(planned.get('generate-source')?.reason).toBe(
+      'top-level general generate --source is not implemented; explicit local source evidence generation is available only through source-truth generate --source --output-dir'
+    );
+    expect(planned.get('generate-source')?.reason).toContain(
+      'source-truth generate --source --output-dir'
+    );
+    expect(planned.get('generate-source')?.reason).not.toContain(
+      'no current CLI generation workflow consumes explicit sources'
+    );
+    expect([...implemented.values()].map((capability) => capability.mode)).not.toContain(
+      'generate --source'
+    );
+    expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
+      'refresh'
+    );
+  });
+
+  it('reports source-truth fact families and explicit limitations', async () => {
+    const { stdout } = await runCli(['capabilities', '--json']);
+    const capabilities = JSON.parse(stdout) as CapabilitiesContract;
+    const sourceTruthInspect = capabilities.implemented.find(
+      (capability) => capability.id === 'source-truth-inspect'
+    );
+    const sourceTruthGenerate = capabilities.implemented.find(
+      (capability) => capability.id === 'source-truth-generate'
+    );
+    const expectedFactFamilies = [
+      'export facts',
+      'optional direct-declaration AST signatures',
+      'package/config facts',
+      'path/filename test/example context facts',
+    ];
+    const expectedLimitations = [
+      'no behavior inference',
+      'no assertion parsing',
+      'no test execution',
+      'no framework inference',
+      'no route inference',
+      'no re-export resolution',
+      'local explicit sources only',
+    ];
+
+    expect(capabilities.sourceTruth.supportedFactFamilies).toEqual(expectedFactFamilies);
+    expect(capabilities.sourceTruth.limitations).toEqual(expectedLimitations);
+    expect(sourceTruthInspect?.factFamilies).toEqual(expectedFactFamilies);
+    expect(sourceTruthInspect?.limitations).toEqual(expectedLimitations);
+    expect(sourceTruthGenerate?.factFamilies).toEqual(expectedFactFamilies);
+    expect(sourceTruthGenerate?.limitations).toEqual(expectedLimitations);
+  });
+
+  it('states the product boundary without promoting unsupported behavior', async () => {
+    const { stdout } = await runCli(['capabilities', '--json']);
+    const capabilities = JSON.parse(stdout) as CapabilitiesContract;
+    const implementedText = JSON.stringify(capabilities.implemented);
+    const contractText = JSON.stringify(capabilities);
+
+    expect(capabilities.productBoundary).toMatchObject({
+      cliRole: 'deterministic-scriptable-capability-layer',
+      agentRole: 'intelligent-planner',
+      sourceAuthority: 'agent-owned',
+      taskFit: 'agent-owned',
+      sourceSelection: 'agent-owned-explicit-decision',
+      discoveryReports: 'candidate-evidence-not-source-selection',
+    });
+    expect(capabilities.productBoundary.statement).toContain(
+      'The agent owns source authority, task fit, and selected source decisions.'
+    );
+    expect(implementedText).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(implementedText).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(implementedText).not.toMatch(/\bautomatically selects\b/i);
+    expect(implementedText).not.toMatch(/\bunderstands routes\b/i);
+    expect(implementedText).not.toMatch(/\bbehavior-level\b/i);
+    expect(contractText).not.toMatch(/\btrust score\b/i);
+    expect(contractText).not.toMatch(/\bclaims correctness\b/i);
+    expect(contractText).not.toMatch(/\bchooses authoritative\b/i);
+  });
+
+  it('prints concise non-JSON capabilities text without writing reports', async () => {
+    const { stdout } = await runCli(['capabilities']);
+
+    expect(stdout).toContain('llm-docs capabilities');
+    expect(stdout).toContain('Schema: 0.1.0');
+    expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
+    expect(stdout).toContain('Implemented modes: 9');
+    expect(stdout).toContain('Planned or unsupported modes: 7');
+    expect(stdout).toContain('Use --json for the stable agent contract.');
   });
 
   it('treats validate --version as the SDK version option', async () => {

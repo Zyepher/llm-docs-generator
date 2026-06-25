@@ -237,6 +237,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] RST parser foundation for explicit local Python-style documentation
 - [x] Static HTML parser foundation for explicit local rendered-HTML fallback
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
+- [x] Deterministic `capabilities --json` contract for agents with implemented
+      and planned/unsupported capabilities separated
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
@@ -266,6 +268,29 @@ deterministically for agent review only. Repo cache handling is non-destructive;
 clean matching caches fetch remote refs without pulling into the checkout, and cached
 checkouts with local changes or ignored files are warned about and inspected as
 present.
+
+Current capabilities contract scope:
+
+- `llm-docs capabilities --json` prints a deterministic JSON contract for
+  agents. The contract has schema version `0.1.0`, package name/version
+  metadata, product-boundary metadata, implemented command entries,
+  source-truth fact-family scope, explicit source-truth limitations, and
+  planned/unsupported entries.
+- Implemented entries cover `discover --source`, `discover --repo`,
+  `discover --url`, `source-truth inspect --source`,
+  `source-truth generate --source --output-dir`, configured `generate --sdk`,
+  configured SDK `verify`, `list-sdks`, and `validate --sdk`.
+- Planned/unsupported entries include general `generate --source`, `refresh`,
+  source-code verification for official docs, broad website crawling, automatic
+  source selection, framework/route understanding, and behavior-level generation
+  from source code.
+- Stable output files are reported where they exist:
+  `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
+  `manifest.json`, `failure.json`, configured SDK parsed spec output, and
+  configured SDK LLM docs output.
+- The contract intentionally omits `generatedAt`. The command does not inspect
+  sources, load config, write files, perform network work, or probe hidden
+  environment state.
 
 Current source-truth evidence scope:
 
