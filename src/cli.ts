@@ -41,6 +41,15 @@ const CAPABILITIES_SCHEMA_VERSION = '0.1.0';
 const AGENT_CONTEXT_SCHEMA_VERSION = '0.2.0';
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIGURED_SDK_GENERATE_FORMATS = ['openref', 'openref-0.1'] as const;
+const SOURCE_GENERATE_FORMATS = [
+  'auto',
+  'markdown',
+  'mdx',
+  'openapi',
+  'openref',
+  'rst',
+  'html',
+] as const;
 
 const AGENT_CONTEXT_ARTIFACTS = [
   {
@@ -198,12 +207,7 @@ const CAPABILITIES_CONTRACT = {
       mode: 'source-truth generate --source --output-dir',
       status: 'implemented',
       inputBoundary: 'explicit local file or directory',
-      outputFiles: [
-        'source-truth-report.json',
-        'source-truth.md',
-        'manifest.json',
-        'failure.json',
-      ],
+      outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json', 'failure.json'],
       factFamilies: [
         'export facts',
         'optional direct-declaration AST signatures',
@@ -238,6 +242,25 @@ const CAPABILITIES_CONTRACT = {
       ],
     },
     {
+      id: 'generate-source',
+      command: 'generate',
+      mode: 'generate --source',
+      status: 'implemented',
+      inputBoundary: 'explicit local file or directory',
+      options: ['--source <path>', '--format auto|markdown|mdx|openapi|openref|rst|html'],
+      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt'],
+      summary:
+        'deterministic local source parsing through the registered parser and universal formatter',
+      limitations: [
+        'local files and directories only',
+        'no URL fetching',
+        'no discovery report consumption',
+        'no candidate auto-selection',
+        'no preset generation',
+        'no source selection decision',
+      ],
+    },
+    {
       id: 'generate-sdk',
       command: 'generate',
       mode: 'generate --sdk',
@@ -252,7 +275,6 @@ const CAPABILITIES_CONTRACT = {
       summary: 'configured OpenRef SDK generation through the existing compatibility flow',
       limitations: [
         'configured SDKs only',
-        'no general generate --source CLI mode',
         'no preset generation',
         'no discovery report consumption',
       ],
@@ -313,18 +335,11 @@ const CAPABILITIES_CONTRACT = {
   },
   plannedUnsupported: [
     {
-      id: 'generate-source',
-      command: 'generate --source',
-      status: 'planned-unsupported',
-      reason:
-        'top-level general generate --source is not implemented; explicit local source evidence generation is available only through source-truth generate --source --output-dir',
-    },
-    {
       id: 'generate-preset',
       command: 'generate --preset',
       status: 'planned-unsupported',
       reason:
-        'preset generation is not implemented; the current generate command only supports configured OpenRef SDK generation through generate --sdk',
+        'preset generation is not implemented; the current generate command supports explicit local source generation and configured OpenRef SDK generation only',
     },
     {
       id: 'refresh',
@@ -342,7 +357,8 @@ const CAPABILITIES_CONTRACT = {
       id: 'broad-crawling',
       command: 'broad website crawling',
       status: 'planned-unsupported',
-      reason: 'website discovery is bounded to explicit URL plus fixed same-origin well-known resources',
+      reason:
+        'website discovery is bounded to explicit URL plus fixed same-origin well-known resources',
     },
     {
       id: 'automatic-source-selection',
@@ -456,50 +472,73 @@ async function removeScopedManifest(outputDir: string): Promise<void> {
   await rm(`${outputDir}/manifest.json`, { force: true });
 }
 
+class GenerateRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GenerateRequestError';
+  }
+}
+
 function failGenerateRequest(message: string): never {
+  throw new GenerateRequestError(message);
+}
+
+function printGenerateRequestFailure(message: string): void {
   console.error(chalk.red(`Generate failed: ${message}`));
   console.error(
     chalk.yellow(
-      'Current supported generation mode: generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] --output-dir <dir>; generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
     )
   );
+  console.error(chalk.yellow('Preset generation remains planned/unsupported in the current CLI.'));
   console.error(
     chalk.yellow(
-      'General generate --source and preset generation are planned/unsupported in the current CLI.'
+      'Discovery reports are candidate evidence for agent review; pass an explicit local source path to generate.'
     )
   );
-  console.error(
-    chalk.yellow(
-      'For conservative local source evidence, use source-truth generate --source <path> --output-dir <dir>.'
-    )
-  );
-  process.exit(1);
 }
+
+type GenerateMode = 'source' | 'configured-sdk';
 
 function validateGenerateOptions(options: {
   sdk?: string;
   source?: string;
   format?: string;
   preset?: string;
-}): asserts options is {
-  sdk: string;
-  source?: string;
-  format?: string;
-  preset?: string;
-} {
-  if (options.source !== undefined) {
-    failGenerateRequest('top-level general generate --source is not implemented.');
+}): GenerateMode {
+  if (options.preset !== undefined) {
+    failGenerateRequest('generate --preset is not implemented.');
   }
 
-  if (options.preset !== undefined) {
-    failGenerateRequest('generate --preset is not implemented for the current configured SDK path.');
+  if (options.source !== undefined && options.sdk !== undefined) {
+    failGenerateRequest('generate --source and --sdk are mutually exclusive.');
+  }
+
+  if (options.source !== undefined) {
+    if (options.format !== undefined) {
+      const normalizedFormat = options.format.trim().toLowerCase();
+
+      if (
+        !SOURCE_GENERATE_FORMATS.some((supportedFormat) => supportedFormat === normalizedFormat)
+      ) {
+        failGenerateRequest(
+          `--format ${options.format} is not supported for generate --source; supported source formats are ${SOURCE_GENERATE_FORMATS.join(
+            ', '
+          )}.`
+        );
+      }
+    }
+
+    return 'source';
   }
 
   if (options.format !== undefined) {
     const normalizedFormat = options.format.trim().toLowerCase();
 
     if (
-      !CONFIGURED_SDK_GENERATE_FORMATS.some((supportedFormat) => supportedFormat === normalizedFormat)
+      !CONFIGURED_SDK_GENERATE_FORMATS.some(
+        (supportedFormat) => supportedFormat === normalizedFormat
+      )
     ) {
       failGenerateRequest(
         `--format ${options.format} is not supported for configured generate --sdk; supported formats are ${CONFIGURED_SDK_GENERATE_FORMATS.join(
@@ -510,13 +549,39 @@ function validateGenerateOptions(options: {
   }
 
   if (options.sdk === undefined || options.sdk.trim().length === 0) {
-    failGenerateRequest('generate requires --sdk for the current configured OpenRef SDK path.');
+    failGenerateRequest('generate requires exactly one of --source or --sdk.');
+  }
+
+  return 'configured-sdk';
+}
+
+async function cleanupStaleSourceArtifactsForFailedSourceRequest(options: {
+  source?: string;
+  outputDir: string;
+}): Promise<void> {
+  if (options.source === undefined) {
+    return;
+  }
+
+  try {
+    const { cleanupStaleSourceDocsArtifacts } = await import('./core/source-docs.js');
+
+    await cleanupStaleSourceDocsArtifacts(options.outputDir, {
+      protectedSourcePath: options.source,
+    });
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(
+      chalk.yellow(`Warning: failed to clean stale source-mode artifacts: ${errorMsg}`)
+    );
   }
 }
 
 program
   .name(CLI_NAME)
-  .description('Generate LLM-optimized documentation from Supabase SDK specifications')
+  .description(
+    'Generate LLM-optimized documentation from explicit local sources and configured SDK specs'
+  )
   .version(GENERATOR_VERSION)
   .enablePositionalOptions();
 
@@ -538,7 +603,9 @@ program
     console.log(`  Schema: ${CAPABILITIES_SCHEMA_VERSION}`);
     console.log(`  Package: ${GENERATOR_NAME}@${GENERATOR_VERSION}`);
     console.log(`  Implemented modes: ${CAPABILITIES_CONTRACT.implemented.length}`);
-    console.log(`  Planned or unsupported modes: ${CAPABILITIES_CONTRACT.plannedUnsupported.length}`);
+    console.log(
+      `  Planned or unsupported modes: ${CAPABILITIES_CONTRACT.plannedUnsupported.length}`
+    );
     console.log('  Use --json for the stable agent contract.');
   });
 
@@ -565,7 +632,9 @@ agentCommand
 
       console.log(chalk.bold('llm-docs agent context'));
       console.log(`  Schema: ${context.schemaVersion}`);
-      console.log(`  Package: ${context.generator.packageName}@${context.generator.packageVersion}`);
+      console.log(
+        `  Package: ${context.generator.packageName}@${context.generator.packageVersion}`
+      );
       console.log(`  Binary: ${context.generator.binary}`);
       console.log('  Context artifacts:');
 
@@ -795,11 +864,14 @@ program
 
 program
   .command('generate')
-  .description('Generate LLM documentation for specified SDK(s) and version(s)')
+  .description('Generate LLM documentation from an explicit local source or configured SDK')
   .option('--sdk <sdk>', 'SDK to generate (or "all" for all SDKs)')
-  .option('--source <path>', 'Planned general source generation input (currently unsupported)')
-  .option('--format <format>', 'Configured SDK format guard: openref or openref-0.1')
-  .option('--preset <name>', 'Planned preset generation input (currently unsupported)')
+  .option('--source <path>', 'Explicit local file or directory to parse and format')
+  .option(
+    '--format <format>',
+    'Source parser hint: auto, markdown, mdx, openapi, openref, rst, html; SDK guard: openref or openref-0.1'
+  )
+  .option('--preset <name>', 'Planned preset generation input (unsupported)')
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
   .option('--config-dir <dir>', 'Configuration directory', 'config')
   .option('--output-dir <dir>', 'Output directory', '../../public/llms-openref')
@@ -817,7 +889,55 @@ program
       verbose: boolean;
       force: boolean;
     }) => {
-      validateGenerateOptions(options);
+      let generateMode: GenerateMode;
+
+      try {
+        generateMode = validateGenerateOptions(options);
+      } catch (error) {
+        if (error instanceof GenerateRequestError) {
+          await cleanupStaleSourceArtifactsForFailedSourceRequest(options);
+          printGenerateRequestFailure(error.message);
+          process.exit(1);
+        }
+
+        throw error;
+      }
+
+      if (generateMode === 'source') {
+        try {
+          const { generateSourceDocs } = await import('./core/source-docs.js');
+          const sourceDocsOptions: Parameters<typeof generateSourceDocs>[0] = {
+            source: options.source ?? '',
+            outputDir: options.outputDir,
+            generator: {
+              name: GENERATOR_NAME,
+              version: GENERATOR_VERSION,
+              cliName: CLI_NAME,
+            },
+          };
+
+          if (options.format !== undefined) {
+            sourceDocsOptions.format = options.format;
+          }
+
+          const result = await generateSourceDocs(sourceDocsOptions);
+
+          console.log(chalk.bold('Local source docs generated'));
+          console.log(`  Source: ${result.manifest.source.resolvedPath}`);
+          console.log(`  Type: ${result.manifest.source.type}`);
+          console.log(`  Format: ${result.manifest.source.resolvedFormat}`);
+          console.log(`  Source files: ${result.manifest.sourceFiles.length}`);
+          console.log(`  Generated files: ${result.manifest.generatedOutputs.length}`);
+          console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
+          console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error(chalk.red(`Generate failed: ${errorMsg}`));
+          process.exit(1);
+        }
+
+        return;
+      }
 
       // Set log level
       Logger.setLevel(options.verbose ? LogLevel.DEBUG : LogLevel.INFO);
@@ -831,7 +951,8 @@ program
 
         // Determine which SDKs to process
         const availableSDKs = config.getAllSDKs();
-        const sdksToProcess = options.sdk === 'all' ? availableSDKs : [options.sdk];
+        const requestedSdk = options.sdk ?? '';
+        const sdksToProcess = requestedSdk === 'all' ? availableSDKs : [requestedSdk];
 
         // Validate SDK names
         for (const sdkName of sdksToProcess) {

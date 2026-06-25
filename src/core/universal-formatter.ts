@@ -12,6 +12,7 @@
 
 import { createWriteStream } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
+import { join } from 'node:path';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 
@@ -53,23 +54,25 @@ export class UniversalFormatter {
    *
    * Performance: O(n) where n = total nodes in tree
    */
-  async generateAll(): Promise<void> {
+  async generateAll(): Promise<string[]> {
     const outputDir = this.options.outputDir;
     await mkdir(outputDir, { recursive: true });
 
     // Generate full combined document
-    await this.generateFullDoc();
+    const outputPaths = [await this.generateFullDoc()];
 
     // Generate modular documents by category (if applicable)
-    await this.generateModularDocs();
+    outputPaths.push(...(await this.generateModularDocs()));
+
+    return outputPaths;
   }
 
   /**
    * Generate full combined documentation
    */
-  private async generateFullDoc(): Promise<void> {
-    const prefix = this.options.filenamePrefix || 'documentation';
-    const filepath = `${this.options.outputDir}/${prefix}-full-llms.txt`;
+  private async generateFullDoc(): Promise<string> {
+    const prefix = sanitizeFileSegment(this.options.filenamePrefix || 'documentation');
+    const filepath = join(this.options.outputDir, `${prefix}-full-llms.txt`);
 
     const parts: string[] = [];
 
@@ -87,23 +90,31 @@ export class UniversalFormatter {
     } else {
       await writeFile(filepath, content, 'utf-8');
     }
+
+    return filepath;
   }
 
   /**
    * Generate modular documentation files (one per category)
    */
-  private async generateModularDocs(): Promise<void> {
+  private async generateModularDocs(): Promise<string[]> {
     // Find all CATEGORY nodes
     const categories = this.root.children.filter((child) => child.type === DocNodeType.CATEGORY);
 
-    if (categories.length === 0) return;
+    if (categories.length === 0) return [];
 
-    const prefix = this.options.filenamePrefix || 'documentation';
+    const prefix = sanitizeFileSegment(this.options.filenamePrefix || 'documentation');
+    const outputPaths: string[] = [];
+    const usedFilenames = new Set([`${prefix}-full-llms.txt`]);
 
     // Generate file for each category
     for (const category of categories) {
-      const filename = `${prefix}-${category.id}-llms.txt`;
-      const filepath = `${this.options.outputDir}/${filename}`;
+      const filename = uniqueFilename(
+        `${prefix}-${sanitizeFileSegment(category.id)}`,
+        '-llms.txt',
+        usedFilenames
+      );
+      const filepath = join(this.options.outputDir, filename);
 
       const parts: string[] = [];
 
@@ -114,7 +125,10 @@ export class UniversalFormatter {
       parts.push(this.formatNode(category, []));
 
       await writeFile(filepath, parts.join(''), 'utf-8');
+      outputPaths.push(filepath);
     }
+
+    return outputPaths;
   }
 
   /**
@@ -268,7 +282,24 @@ export class UniversalFormatter {
 /**
  * Format DocNode tree (convenience function)
  */
-export async function formatDocNode(root: DocNode, options: FormatterOptions): Promise<void> {
+export async function formatDocNode(root: DocNode, options: FormatterOptions): Promise<string[]> {
   const formatter = new UniversalFormatter(root, options);
-  await formatter.generateAll();
+  return await formatter.generateAll();
+}
+
+function sanitizeFileSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'documentation';
+}
+
+function uniqueFilename(baseName: string, extension: string, usedFilenames: Set<string>): string {
+  let suffix = 1;
+  let filename = `${baseName}${extension}`;
+
+  while (usedFilenames.has(filename)) {
+    suffix++;
+    filename = `${baseName}-${suffix}${extension}`;
+  }
+
+  usedFilenames.add(filename);
+  return filename;
 }

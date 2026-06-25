@@ -101,10 +101,10 @@
           "description": "Standard library documentation"
         }
       ],
-      "hint": "Likely reStructuredText docs live under Doc. This is a hint only; the RST parser module supports a deterministic local subset, but this catalog entry remains untested and does not imply CLI source generation.",
+      "hint": "Likely reStructuredText docs live under Doc. This is a non-authoritative hint only; this catalog entry has not been validated with the current explicit local source generation workflow for RST inputs.",
       "tested": false,
       "status": "planned",
-      "note": "Requires agent-selected explicit source conversion workflow before marking tested",
+      "note": "Requires agent verification of repository, path, version, selected local source, and RST parse output before marking tested",
       "maintainer": "Python Software Foundation"
     },
     {
