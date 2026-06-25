@@ -145,3 +145,20 @@ export type {
   SourceTruthSymbolKind,
   SourceTruthTraversalSettings,
 } from './core/source-truth.js';
+export {
+  SOURCE_TRUTH_DOCS_FAILURE_MODE,
+  SOURCE_TRUTH_DOCS_MODE,
+  SOURCE_TRUTH_DOCS_SCHEMA_VERSION,
+  SourceTruthDocsNoFactsError,
+  formatSourceTruthMarkdown,
+  generateSourceTruthDocs,
+} from './core/source-truth-docs.js';
+export type {
+  GenerateSourceTruthDocsOptions,
+  SourceTruthDocsFailure,
+  SourceTruthDocsGenerationResult,
+  SourceTruthDocsManifest,
+  SourceTruthGeneratedOutput,
+  SourceTruthGeneratedOutputKind,
+  SourceTruthManifestSourceFile,
+} from './core/source-truth-docs.js';

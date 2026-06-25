@@ -1,0 +1,345 @@
+import { createHash } from 'node:crypto';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  SourceTruthDocsNoFactsError,
+  formatSourceTruthMarkdown,
+  generateSourceTruthDocs,
+  type SourceTruthDocsFailure,
+  type SourceTruthDocsManifest,
+} from '../../src/core/source-truth-docs.js';
+import {
+  inspectSourceTruth,
+  type SourceTruthInspectionReport,
+} from '../../src/core/source-truth.js';
+
+const tempDirs: string[] = [];
+
+async function makeTempDir(prefix: string): Promise<string> {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), prefix));
+  tempDirs.push(dir);
+
+  return dir;
+}
+
+function sha256(content: string | Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+async function readJson<T>(path: string): Promise<T> {
+  return JSON.parse(await readFile(path, 'utf-8')) as T;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe('source-truth docs generation', () => {
+  it('writes deterministic evidence-bound Markdown, raw report, and manifest files', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-');
+    const sourceDir = join(dir, 'source');
+    const firstOutputDir = join(dir, 'out-a');
+    const secondOutputDir = join(dir, 'out-b');
+    await mkdir(sourceDir, { recursive: true });
+
+    const alphaSource = [
+      'export const alpha = 1;',
+      'export function makeAlpha() {',
+      '  return alpha;',
+      '}',
+      'export { alpha as renamedAlpha };',
+      "export * from './zeta';",
+      '',
+    ].join('\n');
+    const zetaSource = ['export class Zeta {}', 'export default Zeta;', ''].join('\n');
+    await writeFile(join(sourceDir, 'zeta.ts'), zetaSource, 'utf-8');
+    await writeFile(join(sourceDir, 'alpha.ts'), alphaSource, 'utf-8');
+
+    const firstResult = await generateSourceTruthDocs({
+      source: sourceDir,
+      outputDir: firstOutputDir,
+    });
+    const secondResult = await generateSourceTruthDocs({
+      source: sourceDir,
+      outputDir: secondOutputDir,
+    });
+
+    expect((await readdir(firstOutputDir)).sort()).toEqual([
+      'manifest.json',
+      'source-truth-report.json',
+      'source-truth.md',
+    ]);
+
+    const report = await readJson<SourceTruthInspectionReport>(
+      join(firstOutputDir, 'source-truth-report.json')
+    );
+    const manifest = await readJson<SourceTruthDocsManifest>(join(firstOutputDir, 'manifest.json'));
+    const markdown = await readFile(join(firstOutputDir, 'source-truth.md'), 'utf-8');
+    const secondManifestText = await readFile(join(secondOutputDir, 'manifest.json'), 'utf-8');
+    const secondMarkdown = await readFile(join(secondOutputDir, 'source-truth.md'), 'utf-8');
+    const secondReportText = await readFile(
+      join(secondOutputDir, 'source-truth-report.json'),
+      'utf-8'
+    );
+
+    expect(report).toEqual(firstResult.report);
+    expect(JSON.stringify(report, null, 2) + '\n').toEqual(secondReportText);
+    expect(markdown).toEqual(secondMarkdown);
+    expect(JSON.stringify(manifest, null, 2) + '\n').toEqual(secondManifestText);
+    expect(firstResult.outputDir).toBe(firstOutputDir);
+    expect(secondResult.outputDir).toBe(secondOutputDir);
+
+    expect(markdown).toContain('### `alpha.ts`');
+    expect(markdown.indexOf('### `alpha.ts`')).toBeLessThan(markdown.indexOf('### `zeta.ts`'));
+    expect(markdown).toContain('- `renamedAlpha`');
+    expect(markdown).toContain('  - Fact kind: `re-exported-symbol`');
+    expect(markdown).toContain('  - Symbol kind: `unknown`');
+    expect(markdown).toContain('  - Original name: `alpha`');
+    expect(markdown).toContain('  - Module specifier: `./zeta`');
+    expect(markdown).toContain('  - Lines: `6-6`');
+    expect(markdown).toContain('- No runtime behavior is inferred.');
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(/\bverified\b/i);
+
+    expect(manifest).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'source-truth-local-docs',
+      source: {
+        input: sourceDir,
+        resolvedPath: sourceDir,
+        type: 'directory',
+      },
+      inspection: {
+        schemaVersion: '0.1.0',
+        mode: 'source-truth-local-evidence',
+        warnings: [],
+      },
+    });
+    expect(manifest.sourceFiles).toEqual([
+      {
+        path: 'alpha.ts',
+        resolvedPath: join(sourceDir, 'alpha.ts'),
+        byteSize: Buffer.byteLength(alphaSource),
+        hash: `sha256:${sha256(alphaSource)}`,
+        factCount: 4,
+        parseDiagnosticCount: 0,
+      },
+      {
+        path: 'zeta.ts',
+        resolvedPath: join(sourceDir, 'zeta.ts'),
+        byteSize: Buffer.byteLength(zetaSource),
+        hash: `sha256:${sha256(zetaSource)}`,
+        factCount: 2,
+        parseDiagnosticCount: 0,
+      },
+    ]);
+    expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'source-truth-report.json',
+      'source-truth.md',
+    ]);
+
+    for (const output of manifest.generatedOutputs) {
+      const bytes = await readFile(join(firstOutputDir, output.path));
+
+      expect(output.byteSize).toBe(bytes.byteLength);
+      expect(output.hash).toBe(`sha256:${sha256(bytes)}`);
+    }
+  });
+
+  it('includes inspector warnings and syntax limitations without adding behavior claims', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-warnings-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(
+      join(sourceDir, 'broken.ts'),
+      ['export const broken = ;', 'export const after = true;', ''].join('\n'),
+      'utf-8'
+    );
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const markdown = formatSourceTruthMarkdown(report);
+
+    expect(report.warnings).toEqual(['Syntax diagnostics in file: broken.ts (1)']);
+    expect(markdown).toContain('- Inspector warning: Syntax diagnostics in file: broken.ts (1)');
+    expect(markdown).toContain('- Re-export targets and export-all targets are not resolved.');
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(/\bverified\b/i);
+  });
+
+  it('fails honestly and writes failure details when no extractable facts are found', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-empty-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'notes.md'), '# Notes\n', 'utf-8');
+
+    let thrown: unknown;
+
+    try {
+      await generateSourceTruthDocs({ source: sourceDir, outputDir });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(SourceTruthDocsNoFactsError);
+    expect(await pathExists(join(outputDir, 'source-truth.md'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'source-truth-report.json'))).toBe(true);
+
+    const failure = await readJson<SourceTruthDocsFailure>(join(outputDir, 'failure.json'));
+
+    expect(failure).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'source-truth-local-docs-failure',
+      reason: 'no-extractable-source-truth-facts',
+      message: 'No extractable source-truth facts were found for the explicit local source path.',
+      source: {
+        input: sourceDir,
+        resolvedPath: sourceDir,
+        type: 'directory',
+      },
+      evidenceReport: {
+        path: 'source-truth-report.json',
+      },
+    });
+    expect('files' in failure.evidenceReport).toBe(false);
+    const report = await readJson<SourceTruthInspectionReport>(
+      join(outputDir, failure.evidenceReport.path)
+    );
+    expect(report.facts).toEqual([]);
+    expect(report.warnings).toEqual(['Skipped unsupported file: notes.md']);
+  });
+
+  it('rejects an output directory inside the source before writing artifacts', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-overlap-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(sourceDir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export const value = true;\n', 'utf-8');
+
+    await expect(generateSourceTruthDocs({ source: sourceDir, outputDir })).rejects.toThrow(
+      'source-truth generate --output-dir must not be the same as, or inside, the explicit --source path'
+    );
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects an existing output symlink that resolves inside the source before writing artifacts', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-output-symlink-');
+    const sourceDir = join(dir, 'source');
+    const sourceOutputTarget = join(sourceDir, 'generated');
+    const outputDir = join(dir, 'output-link');
+    await mkdir(sourceOutputTarget, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export const value = true;\n', 'utf-8');
+    await symlink(sourceOutputTarget, outputDir, 'dir');
+
+    await expect(generateSourceTruthDocs({ source: sourceDir, outputDir })).rejects.toThrow(
+      'source-truth generate --output-dir must not be the same as, or inside, the explicit --source path'
+    );
+    expect(await pathExists(join(sourceOutputTarget, 'source-truth-report.json'))).toBe(false);
+    expect(await pathExists(join(sourceOutputTarget, 'source-truth.md'))).toBe(false);
+    expect(await pathExists(join(sourceOutputTarget, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(sourceOutputTarget, 'failure.json'))).toBe(false);
+  });
+
+  it('rejects an output path below a symlinked parent that resolves inside the source', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-output-parent-symlink-');
+    const sourceDir = join(dir, 'source');
+    const sourceOutputParent = join(sourceDir, 'generated-parent');
+    const outputParent = join(dir, 'output-parent-link');
+    const outputDir = join(outputParent, 'nested');
+    await mkdir(sourceOutputParent, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export const value = true;\n', 'utf-8');
+    await symlink(sourceOutputParent, outputParent, 'dir');
+
+    await expect(generateSourceTruthDocs({ source: sourceDir, outputDir })).rejects.toThrow(
+      'source-truth generate --output-dir must not be the same as, or inside, the explicit --source path'
+    );
+    expect(await pathExists(join(sourceOutputParent, 'nested'))).toBe(false);
+    expect(await pathExists(join(sourceOutputParent, 'source-truth-report.json'))).toBe(false);
+    expect(await pathExists(join(sourceOutputParent, 'source-truth.md'))).toBe(false);
+    expect(await pathExists(join(sourceOutputParent, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(sourceOutputParent, 'failure.json'))).toBe(false);
+  });
+
+  it('clears stale generated artifacts when switching from success to no-facts failure', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-success-failure-');
+    const sourceDir = join(dir, 'source');
+    const emptySourceDir = join(dir, 'empty-source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(emptySourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export const value = true;\n', 'utf-8');
+    await writeFile(join(emptySourceDir, 'notes.md'), '# Notes\n', 'utf-8');
+
+    await generateSourceTruthDocs({ source: sourceDir, outputDir });
+    expect(await pathExists(join(outputDir, 'source-truth.md'))).toBe(true);
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(true);
+
+    await expect(generateSourceTruthDocs({ source: emptySourceDir, outputDir })).rejects.toThrow(
+      SourceTruthDocsNoFactsError
+    );
+
+    expect(await pathExists(join(outputDir, 'source-truth.md'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'failure.json'))).toBe(true);
+    const report = await readJson<SourceTruthInspectionReport>(
+      join(outputDir, 'source-truth-report.json')
+    );
+    expect(report.source.resolvedPath).toBe(emptySourceDir);
+    expect(report.facts).toEqual([]);
+  });
+
+  it('clears stale failure artifacts when switching from no-facts failure to success', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-failure-success-');
+    const sourceDir = join(dir, 'source');
+    const emptySourceDir = join(dir, 'empty-source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(emptySourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export const value = true;\n', 'utf-8');
+    await writeFile(join(emptySourceDir, 'notes.md'), '# Notes\n', 'utf-8');
+
+    await expect(generateSourceTruthDocs({ source: emptySourceDir, outputDir })).rejects.toThrow(
+      SourceTruthDocsNoFactsError
+    );
+    expect(await pathExists(join(outputDir, 'failure.json'))).toBe(true);
+
+    await generateSourceTruthDocs({ source: sourceDir, outputDir });
+
+    expect(await pathExists(join(outputDir, 'failure.json'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'source-truth.md'))).toBe(true);
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(true);
+    const report = await readJson<SourceTruthInspectionReport>(
+      join(outputDir, 'source-truth-report.json')
+    );
+    expect(report.source.resolvedPath).toBe(sourceDir);
+    expect(report.facts.map((fact) => fact.exportedName)).toEqual(['value']);
+  });
+});

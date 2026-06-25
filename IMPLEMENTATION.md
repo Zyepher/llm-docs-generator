@@ -230,6 +230,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit website `discover --url` bounded inspection report
 - [x] Explicit `source-truth inspect --source` deterministic evidence report
       for conservative TypeScript/JavaScript export facts
+- [x] Explicit `source-truth generate --source --output-dir` Markdown export
+      facts with raw evidence report and provenance manifest
 - [x] RST parser foundation for explicit local Python-style documentation
 - [x] Static HTML parser foundation for explicit local rendered-HTML fallback
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
@@ -267,6 +269,13 @@ Current source-truth evidence scope:
 
 - `llm-docs source-truth inspect --source <path>` accepts an explicit local file
   or directory and prints deterministic JSON to stdout.
+- `llm-docs source-truth generate --source <path> --output-dir <dir>` accepts
+  the same explicit local source boundary, reuses the inspector, and writes
+  `source-truth-report.json`, `source-truth.md`, and `manifest.json` on success.
+  It rejects output directories that are the source path or inside the source
+  path. If no extractable facts are found, it exits non-zero and writes
+  `failure.json` referencing the raw evidence report without producing
+  Markdown.
 - Traversal is bounded by depth, entry, file, and per-file byte limits. It does
   not follow symlinks and skips common dependency/build directories such as
   `node_modules`, `dist`, `build`, `coverage`, and `.git`.
@@ -276,9 +285,12 @@ Current source-truth evidence scope:
 - Every extracted fact cites a normalized source path and line range. Supported
   inspected files include byte size and SHA-256 hash; unsupported or oversized
   files are reported as skipped with warnings.
-- The report does not generate documentation, verify existing documentation
-  claims, infer runtime behavior, decide task fit, select sources, assign
-  authority, or summarize behavior beyond observed export facts.
+- Generated source-truth Markdown groups observed facts by normalized source
+  file and lists exported names, original names where different, symbol kinds,
+  module specifiers, line ranges, and warnings/limitations. It does not verify
+  existing documentation claims, infer runtime behavior, decide task fit, select
+  sources, assign authority, or summarize behavior beyond observed export
+  facts.
 
 Current OpenAPI / Swagger parser scope:
 

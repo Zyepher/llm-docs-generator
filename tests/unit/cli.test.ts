@@ -28,6 +28,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { discoverLocalSource, discoverLocalSources } from '../../src/core/discovery.js';
 import { discoverRepo } from '../../src/core/repo-discovery.js';
 import type { SourceTruthInspectionReport } from '../../src/core/source-truth.js';
+import type {
+  SourceTruthDocsFailure,
+  SourceTruthDocsManifest,
+} from '../../src/core/source-truth-docs.js';
 import { discoverWebsite } from '../../src/core/website-discovery.js';
 
 const execFileAsync = promisify(execFile);
@@ -863,13 +867,15 @@ describe('CLI compatibility behavior', () => {
       warnings: [],
     });
     expect(report.files.map((file) => file.path)).toEqual(['index.ts']);
-    expect(report.facts.map((fact) => ({
-      kind: fact.kind,
-      symbolKind: fact.symbolKind,
-      name: fact.name,
-      exportedName: fact.exportedName,
-      provenance: fact.provenance,
-    }))).toEqual([
+    expect(
+      report.facts.map((fact) => ({
+        kind: fact.kind,
+        symbolKind: fact.symbolKind,
+        name: fact.name,
+        exportedName: fact.exportedName,
+        provenance: fact.provenance,
+      }))
+    ).toEqual([
       {
         kind: 'exported-symbol',
         symbolKind: 'value',
@@ -897,6 +903,114 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).not.toMatch(/\bverified\b/i);
     expect(stdout).not.toMatch(/\bsummary\b/i);
     expect(stderr).not.toContain('Source-truth inspection failed');
+  });
+
+  it('generates source-truth Markdown, evidence report, and manifest for an explicit local source', async () => {
+    const dir = await mkdtemp(
+      join(await realpath(tmpdir()), 'llm-docs-source-truth-generate-cli-')
+    );
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    const source = [
+      'export const value = 1;',
+      "export { value as renamedValue } from './value';",
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'index.ts'), source, 'utf-8');
+
+    const { stdout, stderr } = await runCli([
+      'source-truth',
+      'generate',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    const manifest = JSON.parse(
+      await readFile(join(outputDir, 'manifest.json'), 'utf-8')
+    ) as SourceTruthDocsManifest;
+    const report = JSON.parse(
+      await readFile(join(outputDir, 'source-truth-report.json'), 'utf-8')
+    ) as SourceTruthInspectionReport;
+    const markdown = await readFile(join(outputDir, 'source-truth.md'), 'utf-8');
+
+    expect(stdout).toContain('Source-truth docs generated');
+    expect(stdout).toContain(`Facts: ${report.facts.length}`);
+    expect(stderr).not.toContain('Source-truth generation failed');
+    expect(report.facts.map((fact) => fact.exportedName)).toEqual(['value', 'renamedValue']);
+    expect(markdown).toContain('### `index.ts`');
+    expect(markdown).toContain('- `renamedValue`');
+    expect(markdown).toContain('  - Original name: `value`');
+    expect(markdown).toContain('  - Module specifier: `./value`');
+    expect(manifest).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'source-truth-local-docs',
+      source: {
+        input: sourceDir,
+        resolvedPath: sourceDir,
+        type: 'directory',
+      },
+      inspection: {
+        mode: 'source-truth-local-evidence',
+        warnings: [],
+      },
+      sourceFiles: [
+        {
+          path: 'index.ts',
+          resolvedPath: join(sourceDir, 'index.ts'),
+          byteSize: Buffer.byteLength(source),
+          hash: `sha256:${createHash('sha256').update(source).digest('hex')}`,
+          factCount: 2,
+        },
+      ],
+    });
+    expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'source-truth-report.json',
+      'source-truth.md',
+    ]);
+
+    const combinedOutput = `${stdout}\n${stderr}\n${markdown}\n${JSON.stringify(manifest)}`;
+    expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(combinedOutput).not.toMatch(/\bofficial\b/i);
+    expect(combinedOutput).not.toMatch(/\bverified\b/i);
+  });
+
+  it('fails source-truth generation with failure details when no export facts are found', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-source-truth-empty-cli-'));
+    tempDirs.push(dir);
+
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'notes.md'), '# Notes\n', 'utf-8');
+
+    const result = await runCliWithExit([
+      'source-truth',
+      'generate',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+    const failure = JSON.parse(
+      await readFile(join(outputDir, 'failure.json'), 'utf-8')
+    ) as SourceTruthDocsFailure;
+    const report = JSON.parse(
+      await readFile(join(outputDir, 'source-truth-report.json'), 'utf-8')
+    ) as SourceTruthInspectionReport;
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Source-truth generation failed');
+    expect(result.stderr).toContain('Failure report:');
+    expect(result.stderr).toContain('Evidence report:');
+    await expect(readFile(join(outputDir, 'source-truth.md'), 'utf-8')).rejects.toThrow();
+    await expect(readFile(join(outputDir, 'manifest.json'), 'utf-8')).rejects.toThrow();
+    expect(failure.reason).toBe('no-extractable-source-truth-facts');
+    expect(failure.evidenceReport).toEqual({ path: 'source-truth-report.json' });
+    expect(report.facts).toEqual([]);
   });
 
   it('writes a bounded website discovery report from an explicit URL and same-origin well-known resources', async () => {

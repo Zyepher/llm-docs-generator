@@ -59,7 +59,7 @@ program
 
 const sourceTruthCommand = program
   .command('source-truth')
-  .description('Inspect explicit local source code and print a bounded factual evidence report');
+  .description('Inspect explicit local source code and generate bounded source-truth export docs');
 
 sourceTruthCommand
   .command('inspect')
@@ -74,6 +74,41 @@ sourceTruthCommand
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Source-truth inspection failed: ${errorMsg}`));
+      process.exit(1);
+    }
+  });
+
+sourceTruthCommand
+  .command('generate')
+  .description('Generate evidence-bound Markdown docs from an explicit local source path')
+  .requiredOption('--source <path>', 'Explicit local file or directory to inspect')
+  .requiredOption('--output-dir <dir>', 'Directory for source-truth output files')
+  .action(async (options: { source: string; outputDir: string }) => {
+    try {
+      const { generateSourceTruthDocs } = await import('./core/source-truth-docs.js');
+      const result = await generateSourceTruthDocs({
+        source: options.source,
+        outputDir: options.outputDir,
+      });
+
+      console.log(chalk.bold('Source-truth docs generated'));
+      console.log(`  Source: ${result.report.source.resolvedPath}`);
+      console.log(`  Facts: ${result.report.facts.length}`);
+      console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
+      console.log(`  Markdown: ${chalk.cyan(result.markdownPath)}`);
+      console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
+    } catch (error) {
+      const { SourceTruthDocsNoFactsError } = await import('./core/source-truth-docs.js');
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      if (error instanceof SourceTruthDocsNoFactsError) {
+        console.error(chalk.red(`Source-truth generation failed: ${errorMsg}`));
+        console.error(chalk.yellow(`Failure report: ${error.failurePath}`));
+        console.error(chalk.yellow(`Evidence report: ${error.reportPath}`));
+      } else {
+        console.error(chalk.red(`Source-truth generation failed: ${errorMsg}`));
+      }
+
       process.exit(1);
     }
   });
