@@ -92,6 +92,34 @@ export const CategoriesConfigSchema = z.object({
 export type CategoriesConfig = z.infer<typeof CategoriesConfigSchema>;
 
 // ============================================================================
+// SOURCE GENERATION PRESET SCHEMAS
+// ============================================================================
+
+export const PresetOutputConfigSchema = z
+  .object({
+    filenamePrefix: z.string().min(1),
+    title: z.string().min(1),
+    formats: z.array(z.string()).optional(),
+  })
+  .strict();
+
+export type PresetOutputConfig = z.infer<typeof PresetOutputConfigSchema>;
+
+export const PresetConfigSchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().min(1),
+    format: z.string().min(1),
+    description: z.string().optional(),
+    output: PresetOutputConfigSchema,
+    systemPrompt: z.string().min(1),
+    manifest: z.record(z.unknown()).optional(),
+  })
+  .strict();
+
+export type PresetConfig = z.infer<typeof PresetConfigSchema>;
+
+// ============================================================================
 // VALIDATION HELPERS
 // ============================================================================
 

@@ -60,6 +60,8 @@ Current implemented capabilities include:
 - parsers for OpenRef, OpenAPI/Swagger, Markdown, MDX, RST, DocC, and HTML
   fallback extraction from explicit local sources
 - agent-optimized Markdown output for explicit local source generation
+- a scoped `swift-book` preset that adds deterministic Markdown output
+  defaults only when the agent or user supplies the exact local source path
 - opt-in semantic chunk JSONL output for explicit local source generation
 - manifests with source provenance, content hashes, generated file hashes,
   parser/formatter metadata, and warnings
@@ -70,8 +72,8 @@ Current implemented capabilities include:
 - read-only bundled agent context metadata
 
 Planned capabilities such as refresh, diff, host setup helpers, broad crawling,
-automatic source selection, and source-code verification are not implemented in
-the current CLI.
+automatic source selection, source-code verification, and additional presets
+are not implemented in the current CLI.
 
 ## Command Model
 
@@ -89,6 +91,7 @@ llm-docs discover --url https://supabase.com/docs/reference/swift --output-dir .
 
 llm-docs generate --source ./docs --format markdown --output-dir ./agent-docs
 llm-docs generate --source ./docs --format markdown --chunks jsonl --output-dir ./agent-docs
+llm-docs generate --source ./TSPL.docc --preset swift-book --output-dir ./swift-book-agent-docs
 llm-docs generate --source ./openapi.yaml --format openapi --output-dir ./api-agent-docs
 
 llm-docs source-truth inspect --source ./src
@@ -170,6 +173,13 @@ When `generate --source` is run with `--chunks jsonl`, it also writes
 `chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a
 generated text output with kind `semantic-chunks-jsonl`, a bounded descriptive
 name, hash, byte size, line count, and deterministic estimated token count.
+
+When `generate --source <path> --preset swift-book` is used, the preset sets
+Markdown format defaults, `swift-book` output naming, the Swift Programming
+Language title, neutral source-derived system prompt, and non-authoritative
+preset provenance in the manifest. It does not infer `TSPL.docc`, select a
+repository path, verify source truth, claim completeness, or decide that the
+supplied path is the correct source.
 
 ## Source-Truth Codebase Docs
 

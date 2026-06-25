@@ -101,6 +101,7 @@ npx tsx src/cli.ts source-truth generate --source ./src --output-dir ./reports/s
 npx tsx src/cli.ts agent context --json
 npx tsx src/cli.ts generate --source ./docs --format markdown --output-dir ./agent-docs
 npx tsx src/cli.ts generate --source ./docs --format markdown --chunks jsonl --output-dir ./agent-docs
+npx tsx src/cli.ts generate --source ./TSPL.docc --preset swift-book --output-dir ./swift-book-agent-docs
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
 npx tsx src/cli.ts verify --output-dir ./output/swift/v2
@@ -174,9 +175,10 @@ counts, and deterministic estimated token counts.
 
 The current `generate --source <local-file-or-directory>` command supports
 explicit local source docs generation only. It rejects URL-like inputs, missing
-paths, discovery reports, `--source` plus `--sdk`, and all `--preset` requests.
-Its `--format` option is a parser hint supporting `auto`, `markdown`, `mdx`
-through the Markdown parser, `openapi`, `openref`, `rst`, and `html`.
+paths, discovery reports, `--source` plus `--sdk`, unknown presets, and presets
+without `--source`. Its `--format` option is a parser hint supporting `auto`,
+`markdown`, `mdx` through the Markdown parser, `openapi`, `openref`, `rst`, and
+`html`.
 Successful source generation writes `manifest.json` at the requested output
 root and generated LLM docs under `llm-docs/`. When `--chunks jsonl` is
 requested, it also writes `chunks/semantic-chunks.jsonl` from the parsed DocNode
@@ -186,6 +188,15 @@ formatter metadata, source file paths, formats, hashes and byte sizes,
 directory aggregate hash when applicable, generated output hashes, byte sizes,
 line counts, deterministic estimated token counts, output kind/name metadata,
 and warnings.
+
+`--preset swift-book` is implemented only as deterministic defaults for
+explicit local Markdown/DocC-style sources. It sets Markdown generation,
+`swift-book` output naming, the Swift Programming Language title, neutral
+source-derived system prompt, and non-authoritative preset provenance
+in `manifest.json`. It does not infer or append `TSPL.docc`, clone or cache
+repos, select sources, verify source truth, claim completeness, refresh, or
+perform source-code verification. Additional preset names remain
+planned/unsupported.
 
 The current CLI still does not expose refresh or source-code verification. It also
 writes `manifest.json` for successful configured `generate --sdk` tasks with

@@ -129,6 +129,21 @@ interface SourceDocsManifest {
     format: string;
   };
   generatedOutputs: ManifestFileEntry[];
+  preset?: {
+    name: string;
+    configPath: string;
+    displayName: string;
+    description?: string;
+    defaults: {
+      format: string;
+      filenamePrefix: string;
+      title: string;
+      systemPrompt: string;
+      outputFormats?: string[];
+    };
+    metadata?: Record<string, unknown>;
+    limitations: string[];
+  };
   warnings: string[];
 }
 
@@ -722,6 +737,69 @@ async function generateSourceDocsFixture(): Promise<{
   };
 }
 
+async function createSwiftBookSourceFixture(prefix = 'llm-docs-swift-book-'): Promise<{
+  dir: string;
+  sourceDir: string;
+  outputDir: string;
+}> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  const sourceDir = join(dir, 'TSPL.docc');
+  const outputDir = join(dir, 'output');
+
+  await mkdir(join(sourceDir, 'LanguageGuide'), { recursive: true });
+  await mkdir(join(sourceDir, 'ReferenceManual', 'Declarations'), { recursive: true });
+  await writeFile(
+    join(sourceDir, 'GuidedTour.md'),
+    ['# A Swift Tour', '', 'Swift lets you write expressive code.', ''].join('\n'),
+    'utf-8'
+  );
+  await writeFile(
+    join(sourceDir, 'LanguageGuide', 'BasicOperators.md'),
+    [
+      '# Basic Operators',
+      '',
+      'Operators are unary, binary, or ternary.',
+      '',
+      '## Assignment Operator',
+      '',
+      'Assignment updates a value.',
+      '',
+    ].join('\n'),
+    'utf-8'
+  );
+  await writeFile(
+    join(sourceDir, 'ReferenceManual', 'Declarations', 'Attributes.md'),
+    [
+      '# Attributes',
+      '',
+      'Attributes provide more information about declarations.',
+      '',
+      '## Declaration Attributes',
+      '',
+      '@available describes platform availability.',
+      '',
+    ].join('\n'),
+    'utf-8'
+  );
+
+  return { dir, sourceDir, outputDir };
+}
+
+async function createPresetConfigDir(presetConfig: unknown): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'llm-docs-preset-config-'));
+  tempDirs.push(dir);
+
+  await mkdir(join(dir, 'presets'), { recursive: true });
+  await writeFile(
+    join(dir, 'presets', 'swift-book.json'),
+    `${JSON.stringify(presetConfig, null, 2)}\n`,
+    'utf-8'
+  );
+
+  return dir;
+}
+
 function compareStringsByCodeUnit(a: string, b: string): number {
   const length = Math.min(a.length, b.length);
 
@@ -823,6 +901,26 @@ describe('CLI compatibility behavior', () => {
     expect(offenderMessages).toEqual([]);
   });
 
+  it('ships the swift-book preset without source path or section-selection defaults', async () => {
+    const preset = JSON.parse(
+      await readFile(join(repoRoot, 'config/presets/swift-book.json'), 'utf-8')
+    ) as Record<string, unknown>;
+
+    expect(preset).toMatchObject({
+      id: 'swift-book',
+      name: 'Swift Programming Language',
+      format: 'markdown',
+      output: {
+        filenamePrefix: 'swift-book',
+        title: 'Swift Programming Language',
+      },
+    });
+    expect(preset).not.toHaveProperty('source');
+    expect(preset).not.toHaveProperty('sources');
+    expect(preset).not.toHaveProperty('path');
+    expect(preset).not.toHaveProperty('sections');
+  });
+
   it('keeps the root --version option available', async () => {
     const { stdout } = await runCli(['--version']);
 
@@ -858,7 +956,7 @@ describe('CLI compatibility behavior', () => {
     );
   }, 15000);
 
-  it('describes generate options as local source mode, configured SDK guards, or planned unsupported modes', async () => {
+  it('describes generate options as local source mode, scoped preset mode, or configured SDK guards', async () => {
     const { stdout } = await runCli(['generate', '--help']);
 
     expect(stdout).toMatch(
@@ -868,7 +966,7 @@ describe('CLI compatibility behavior', () => {
       /--format <format>\s+Source parser hint: auto, markdown, mdx, openapi,\s+openref, rst, html; SDK guard: openref or\s+openref-0\.1/
     );
     expect(stdout).toMatch(/--chunks <format>\s+Source-only semantic chunk export: jsonl/);
-    expect(stdout).toMatch(/--preset <name>\s+Planned preset generation input \(unsupported\)/);
+    expect(stdout).toMatch(/--preset <name>\s+Source-only deterministic preset: swift-book/);
     expect(stdout).not.toContain('candidate');
   });
 
@@ -999,6 +1097,7 @@ describe('CLI compatibility behavior', () => {
       'source-truth-generate',
       'agent-context',
       'generate-source',
+      'generate-preset-swift-book',
       'generate-sdk',
       'verify-configured-sdk',
       'verify-source-docs',
@@ -1006,7 +1105,7 @@ describe('CLI compatibility behavior', () => {
       'validate-sdk',
     ]);
     expect([...planned.keys()]).toEqual([
-      'generate-preset',
+      'generate-preset-additional',
       'refresh',
       'source-code-verification',
       'broad-crawling',
@@ -1052,6 +1151,7 @@ describe('CLI compatibility behavior', () => {
       '--source <path>',
       '--format auto|markdown|mdx|openapi|openref|rst|html',
       '--chunks jsonl',
+      '--preset swift-book',
     ]);
     expect(implemented.get('generate-source')?.limitations).toEqual(
       expect.arrayContaining([
@@ -1059,11 +1159,30 @@ describe('CLI compatibility behavior', () => {
         'no URL fetching',
         'no discovery report consumption',
         'no candidate auto-selection',
-        'no preset generation',
+        'swift-book preset requires explicit --source and adds deterministic output defaults only',
         'no source selection decision',
         'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
       ])
     );
+    expect(implemented.get('generate-preset-swift-book')).toMatchObject({
+      command: 'generate',
+      mode: 'generate --source --preset swift-book',
+      status: 'implemented',
+      inputBoundary: 'explicit local Markdown or DocC-style source path',
+      options: ['--source <path>', '--preset swift-book', '--format markdown', '--chunks jsonl'],
+      outputFiles: [
+        'manifest.json',
+        'llm-docs/swift-book-full-llms.txt',
+        'chunks/semantic-chunks.jsonl',
+      ],
+      limitations: expect.arrayContaining([
+        'requires explicit --source',
+        'Markdown parser only',
+        'no TSPL.docc path inference',
+        'no repo clone or cache',
+        'no automatic source selection',
+      ]),
+    });
     expect(implemented.get('generate-sdk')?.outputFiles).toEqual([
       'manifest.json',
       'parsed/<sdk>-<resolved-version>-spec.json',
@@ -1087,8 +1206,8 @@ describe('CLI compatibility behavior', () => {
       ])
     );
     expect(planned.has('generate-source')).toBe(false);
-    expect(planned.get('generate-preset')?.reason).toBe(
-      'preset generation is not implemented; the current generate command supports explicit local source generation and configured OpenRef SDK generation only'
+    expect(planned.get('generate-preset-additional')?.reason).toBe(
+      'only --preset swift-book over an explicit local --source path is implemented; additional presets remain planned'
     );
     expect([...implemented.values()].map((capability) => capability.mode)).toContain(
       'generate --source'
@@ -1172,7 +1291,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 12');
+    expect(stdout).toContain('Implemented modes: 13');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
@@ -3500,6 +3619,129 @@ describe('CLI compatibility behavior', () => {
     }
   });
 
+  it('generates swift-book preset docs from an explicit nested DocC-style Markdown directory', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture();
+
+    const { stdout } = await runCli([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+    const outputPath = join(outputDir, 'llm-docs', 'swift-book-full-llms.txt');
+    const fullDoc = await readFile(outputPath, 'utf-8');
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(stdout).toContain('Local source docs generated');
+    expect(stdout).toContain('Format: markdown');
+    expect(stdout).toContain('Preset: swift-book');
+    expect(manifest.source).toMatchObject({
+      input: sourceDir,
+      resolvedPath: sourceDir,
+      type: 'directory',
+      formatHint: 'markdown',
+      resolvedFormat: 'markdown',
+      fileCount: 3,
+    });
+    expect(manifest.sourceFiles.map((file) => file.path)).toEqual([
+      'GuidedTour.md',
+      'LanguageGuide/BasicOperators.md',
+      'ReferenceManual/Declarations/Attributes.md',
+    ]);
+    expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'llm-docs/swift-book-full-llms.txt',
+    ]);
+    expect(manifest.preset).toMatchObject({
+      name: 'swift-book',
+      configPath: join(repoRoot, 'config/presets/swift-book.json'),
+      displayName: 'Swift Programming Language',
+      defaults: {
+        format: 'markdown',
+        filenamePrefix: 'swift-book',
+        title: 'Swift Programming Language',
+        systemPrompt:
+          'Generated Swift Programming Language docs from an explicit local source path supplied by the user or agent, formatted for LLM and AI coding assistant consumption.',
+        outputFormats: ['txt'],
+      },
+      metadata: {
+        sourceSelection: 'explicit-local-source-required',
+        sourceVerification: 'not-performed',
+        sourceTruthClaim: 'not-claimed',
+      },
+      limitations: expect.arrayContaining([
+        'Requires an explicit local --source path.',
+        'Does not select or infer source paths.',
+        'Does not claim source truth.',
+      ]),
+    });
+    expect(manifest.source.resolvedPath).toBe(sourceDir);
+    expect(manifest.sourceFiles.every((file) => file.resolvedPath.startsWith(sourceDir))).toBe(
+      true
+    );
+    expect(fullDoc).toContain(
+      '<SYSTEM>Generated Swift Programming Language docs from an explicit local source path supplied by the user or agent, formatted for LLM and AI coding assistant consumption.</SYSTEM>'
+    );
+    expect(fullDoc).not.toContain('Complete Swift Programming Language documentation');
+    expect(fullDoc).toContain('# Swift Programming Language');
+    expect(fullDoc).toContain('A Swift Tour');
+    expect(fullDoc).toContain('Basic Operators');
+    expect(fullDoc).toContain('Attributes');
+    expect(fullDoc).not.toContain('# TSPL.docc');
+    expect(verifyResult.stdout).toContain('Manifest verification');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('preserves semantic chunk JSONL compatibility for the swift-book preset', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture(
+      'llm-docs-swift-book-chunks-'
+    );
+
+    const { stdout } = await runCli([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifest = JSON.parse(
+      await readFile(join(outputDir, 'manifest.json'), 'utf-8')
+    ) as SourceDocsManifest;
+    const chunkOutput = manifest.generatedOutputs.find(
+      (output) => output.kind === 'semantic-chunks-jsonl'
+    );
+    const chunkPath = join(outputDir, 'chunks', 'semantic-chunks.jsonl');
+    const chunkJsonl = await readFile(chunkPath, 'utf-8');
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(stdout).toContain('Preset: swift-book');
+    expect(stdout).toContain('Chunk export: chunks/semantic-chunks.jsonl');
+    expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'chunks/semantic-chunks.jsonl',
+      'llm-docs/swift-book-full-llms.txt',
+    ]);
+    expect(chunkOutput).toMatchObject({
+      path: 'chunks/semantic-chunks.jsonl',
+      kind: 'semantic-chunks-jsonl',
+      name: 'semantic chunks JSONL export',
+    });
+    expect(chunkJsonl.endsWith('\n')).toBe(true);
+    expect(chunkJsonl).toContain('Basic Operators');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
   it('generates opt-in semantic chunk JSONL for local source docs and verifies the manifest', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-chunks-'));
     tempDirs.push(dir);
@@ -3798,7 +4040,9 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain(
       'Supported generation modes: generate --source <local-file-or-directory>'
     );
-    expect(result.stderr).toContain('Preset generation remains planned/unsupported');
+    expect(result.stderr).toContain(
+      'Preset generation is limited to --preset swift-book with an explicit --source path'
+    );
     expect(result.stdout).not.toContain('Processing');
     expect(await pathExists(outputDir)).toBe(false);
     expect(await findManifestFiles(configDir)).toEqual([]);
@@ -3925,8 +4169,8 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(configDir)).toBe(false);
   });
 
-  it('rejects generate --preset honestly without requiring configured SDK generation', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-preset-'));
+  it('rejects generate --preset without an explicit source before output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-preset-no-source-'));
     tempDirs.push(dir);
     const outputDir = join(dir, 'output');
 
@@ -3939,9 +4183,11 @@ describe('CLI compatibility behavior', () => {
     ]);
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('Generate failed: generate --preset is not implemented.');
     expect(result.stderr).toContain(
-      'Preset generation remains planned/unsupported in the current CLI.'
+      'Generate failed: generate --preset swift-book requires --source <explicit-local-docs-path>; presets do not select source paths.'
+    );
+    expect(result.stderr).toContain(
+      'Preset generation is limited to --preset swift-book with an explicit --source path'
     );
     expect(result.stderr).toContain('generate --source <local-file-or-directory>');
     expect(result.stderr).toContain('generate --sdk <sdk>');
@@ -3949,8 +4195,51 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(outputDir)).toBe(false);
   });
 
-  it('rejects generate --preset before configured SDK generation even with sdk and format', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-preset-with-sdk-'));
+  it('removes stale source-doc artifacts after preset validation fails without source', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-preset-no-source-stale-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'docs.md');
+    const outputDir = join(dir, 'output');
+    const keepPath = join(outputDir, 'keep.txt');
+
+    await writeFile(sourcePath, '# Docs\n\n## Intro\n\nHello.\n', 'utf-8');
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+    await writeFile(keepPath, 'keep me\n', 'utf-8');
+
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(true);
+    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(true);
+    expect(await pathExists(join(outputDir, 'chunks'))).toBe(true);
+
+    const result = await runCliWithExit([
+      'generate',
+      '--preset',
+      'swift-book',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: generate --preset swift-book requires --source <explicit-local-docs-path>; presets do not select source paths.'
+    );
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'chunks'))).toBe(false);
+    expect(await readFile(keepPath, 'utf-8')).toBe('keep me\n');
+  });
+
+  it('rejects generate --preset with configured SDK generation before config or output work', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-preset-sdk-'));
     tempDirs.push(dir);
     const configDir = join(dir, 'missing-config');
     const outputDir = join(dir, 'output');
@@ -3970,15 +4259,212 @@ describe('CLI compatibility behavior', () => {
     ]);
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('Generate failed: generate --preset is not implemented.');
     expect(result.stderr).toContain(
-      'Preset generation remains planned/unsupported in the current CLI.'
+      'Generate failed: generate --preset is supported only with explicit --source and cannot be used with --sdk.'
     );
     expect(result.stderr).not.toContain('Fatal error');
     expect(result.stderr).not.toContain(configDir);
     expect(result.stdout).not.toContain('Processing');
     expect(await pathExists(outputDir)).toBe(false);
     expect(await pathExists(configDir)).toBe(false);
+  });
+
+  it('rejects unknown generate --preset names before output work', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture(
+      'llm-docs-generate-preset-unknown-'
+    );
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'unknown-preset',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      "Generate failed: Unknown preset 'unknown-preset'. Supported source-generation presets: swift-book."
+    );
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects incompatible explicit formats for the swift-book preset before output work', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture(
+      'llm-docs-generate-preset-format-'
+    );
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--format',
+      'html',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Generate failed: --format html is not compatible with --preset swift-book; supported preset formats are markdown.'
+    );
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects invalid swift-book preset config schemas before output work', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture(
+      'llm-docs-generate-preset-invalid-config-'
+    );
+    const configDir = await createPresetConfigDir({
+      id: 'swift-book',
+      name: 'Swift Programming Language',
+      format: 'markdown',
+      output: {
+        filenamePrefix: 'swift-book',
+      },
+      systemPrompt: 'Generated docs from an explicit local source.',
+    });
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Generate failed:');
+    expect(result.stderr).toContain('output');
+    expect(result.stderr).toContain('title');
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects swift-book preset configs with nested source-selection fields', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture(
+      'llm-docs-generate-preset-nested-source-'
+    );
+    const configDir = await createPresetConfigDir({
+      id: 'swift-book',
+      name: 'Swift Programming Language',
+      format: 'markdown',
+      output: {
+        filenamePrefix: 'swift-book',
+        title: 'Swift Programming Language',
+        formats: ['txt'],
+      },
+      systemPrompt: 'Generated docs from an explicit local source.',
+      manifest: {
+        sourceSelection: 'explicit-local-source-required',
+        sourceVerification: 'not-performed',
+        sourceTruthClaim: 'not-claimed',
+        source: 'TSPL.docc',
+      },
+    });
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      "Generate failed: Preset 'swift-book' must not define source paths or source-selection fields; pass --source explicitly"
+    );
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(outputDir)).toBe(false);
+  });
+
+  it('rejects custom swift-book preset metadata and prompt claims before generation writes', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture(
+      'llm-docs-generate-preset-bad-metadata-'
+    );
+    const keepPath = join(outputDir, 'keep.txt');
+    const configDir = await createPresetConfigDir({
+      id: 'swift-book',
+      name: 'Swift Programming Language',
+      format: 'markdown',
+      output: {
+        filenamePrefix: 'swift-book',
+        title: 'Swift Programming Language',
+        formats: ['txt'],
+      },
+      systemPrompt:
+        'Complete Swift Programming Language documentation verified against source truth, authoritative and official.',
+      manifest: {
+        sourceSelection: 'automatic-authoritative-selection',
+        sourceVerification: 'performed',
+        sourceTruthClaim: 'verified',
+      },
+    });
+
+    await runCli([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+    await writeFile(keepPath, 'keep me\n', 'utf-8');
+
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(true);
+    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(true);
+    expect(await pathExists(join(outputDir, 'chunks'))).toBe(true);
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--chunks',
+      'jsonl',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      "Generate failed: Preset 'swift-book' violates the non-authoritative source contract:"
+    );
+    expect(result.stderr).toContain(
+      'preset.metadata.sourceSelection must be explicit-local-source-required'
+    );
+    expect(result.stderr).toContain('preset.metadata.sourceVerification must be not-performed');
+    expect(result.stderr).toContain('preset.metadata.sourceTruthClaim must be not-claimed');
+    expect(result.stderr).toContain('preset.defaults.systemPrompt must not claim completeness');
+    expect(result.stderr).toContain('source truth');
+    expect(result.stderr).toContain('source verification');
+    expect(result.stderr).toContain('authority or official status');
+    expect(result.stdout).not.toContain('Local source docs generated');
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(false);
+    expect(await pathExists(join(outputDir, 'chunks'))).toBe(false);
+    expect(await readFile(keepPath, 'utf-8')).toBe('keep me\n');
   });
 
   it('rejects generate --source plus --sdk before config or output work', async () => {
@@ -4258,9 +4744,7 @@ describe('CLI compatibility behavior', () => {
     ]);
 
     expect(manifestResult.exitCode).toBe(1);
-    expect(manifestResult.stderr).toContain(
-      'file input must not be the source-mode manifest path'
-    );
+    expect(manifestResult.stderr).toContain('file input must not be the source-mode manifest path');
     expect(generatedResult.exitCode).toBe(1);
     expect(generatedResult.stderr).toContain(
       'file input must not be inside the source-mode generated docs directory'
@@ -4309,9 +4793,7 @@ describe('CLI compatibility behavior', () => {
     ]);
 
     expect(manifestResult.exitCode).toBe(1);
-    expect(manifestResult.stderr).toContain(
-      'file input must not be the source-mode manifest path'
-    );
+    expect(manifestResult.stderr).toContain('file input must not be the source-mode manifest path');
     expect(generatedResult.exitCode).toBe(1);
     expect(generatedResult.stderr).toContain(
       'file input must not be inside the source-mode generated docs directory'
@@ -4620,6 +5102,56 @@ describe('CLI compatibility behavior', () => {
     );
     expect(result.stdout).toContain('Failures: 0');
     expect(result.stdout).toContain('Verification passed');
+  });
+
+  it('rejects tampered swift-book preset metadata during source docs verification', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture(
+      'llm-docs-verify-preset-tamper-'
+    );
+
+    await runCli([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+
+    if (manifest.preset === undefined) {
+      throw new Error('expected generated swift-book preset metadata');
+    }
+
+    manifest.preset.metadata = {
+      sourceSelection: 'explicit-local-source-required',
+      sourceVerification: 'performed',
+      sourceTruthClaim: 'verified',
+    };
+    manifest.preset.defaults.systemPrompt = '';
+    manifest.preset.limitations = [];
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('preset.metadata.sourceVerification must be not-performed');
+    expect(result.stderr).toContain('preset.metadata.sourceTruthClaim must be not-claimed');
+    expect(result.stderr).toContain('preset.defaults.systemPrompt must be a non-empty string');
+    expect(result.stderr).toContain(
+      'preset.limitations must include "Requires an explicit local --source path."'
+    );
+    expect(result.stderr).toContain(
+      'preset.limitations must include "Does not perform source-code verification."'
+    );
+    expect(result.stderr).toContain(
+      'preset.limitations must include "Does not claim source truth."'
+    );
   });
 
   it('requires exactly one verify manifest location option', async () => {

@@ -21,10 +21,16 @@ import { fileURLToPath } from 'node:url';
 import { ConfigLoader } from './config/loader.js';
 import { discoverLocalSource } from './core/discovery.js';
 import { discoverRepo } from './core/repo-discovery.js';
+import type { SourceDocsPresetMetadata } from './core/source-docs.js';
 import { discoverWebsite } from './core/website-discovery.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
-import { verifyGenerationManifest, writeGenerationManifest } from './core/manifest.js';
+import {
+  SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS,
+  validateSourceDocsPresetContract,
+  verifyGenerationManifest,
+  writeGenerationManifest,
+} from './core/manifest.js';
 import { fetchSpec } from './utils/fetcher.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
@@ -51,6 +57,8 @@ const SOURCE_GENERATE_FORMATS = [
   'html',
 ] as const;
 const SOURCE_GENERATE_CHUNK_FORMATS = ['jsonl'] as const;
+const SOURCE_GENERATE_PRESETS = ['swift-book'] as const;
+const SWIFT_BOOK_PRESET_FORMATS = ['markdown'] as const;
 
 const AGENT_CONTEXT_ARTIFACTS = [
   {
@@ -252,18 +260,45 @@ const CAPABILITIES_CONTRACT = {
         '--source <path>',
         '--format auto|markdown|mdx|openapi|openref|rst|html',
         '--chunks jsonl',
+        '--preset swift-book',
       ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic local source parsing through the registered parser and universal formatter, with opt-in semantic chunk JSONL export',
+        'deterministic local source parsing through the registered parser and universal formatter, with opt-in semantic chunk JSONL export and a scoped swift-book preset',
       limitations: [
         'local files and directories only',
         'no URL fetching',
         'no discovery report consumption',
         'no candidate auto-selection',
-        'no preset generation',
+        'swift-book preset requires explicit --source and adds deterministic output defaults only',
         'no source selection decision',
         'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
+      ],
+    },
+    {
+      id: 'generate-preset-swift-book',
+      command: 'generate',
+      mode: 'generate --source --preset swift-book',
+      status: 'implemented',
+      inputBoundary: 'explicit local Markdown or DocC-style source path',
+      options: ['--source <path>', '--preset swift-book', '--format markdown', '--chunks jsonl'],
+      outputFiles: [
+        'manifest.json',
+        'llm-docs/swift-book-full-llms.txt',
+        'chunks/semantic-chunks.jsonl',
+      ],
+      summary:
+        'deterministic Swift Programming Language output defaults over an explicit local source path',
+      limitations: [
+        'requires explicit --source',
+        'local files and directories only',
+        'Markdown parser only',
+        'no TSPL.docc path inference',
+        'no repo clone or cache',
+        'no refresh',
+        'no source-code verification',
+        'no automatic source selection',
+        'preset metadata does not select or verify source truth',
       ],
     },
     {
@@ -358,11 +393,11 @@ const CAPABILITIES_CONTRACT = {
   },
   plannedUnsupported: [
     {
-      id: 'generate-preset',
-      command: 'generate --preset',
+      id: 'generate-preset-additional',
+      command: 'generate --preset <name> except swift-book',
       status: 'planned-unsupported',
       reason:
-        'preset generation is not implemented; the current generate command supports explicit local source generation and configured OpenRef SDK generation only',
+        'only --preset swift-book over an explicit local --source path is implemented; additional presets remain planned',
     },
     {
       id: 'refresh',
@@ -510,10 +545,14 @@ function printGenerateRequestFailure(message: string): void {
   console.error(chalk.red(`Generate failed: ${message}`));
   console.error(
     chalk.yellow(
-      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] [--chunks jsonl] --output-dir <dir>; generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] [--chunks jsonl] [--preset swift-book] --output-dir <dir>; generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
     )
   );
-  console.error(chalk.yellow('Preset generation remains planned/unsupported in the current CLI.'));
+  console.error(
+    chalk.yellow(
+      'Preset generation is limited to --preset swift-book with an explicit --source path; presets do not select sources.'
+    )
+  );
   console.error(
     chalk.yellow(
       'Discovery reports are candidate evidence for agent review; pass an explicit local source path to generate.'
@@ -523,6 +562,16 @@ function printGenerateRequestFailure(message: string): void {
 
 type GenerateMode = 'source' | 'configured-sdk';
 
+interface ResolvedSourceGeneratePreset {
+  format: string;
+  output: {
+    filenamePrefix: string;
+    title: string;
+    systemPrompt: string;
+  };
+  manifest: SourceDocsPresetMetadata;
+}
+
 function validateGenerateOptions(options: {
   sdk?: string;
   source?: string;
@@ -530,12 +579,24 @@ function validateGenerateOptions(options: {
   chunks?: string;
   preset?: string;
 }): GenerateMode {
-  if (options.preset !== undefined) {
-    failGenerateRequest('generate --preset is not implemented.');
+  if (options.preset !== undefined && options.preset.trim().length === 0) {
+    failGenerateRequest('generate --preset requires a non-empty preset name.');
+  }
+
+  if (options.preset !== undefined && options.sdk !== undefined) {
+    failGenerateRequest(
+      'generate --preset is supported only with explicit --source and cannot be used with --sdk.'
+    );
   }
 
   if (options.source !== undefined && options.sdk !== undefined) {
     failGenerateRequest('generate --source and --sdk are mutually exclusive.');
+  }
+
+  if (options.preset !== undefined && options.source === undefined) {
+    failGenerateRequest(
+      `generate --preset ${options.preset.trim()} requires --source <explicit-local-docs-path>; presets do not select source paths.`
+    );
   }
 
   if (options.source !== undefined) {
@@ -599,20 +660,110 @@ function validateGenerateOptions(options: {
   return 'configured-sdk';
 }
 
+async function resolveSourceGeneratePreset(options: {
+  preset?: string;
+  format?: string;
+  configDir: string;
+}): Promise<ResolvedSourceGeneratePreset | undefined> {
+  if (options.preset === undefined) {
+    return undefined;
+  }
+
+  const presetName = options.preset.trim().toLowerCase();
+
+  if (!SOURCE_GENERATE_PRESETS.some((supportedPreset) => supportedPreset === presetName)) {
+    failGenerateRequest(
+      `Unknown preset '${options.preset}'. Supported source-generation presets: ${SOURCE_GENERATE_PRESETS.join(
+        ', '
+      )}.`
+    );
+  }
+
+  const explicitFormat = options.format?.trim().toLowerCase();
+
+  if (
+    explicitFormat !== undefined &&
+    !SWIFT_BOOK_PRESET_FORMATS.some((supportedFormat) => supportedFormat === explicitFormat)
+  ) {
+    failGenerateRequest(
+      `--format ${options.format} is not compatible with --preset ${presetName}; supported preset formats are ${SWIFT_BOOK_PRESET_FORMATS.join(
+        ', '
+      )}.`
+    );
+  }
+
+  const config = new ConfigLoader(options.configDir);
+  let loadedPreset: Awaited<ReturnType<ConfigLoader['loadPreset']>>;
+
+  try {
+    loadedPreset = await config.loadPreset(presetName);
+  } catch (error) {
+    failGenerateRequest(error instanceof Error ? error.message : String(error));
+  }
+
+  const presetFormat = loadedPreset.config.format.trim().toLowerCase();
+
+  if (!SWIFT_BOOK_PRESET_FORMATS.some((supportedFormat) => supportedFormat === presetFormat)) {
+    failGenerateRequest(
+      `Preset '${presetName}' is configured with unsupported format '${loadedPreset.config.format}'; supported preset formats are ${SWIFT_BOOK_PRESET_FORMATS.join(
+        ', '
+      )}.`
+    );
+  }
+
+  const presetManifest: SourceDocsPresetMetadata = {
+    name: presetName,
+    configPath: loadedPreset.configPath,
+    displayName: loadedPreset.config.name,
+    ...(loadedPreset.config.description === undefined
+      ? {}
+      : { description: loadedPreset.config.description }),
+    defaults: {
+      format: presetFormat,
+      filenamePrefix: loadedPreset.config.output.filenamePrefix,
+      title: loadedPreset.config.output.title,
+      systemPrompt: loadedPreset.config.systemPrompt,
+      ...(loadedPreset.config.output.formats === undefined
+        ? {}
+        : { outputFormats: loadedPreset.config.output.formats }),
+    },
+    ...(loadedPreset.config.manifest === undefined
+      ? {}
+      : { metadata: loadedPreset.config.manifest }),
+    limitations: [...SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS],
+  };
+  const presetContractFailures = validateSourceDocsPresetContract(presetManifest);
+
+  if (presetContractFailures.length > 0) {
+    failGenerateRequest(
+      `Preset '${presetName}' violates the non-authoritative source contract: ${presetContractFailures.join(
+        '; '
+      )}.`
+    );
+  }
+
+  return {
+    format: explicitFormat ?? presetFormat,
+    output: {
+      filenamePrefix: loadedPreset.config.output.filenamePrefix,
+      title: loadedPreset.config.output.title,
+      systemPrompt: loadedPreset.config.systemPrompt,
+    },
+    manifest: presetManifest,
+  };
+}
+
 async function cleanupStaleSourceArtifactsForFailedSourceRequest(options: {
   source?: string;
   outputDir: string;
 }): Promise<void> {
-  if (options.source === undefined) {
-    return;
-  }
-
   try {
     const { cleanupStaleSourceDocsArtifacts } = await import('./core/source-docs.js');
 
-    await cleanupStaleSourceDocsArtifacts(options.outputDir, {
-      protectedSourcePath: options.source,
-    });
+    await cleanupStaleSourceDocsArtifacts(
+      options.outputDir,
+      options.source === undefined ? {} : { protectedSourcePath: options.source }
+    );
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     console.error(
@@ -916,7 +1067,7 @@ program
     'Source parser hint: auto, markdown, mdx, openapi, openref, rst, html; SDK guard: openref or openref-0.1'
   )
   .option('--chunks <format>', 'Source-only semantic chunk export: jsonl')
-  .option('--preset <name>', 'Planned preset generation input (unsupported)')
+  .option('--preset <name>', 'Source-only deterministic preset: swift-book')
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
   .option('--config-dir <dir>', 'Configuration directory', 'config')
   .option('--output-dir <dir>', 'Output directory', '../../public/llms-openref')
@@ -951,6 +1102,7 @@ program
 
       if (generateMode === 'source') {
         try {
+          const sourcePreset = await resolveSourceGeneratePreset(options);
           const { generateSourceDocs } = await import('./core/source-docs.js');
           const sourceDocsOptions: Parameters<typeof generateSourceDocs>[0] = {
             source: options.source ?? '',
@@ -962,7 +1114,11 @@ program
             },
           };
 
-          if (options.format !== undefined) {
+          if (sourcePreset !== undefined) {
+            sourceDocsOptions.format = sourcePreset.format;
+            sourceDocsOptions.output = sourcePreset.output;
+            sourceDocsOptions.preset = sourcePreset.manifest;
+          } else if (options.format !== undefined) {
             sourceDocsOptions.format = options.format;
           }
           if (options.chunks !== undefined) {
@@ -978,6 +1134,9 @@ program
           console.log(`  Source: ${result.manifest.source.resolvedPath}`);
           console.log(`  Type: ${result.manifest.source.type}`);
           console.log(`  Format: ${result.manifest.source.resolvedFormat}`);
+          if (result.manifest.preset !== undefined) {
+            console.log(`  Preset: ${result.manifest.preset.name}`);
+          }
           console.log(`  Source files: ${result.manifest.sourceFiles.length}`);
           console.log(`  Generated files: ${result.manifest.generatedOutputs.length}`);
           if (chunkOutput !== undefined) {
@@ -986,6 +1145,12 @@ program
           console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
           console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
         } catch (error) {
+          if (error instanceof GenerateRequestError) {
+            await cleanupStaleSourceArtifactsForFailedSourceRequest(options);
+            printGenerateRequestFailure(error.message);
+            process.exit(1);
+          }
+
           const errorMsg = error instanceof Error ? error.message : String(error);
           console.error(chalk.red(`Generate failed: ${errorMsg}`));
           process.exit(1);

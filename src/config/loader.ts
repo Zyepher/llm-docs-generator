@@ -9,10 +9,13 @@
  */
 
 import { readFile } from 'fs/promises';
+import { isAbsolute, relative, resolve } from 'path';
 
 import {
   CategoriesConfigSchema,
   CategoryConfig,
+  PresetConfig,
+  PresetConfigSchema,
   SDKConfig,
   SDKsConfigSchema,
   SDKVersionConfig,
@@ -29,6 +32,53 @@ export class ConfigLoader {
   private sortedCategoriesCache: [string, CategoryConfig][] | null = null;
 
   constructor(private readonly configDir: string) {}
+
+  /**
+   * Load a deterministic source-generation preset by name.
+   *
+   * Presets are metadata/defaults only. They must not include source paths,
+   * source candidates, or source-selection rules.
+   */
+  async loadPreset(name: string): Promise<{
+    name: string;
+    configPath: string;
+    config: PresetConfig;
+  }> {
+    const normalizedName = normalizePresetName(name);
+    const presetsDir = resolve(this.configDir, 'presets');
+    const configPath = resolve(presetsDir, `${normalizedName}.json`);
+    const relativeConfigPath = relative(presetsDir, configPath);
+
+    if (relativeConfigPath.startsWith('..') || isAbsolute(relativeConfigPath)) {
+      throw new Error(`Preset '${name}' not found in configuration`);
+    }
+
+    let content: string;
+
+    try {
+      content = await readFile(configPath, 'utf-8');
+    } catch (error) {
+      if (isFileNotFoundError(error)) {
+        throw new Error(`Preset '${normalizedName}' not found in configuration`);
+      }
+
+      throw error;
+    }
+
+    const data = JSON.parse(content) as unknown;
+
+    if (presetConfigContainsSourceSelection(data)) {
+      throw new Error(
+        `Preset '${normalizedName}' must not define source paths or source-selection fields; pass --source explicitly`
+      );
+    }
+
+    return {
+      name: normalizedName,
+      configPath,
+      config: PresetConfigSchema.parse(data),
+    };
+  }
 
   /**
    * Load all configuration files
@@ -280,6 +330,65 @@ export class ConfigLoader {
     this.categoriesCache = null;
     this.sortedCategoriesCache = null;
   }
+}
+
+function normalizePresetName(name: string): string {
+  const normalizedName = name.trim().toLowerCase();
+
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(normalizedName)) {
+    throw new Error(`Preset '${name}' not found in configuration`);
+  }
+
+  return normalizedName;
+}
+
+function presetConfigContainsSourceSelection(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const sourceSelectionFields = new Set([
+    'source',
+    'sources',
+    'path',
+    'paths',
+    'repo',
+    'url',
+    'candidate',
+  ]);
+  const stack: unknown[] = [value];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+
+    if (typeof current !== 'object' || current === null) {
+      continue;
+    }
+
+    if (Array.isArray(current)) {
+      stack.push(...current);
+      continue;
+    }
+
+    for (const [field, fieldValue] of Object.entries(current)) {
+      if (sourceSelectionFields.has(field)) {
+        return true;
+      }
+
+      stack.push(fieldValue);
+    }
+  }
+
+  return false;
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
+      (error as NodeJS.ErrnoException).code === 'ENOTDIR')
+  );
 }
 
 // ============================================================================

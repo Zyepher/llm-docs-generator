@@ -131,7 +131,8 @@ Current implementation:
   through the Markdown parser, `openapi`, `openref`, `rst`, and `html`. It
   accepts local files or directories only, rejects URL-like inputs, missing
   paths, discovery reports, `--source` plus `--sdk`, unsupported `--chunks`
-  values, and all `--preset` requests, and does not fetch, crawl, select
+  values, unknown presets, presets without `--source`, presets with `--sdk`,
+  and preset-incompatible explicit formats, and does not fetch, crawl, select
   candidates, infer task fit, or decide source selection. Successful source
   generation writes `manifest.json` plus generated docs under `llm-docs/`.
   With `--chunks jsonl`, it also writes `chunks/semantic-chunks.jsonl`. The
@@ -139,6 +140,15 @@ Current implementation:
   aggregate hash when applicable, parser/formatter metadata, generated output
   hashes, byte sizes, line counts, deterministic estimated token counts,
   output kind/name metadata, and warnings.
+- Can run `generate --source <explicit-local-docs-path> --preset swift-book
+  --output-dir <dir>` for a deterministic Swift Programming Language output
+  preset over explicit local Markdown/DocC-style sources. The preset supplies
+  Markdown format defaults, `swift-book` output naming, title, neutral
+  source-derived system prompt, and non-authoritative preset provenance only. It
+  does not infer or append `TSPL.docc`, clone or cache repositories, select
+  sources, verify source truth, claim completeness, refresh, or perform
+  source-code verification. `--chunks jsonl` remains compatible with this
+  preset.
 - Can run `capabilities --json` to print a deterministic, machine-readable
   contract of implemented commands and planned/unsupported capabilities for
   agents. The contract has schema version `0.1.0`, package name/version
@@ -156,7 +166,8 @@ Current implementation:
   state, or perform network work.
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`, `generate --source`,
-  `generate --sdk`, `verify`, `list-sdks`, `validate --sdk`,
+  `generate --source --preset swift-book`, `generate --sdk`, `verify`,
+  `list-sdks`, `validate --sdk`,
   `capabilities --json`, and read-only `agent context`.
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or behavior-level source documentation from
@@ -646,6 +657,11 @@ Local docs:
 User: Generate LLM docs from ./docs.
 Agent: Verify path, then run llm-docs generate --source ./docs --output-dir <dir>
 with an explicit format hint when useful.
+
+User: Generate Swift book docs from this local TSPL.docc folder.
+Agent: Verify the exact path supplied by the user, then run llm-docs generate
+--source <explicit-local-docs-path> --preset swift-book --output-dir <dir>.
+Do not infer or append TSPL.docc.
 ```
 
 Source-truth codebase docs:
@@ -687,6 +703,7 @@ llm-docs discover --repo https://github.com/owner/repo --scope docs --output-dir
 llm-docs discover --url https://example.com/docs --output-dir ./reports/website
 llm-docs capabilities --json
 llm-docs source-truth inspect --source ./src
+llm-docs generate --source ./TSPL.docc --preset swift-book --output-dir ./swift-book-agent-docs
 llm-docs generate --sdk swift --sdk-version v2
 llm-docs generate --sdk all --sdk-version all
 llm-docs verify --output-dir ./output/swift/v2
