@@ -179,18 +179,21 @@ through the Markdown parser, `openapi`, `openref`, `rst`, and `html`.
 Successful source generation writes `manifest.json` at the requested output
 root and generated LLM docs under `llm-docs/`. The source manifest records the
 input path, resolved source type, format hint and resolved format, parser and
-formatter metadata, source file hashes and byte sizes, directory aggregate hash
-when applicable, generated output hashes, byte sizes, line counts,
+formatter metadata, source file paths, formats, hashes and byte sizes,
+directory aggregate hash when applicable, generated output hashes, byte sizes, line counts,
 deterministic estimated token counts, and warnings.
 
-The current CLI still does not expose refresh or source verification. It also
+The current CLI still does not expose refresh or source-code verification. It also
 writes `manifest.json` for successful configured `generate --sdk` tasks with
 generated output hashes, byte sizes, line counts, and deterministic estimated
-token counts. Current configured SDK `verify` checks configured-SDK manifest
-source and output file hashes and byte sizes, and validates optional line/token
-metadata shape when present, but does not recompute those counts yet and does
-not verify source-mode manifests. Discovery reports do not generate docs,
-choose sources, assign trust scores, infer authority, or claim source truth.
+token counts. Current `verify` supports configured-SDK and source-mode
+manifests. Configured SDK verification checks source and output file hashes and
+byte sizes, and validates optional line/token metadata shape when present
+without recomputing those counts. Source-mode verification checks local source
+path shape and existence, recorded source file hashes and byte sizes, generated
+output paths, hashes, byte sizes, line counts, and deterministic estimated token
+counts. Discovery reports do not generate docs, choose sources, assign trust
+scores, infer authority, or claim source truth.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR: it emits
 stable semantic chunk records with path-derived IDs, order, source metadata,
@@ -291,10 +294,13 @@ agent intent/source/scope resolution
 - If the user asks for latest, verify remote state before reusing a cached clone.
 - Successful configured SDK generation currently writes a scoped manifest with
   source and output hashes, byte sizes, line counts, and deterministic
-  estimated token counts for generated outputs. Current `verify` checks those
+  estimated token counts for generated outputs. Current `verify` checks
   configured SDK manifest file hashes and byte sizes, and validates optional
-  line/token metadata shape when present without recomputing the counts. Local
-  source docs generation is available through
+  line/token metadata shape when present without recomputing the counts. It
+  also verifies `local-source-docs` manifests by checking local source path
+  shape and existence, source file hashes and byte sizes, generated output
+  paths, hashes, byte sizes, line counts, and deterministic estimated token
+  counts. Local source docs generation is available through
   `generate --source <local-file-or-directory> --output-dir <dir>` for explicit
   local Markdown/MDX, OpenAPI, OpenRef, RST, and static HTML inputs. Local
   bounded inspection reports are available through `discover --source`, and

@@ -115,6 +115,7 @@ interface SourceDocsManifest {
     resolvedPath: string;
     byteSize: number;
     hash: string;
+    format: string;
   }>;
   parser: {
     name: string;
@@ -554,6 +555,22 @@ function estimateTextTokens(text: string): number {
   return Math.ceil(Array.from(text).length / 4);
 }
 
+function aggregateSourceFilesHashForTest(files: SourceDocsManifest['sourceFiles']): string {
+  const hash = createHash('sha256');
+  hash.update('llm-docs-generator:source-docs-directory:v1\n');
+
+  for (const file of files) {
+    hash.update(file.path);
+    hash.update('\0');
+    hash.update(String(file.byteSize));
+    hash.update('\0');
+    hash.update(file.hash);
+    hash.update('\n');
+  }
+
+  return `sha256:${hash.digest('hex')}`;
+}
+
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
@@ -659,6 +676,48 @@ async function generateSwiftFixture(): Promise<{
     configDir,
     outputDir: join(outputDir, 'swift/v2'),
     manifestPath: join(outputDir, 'swift/v2/manifest.json'),
+  };
+}
+
+async function generateSourceDocsFixture(): Promise<{
+  sourceDir: string;
+  outputDir: string;
+  manifestPath: string;
+  manifest: SourceDocsManifest;
+}> {
+  const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-verify-'));
+  tempDirs.push(dir);
+  const sourceDir = join(dir, 'docs');
+  const outputDir = join(dir, 'agent-docs');
+  const manifestPath = join(outputDir, 'manifest.json');
+
+  await mkdir(join(sourceDir, 'guides'), { recursive: true });
+  await writeFile(
+    join(sourceDir, 'index.md'),
+    '# Local Docs\n\nWelcome to the local docs.\n',
+    'utf-8'
+  );
+  await writeFile(
+    join(sourceDir, 'guides/usage.mdx'),
+    '# Usage\n\n```ts\nexport const value = 1;\n```\n',
+    'utf-8'
+  );
+
+  await runCli([
+    'generate',
+    '--source',
+    sourceDir,
+    '--format',
+    'markdown',
+    '--output-dir',
+    outputDir,
+  ]);
+
+  return {
+    sourceDir,
+    outputDir,
+    manifestPath,
+    manifest: JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest,
   };
 }
 
@@ -940,6 +999,7 @@ describe('CLI compatibility behavior', () => {
       'generate-source',
       'generate-sdk',
       'verify-configured-sdk',
+      'verify-source-docs',
       'list-sdks',
       'validate-sdk',
     ]);
@@ -1010,6 +1070,17 @@ describe('CLI compatibility behavior', () => {
       '--format openref|openref-0.1',
     ]);
     expect(implemented.get('generate-sdk')?.limitations).toContain('no preset generation');
+    expect(implemented.get('verify-source-docs')?.inputBoundary).toBe(
+      'local-source-docs manifest.json'
+    );
+    expect(implemented.get('verify-source-docs')?.limitations).toEqual(
+      expect.arrayContaining([
+        'local-source-docs manifest mode only',
+        'no refresh',
+        'no repo freshness check',
+        'no source-code verification',
+      ])
+    );
     expect(planned.has('generate-source')).toBe(false);
     expect(planned.get('generate-preset')?.reason).toBe(
       'preset generation is not implemented; the current generate command supports explicit local source generation and configured OpenRef SDK generation only'
@@ -1096,7 +1167,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 11');
+    expect(stdout).toContain('Implemented modes: 12');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
@@ -3387,6 +3458,7 @@ describe('CLI compatibility behavior', () => {
     });
     expect(manifest.source.aggregateHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(manifest.sourceFiles.map((file) => file.path)).toEqual(['guides/usage.mdx', 'index.md']);
+    expect(manifest.sourceFiles.map((file) => file.format)).toEqual(['markdown', 'markdown']);
     expect(manifest.warnings).toContain('Skipped symlinked source entry: linked.md');
     expect(manifest.sourceFiles.map((file) => file.hash)).toEqual([
       await sha256File(join(sourceDir, 'guides', 'usage.mdx')),
@@ -4318,6 +4390,19 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).toContain('Verification passed');
   });
 
+  it('verifies a generated local source docs manifest by output directory', async () => {
+    const { outputDir, manifest } = await generateSourceDocsFixture();
+
+    const result = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
+  });
+
   it('requires exactly one verify manifest location option', async () => {
     const missingResult = await runCliWithExit(['verify']);
     const duplicateResult = await runCliWithExit([
@@ -4359,6 +4444,70 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('missing file');
     expect(result.stderr).toContain(manifest.generatedOutputs[0]?.path);
+  });
+
+  it('reports local source docs source drift', async () => {
+    const { manifestPath, sourceDir, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0];
+
+    if (sourceFile === undefined) {
+      throw new Error('expected generated source docs fixture source file');
+    }
+
+    await writeFile(join(sourceDir, sourceFile.path), '# Changed Source\n\nDrifted.\n', 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain('sourceFiles[0]');
+    expect(result.stderr).toContain('hash mismatch');
+  });
+
+  it('reports missing local source docs source and output files', async () => {
+    const { manifestPath, sourceDir, outputDir, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0];
+    const outputFile = manifest.generatedOutputs[0];
+
+    if (sourceFile === undefined || outputFile === undefined) {
+      throw new Error('expected generated source docs fixture files');
+    }
+
+    await rm(join(sourceDir, sourceFile.path), { force: true });
+    await rm(join(outputDir, outputFile.path), { force: true });
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain('sourceFiles[0]: missing file');
+    expect(result.stderr).toContain(`output ${outputFile.path}: missing file`);
+  });
+
+  it('reports local source docs generated output line and token metadata drift', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const outputFile = manifest.generatedOutputs[0];
+
+    if (outputFile === undefined) {
+      throw new Error('expected generated source docs fixture output file');
+    }
+
+    outputFile.lineCount += 1;
+    outputFile.estimatedTokenCount += 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain('line count mismatch');
+    expect(result.stderr).toContain('estimated token count mismatch');
   });
 
   it('verifies a relative source path from the manifest directory across cwd changes', async () => {
@@ -4552,6 +4701,134 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('path escapes manifest directory');
   });
 
+  it('rejects source docs source file paths that escape the recorded source root', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0];
+    const outputFile = manifest.generatedOutputs[0];
+
+    if (sourceFile === undefined || outputFile === undefined) {
+      throw new Error('expected generated source docs fixture files');
+    }
+
+    sourceFile.path = '../outside.md';
+    outputFile.path = '../outside-output.txt';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('sourceFiles[0].path escapes source root');
+    expect(result.stderr).toContain('output[0].path escapes manifest directory');
+  });
+
+  it('rejects source docs source file symlinks before following outside content', async () => {
+    const { manifestPath, sourceDir, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0];
+    const outsidePath = join(dirname(sourceDir), 'outside.md');
+    const linkPath = join(sourceDir, 'link.md');
+
+    if (sourceFile === undefined) {
+      throw new Error('expected generated source docs fixture source file');
+    }
+
+    await writeFile(outsidePath, '# Outside Target\n\nThis is outside the source root.\n', 'utf-8');
+    await symlink(outsidePath, linkPath, 'file');
+
+    sourceFile.path = 'link.md';
+    sourceFile.resolvedPath = linkPath;
+    sourceFile.byteSize = await byteSize(outsidePath);
+    sourceFile.hash = await sha256File(outsidePath);
+    manifest.source.aggregateHash = aggregateSourceFilesHashForTest(manifest.sourceFiles);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('sourceFiles[0]: symbolic links are not allowed');
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects source docs source file symlinked parent directories', async () => {
+    const { manifestPath, sourceDir, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0];
+    const outsideDir = join(dirname(sourceDir), 'outside-source-dir');
+    const outsidePath = join(outsideDir, 'file.md');
+    const linkPath = join(sourceDir, 'link');
+
+    if (sourceFile === undefined) {
+      throw new Error('expected generated source docs fixture source file');
+    }
+
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(outsidePath, '# Outside Parent Target\n\nOutside source root.\n', 'utf-8');
+    await symlink(outsideDir, linkPath, 'dir');
+
+    sourceFile.path = 'link/file.md';
+    sourceFile.resolvedPath = join(sourceDir, 'link/file.md');
+    sourceFile.byteSize = await byteSize(outsidePath);
+    sourceFile.hash = await sha256File(outsidePath);
+    manifest.source.aggregateHash = aggregateSourceFilesHashForTest(manifest.sourceFiles);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('sourceFiles[0]: symbolic links are not allowed');
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects source docs generated output symlinks before following outside content', async () => {
+    const { manifestPath, outputDir, manifest } = await generateSourceDocsFixture();
+    const outputFile = manifest.generatedOutputs[0];
+
+    if (outputFile === undefined) {
+      throw new Error('expected generated source docs fixture output file');
+    }
+
+    const outputPath = join(outputDir, outputFile.path);
+    const outsidePath = join(dirname(outputDir), 'outside-output.txt');
+    const originalOutput = await readFile(outputPath, 'utf-8');
+
+    await writeFile(outsidePath, originalOutput, 'utf-8');
+    await rm(outputPath, { force: true });
+    await symlink(outsidePath, outputPath, 'file');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`output ${outputFile.path}: symbolic links are not allowed`);
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects source docs generated output symlinked parent directories', async () => {
+    const { manifestPath, outputDir, manifest } = await generateSourceDocsFixture();
+    const outputFile = manifest.generatedOutputs[0];
+
+    if (outputFile === undefined) {
+      throw new Error('expected generated source docs fixture output file');
+    }
+
+    const originalOutputPath = join(outputDir, outputFile.path);
+    const originalOutput = await readFile(originalOutputPath, 'utf-8');
+    const outsideDir = join(dirname(outputDir), 'outside-output-dir');
+    const outsidePath = join(outsideDir, 'file.txt');
+    const linkPath = join(outputDir, 'llm-docs/link');
+
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(outsidePath, originalOutput, 'utf-8');
+    await symlink(outsideDir, linkPath, 'dir');
+
+    outputFile.path = 'llm-docs/link/file.txt';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`output ${outputFile.path}: symbolic links are not allowed`);
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
   it('rejects invalid generated output kinds before checking files', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
     tempDirs.push(dir);
@@ -4593,6 +4870,26 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('Checked files: 0');
     expect(result.stderr).toContain('kind must be parsed-spec-json or llm-docs');
+  });
+
+  it('rejects source docs manifests without source file format metadata', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0] as
+      | (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>)
+      | undefined;
+
+    if (sourceFile === undefined) {
+      throw new Error('expected generated source docs fixture source file');
+    }
+
+    delete sourceFile.format;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('sourceFiles[0].format must be a non-empty string');
   });
 
   it('rejects invalid optional generated output RAG metadata before checking files', async () => {

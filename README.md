@@ -22,8 +22,8 @@ agent-docs/
 ```
 
 The Markdown files are for the AI agent to read. The JSON files are for trust:
-they record source paths, content hashes, parser and formatter versions,
-warnings, and generated files.
+they record source paths, source file formats, content hashes, parser and
+formatter versions, warnings, and generated files.
 
 ## Core Workflow
 
@@ -60,7 +60,8 @@ Current implemented capabilities include:
 - agent-optimized Markdown output for explicit local source generation
 - manifests with source provenance, content hashes, generated file hashes,
   parser/formatter metadata, and warnings
-- configured OpenRef SDK generation and configured-SDK manifest verification
+- configured OpenRef SDK generation plus configured-SDK and source-docs manifest
+  verification
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
 - read-only bundled agent context metadata
@@ -124,8 +125,8 @@ The CLI is responsible for:
 - preserving headings, examples, semantic structure, and stable IDs
 - writing Markdown packs, manifests, discovery reports, provenance metadata,
   and source-truth failure reports
-- verifying configured-SDK generated outputs against recorded hashes and source
-  metadata
+- verifying configured-SDK and source-docs generated outputs against recorded
+  hashes and source metadata
 - failing clearly when a requested source, format, parser, permission, or mode
   cannot be used
 
@@ -146,16 +147,20 @@ The CLI records evidence; the agent owns the final source-selection judgment.
 
 ## Freshness And Verification
 
-Configured SDK generated packs can be checked later:
+Configured SDK and local source docs generated packs can be checked later:
 
 ```bash
 llm-docs verify --manifest ./output/swift/v2/manifest.json
+llm-docs verify --output-dir ./agent-docs
 ```
 
-Verification currently checks configured-SDK manifest shape, source path
+Verification currently supports `configured-sdk` and `local-source-docs`
+manifests. Configured SDK verification checks manifest shape, source path
 existence, source content hash and byte size, and generated file hashes and byte
-sizes. Source-mode manifest verification and refresh are planned but not
-implemented.
+sizes. Source-docs verification checks local source path shape and existence,
+recorded source file hashes and byte sizes, generated output paths, hashes,
+byte sizes, line counts, and deterministic estimated token counts. Refresh and
+source-code verification remain planned but are not implemented.
 
 ## Source-Truth Codebase Docs
 

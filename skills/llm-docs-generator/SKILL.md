@@ -41,4 +41,4 @@ When modifying this repository:
 
 ## Current CLI Boundary
 
-Implemented modes may include local/repo/URL discovery evidence reports, conservative source-truth evidence extraction/generation, configured SDK generation and verification, `capabilities --json`, and read-only `agent context` metadata. Treat any broader lifecycle command as unavailable unless the installed CLI says otherwise.
+Implemented modes may include local/repo/URL discovery evidence reports, conservative source-truth evidence extraction/generation, local source docs generation and manifest verification, configured SDK generation and verification, `capabilities --json`, and read-only `agent context` metadata. Treat any broader lifecycle command as unavailable unless the installed CLI says otherwise.

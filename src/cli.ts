@@ -288,7 +288,24 @@ const CAPABILITIES_CONTRACT = {
       outputFiles: ['stdout verification result'],
       summary: 'hash and byte-size verification for configured SDK manifests',
       limitations: [
-        'configured-sdk manifests only',
+        'configured-sdk manifest mode only',
+        'does not recompute optional generated output line or token metadata',
+        'no refresh',
+        'no repo freshness check',
+        'no source-code verification',
+      ],
+    },
+    {
+      id: 'verify-source-docs',
+      command: 'verify',
+      mode: 'verify --manifest or verify --output-dir',
+      status: 'implemented',
+      inputBoundary: 'local-source-docs manifest.json',
+      outputFiles: ['stdout verification result'],
+      summary:
+        'source path, source file, generated output hash, byte-size, line-count, and estimated-token verification for local source docs manifests',
+      limitations: [
+        'local-source-docs manifest mode only',
         'no refresh',
         'no repo freshness check',
         'no source-code verification',
@@ -1099,7 +1116,9 @@ program
 
 program
   .command('verify')
-  .description('Verify an existing configured SDK manifest by hash and byte size')
+  .description(
+    'Verify an existing configured SDK or local source docs manifest by recorded file metadata'
+  )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')
   .option('-v, --verbose', 'Enable verbose logging', false)

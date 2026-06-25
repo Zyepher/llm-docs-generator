@@ -75,6 +75,10 @@ Current implementation:
   configured source and generated output file hashes and byte sizes. Optional
   generated output line counts and estimated token counts are shape-validated
   when present, but are not recomputed by verification yet.
+- Verifies current `local-source-docs` manifests by checking source manifest
+  shape, local source path existence, recorded source file byte sizes and
+  SHA-256 hashes, generated output paths, byte sizes, hashes, line counts, and
+  deterministic estimated token counts.
 - Can run `discover --source <local-file-or-directory>` for explicit local,
   bounded inspection and write `discovery-report.json` with candidate file
   hints, deterministic evidence categories and signals, report order, hashes,
@@ -539,18 +543,23 @@ Record at minimum:
 
 The current explicit local source generation path writes a source-mode
 `manifest.json` with source path/type, format hint, resolved format,
-parser/formatter metadata, source file hashes and byte sizes, a deterministic
-directory aggregate hash when applicable, generated file hashes, byte sizes,
-line counts, deterministic estimated token counts, and warnings. The current
+parser/formatter metadata, source file paths, source file formats, hashes and
+byte sizes, a deterministic directory aggregate hash when applicable, generated
+file hashes, byte sizes, line counts, deterministic estimated token counts, and
+warnings. The current
 configured SDK generation path writes a scoped `manifest.json` with configured
 source details, hashes, parser and formatter metadata, generated file hashes,
 byte sizes, line counts, and deterministic estimated token counts. The current
-`verify` command checks configured SDK manifest file hashes and byte sizes, and
-rejects malformed optional generated output line/token metadata when present;
-it does not recompute line or token counts yet, verify source-mode manifests,
-or perform refresh, discovery report validation, repo freshness verification,
-or source-code verification. Future implementations should extend manifest
-coverage to the broader provenance fields above.
+`verify` command supports `configured-sdk` and `local-source-docs` manifests.
+For configured SDK manifests, it checks source and generated output hashes and
+byte sizes, and rejects malformed optional generated output line/token metadata
+when present; it does not recompute those optional counts. For source-mode
+manifests, it checks local source path shape and existence, source file hashes
+and byte sizes, generated output paths, hashes, byte sizes, line counts, and
+deterministic estimated token counts. It does not perform refresh, discovery
+report validation, repo freshness verification, or source-code verification.
+Future implementations should extend manifest coverage to the broader
+provenance fields above.
 
 ## Clarifying Questions
 
