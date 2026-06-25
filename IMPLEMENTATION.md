@@ -218,7 +218,13 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 
 ## Next Steps (Future Work)
 
-- [ ] CLI enhancements (--format, --preset flags)
+- [x] Deterministic configured SDK `generate --format` / `--preset` handling:
+      `--format openref` and `--format openref-0.1` are accepted for the
+      existing `generate --sdk` OpenRef compatibility path; unsupported
+      `--format` values, all `--preset` requests, and top-level
+      `generate --source` fail honestly before generation
+- [ ] General CLI enhancements for `generate --source --format` and supported
+      `--preset` generation
 - [ ] Directory parsing for full swift-book (all chapters)
 - [ ] JSONL export format for embedding pipelines
 - [x] OpenAPI 3.x / Swagger 2.0 parser foundation for explicit local JSON/YAML
@@ -284,12 +290,14 @@ Current capabilities contract scope:
 - Implemented entries cover `discover --source`, `discover --repo`,
   `discover --url`, `source-truth inspect --source`,
   `source-truth generate --source --output-dir`, read-only `agent context`,
-  configured `generate --sdk`, configured SDK `verify`, `list-sdks`, and
+  configured `generate --sdk` with optional `--format openref` /
+  `--format openref-0.1`, configured SDK `verify`, `list-sdks`, and
   `validate --sdk`.
-- Planned/unsupported entries include general `generate --source`, `refresh`,
-  source-code verification for official docs, broad website crawling, automatic
-  source selection, framework/route understanding, behavior-level generation
-  from source code, `agent install codex`, and `agent doctor`.
+- Planned/unsupported entries include general `generate --source`,
+  `generate --preset`, `refresh`, source-code verification for official docs,
+  broad website crawling, automatic source selection, framework/route
+  understanding, behavior-level generation from source code,
+  `agent install codex`, and `agent doctor`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `manifest.json`, `failure.json`, configured SDK parsed spec output, and
