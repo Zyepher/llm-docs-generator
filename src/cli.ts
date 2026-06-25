@@ -18,6 +18,7 @@ import { rm } from 'node:fs/promises';
 import { ConfigLoader } from './config/loader.js';
 import { discoverLocalSource } from './core/discovery.js';
 import { discoverRepo } from './core/repo-discovery.js';
+import { discoverWebsite } from './core/website-discovery.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
 import { verifyGenerationManifest, writeGenerationManifest } from './core/manifest.js';
@@ -58,12 +59,13 @@ program
 
 program
   .command('discover')
-  .description('Write a bounded discovery report for an explicit local source or repo')
+  .description('Write a bounded discovery report for an explicit local source, repo, or URL')
   .option('--source <path>', 'Explicit local file or directory to inspect')
   .option(
     '--repo <git-url-or-local-git-repo>',
     'Explicit git URL or local git repository to inspect'
   )
+  .option('--url <http-or-https-url>', 'Explicit HTTP(S) URL to inspect')
   .option('--scope <path>', 'Repo-relative path to inspect in repo mode')
   .option('--cache-dir <dir>', 'Directory for cached repo clones')
   .option('--output-dir <dir>', 'Directory for discovery-report.json')
@@ -71,16 +73,19 @@ program
     async (options: {
       source?: string;
       repo?: string;
+      url?: string;
       scope?: string;
       cacheDir?: string;
       outputDir?: string;
     }) => {
       try {
-        if (
-          (options.source === undefined && options.repo === undefined) ||
-          (options.source !== undefined && options.repo !== undefined)
-        ) {
-          throw new Error('discover requires exactly one of --source or --repo.');
+        const inputCount =
+          (options.source === undefined ? 0 : 1) +
+          (options.repo === undefined ? 0 : 1) +
+          (options.url === undefined ? 0 : 1);
+
+        if (inputCount !== 1) {
+          throw new Error('discover requires exactly one of --source, --repo, or --url.');
         }
 
         if (options.source !== undefined) {
@@ -100,6 +105,31 @@ program
           console.log(`  Candidate files: ${report.candidates.length}`);
           console.log(`  Warnings: ${report.warnings.length}`);
           console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
+
+          return;
+        }
+
+        if (options.url !== undefined) {
+          if (options.scope !== undefined || options.cacheDir !== undefined) {
+            throw new Error('discover --scope and --cache-dir are only supported with --repo.');
+          }
+
+          const { report } = await discoverWebsite(
+            options.outputDir === undefined
+              ? { url: options.url }
+              : { url: options.url, outputDir: options.outputDir }
+          );
+
+          console.log(chalk.bold('Website discovery'));
+          console.log(`  URL: ${report.website.normalizedUrl}`);
+          console.log(`  Resources inspected: ${report.inspectedResources.length}`);
+          console.log(`  Candidate URLs: ${report.candidates.length}`);
+          console.log(`  Warnings: ${report.warnings.length}`);
+          console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
+
+          for (const warning of report.warnings) {
+            console.error(chalk.yellow(`Warning: ${warning}`));
+          }
 
           return;
         }

@@ -5,6 +5,9 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { discoverLocalSource, discoverLocalSources } from '../../src/core/discovery.js';
 import { discoverRepo } from '../../src/core/repo-discovery.js';
+import { discoverWebsite } from '../../src/core/website-discovery.js';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -25,6 +29,7 @@ const tsxBin = join(
 );
 
 const tempDirs: string[] = [];
+const servers: Server[] = [];
 interface ManifestFileEntry {
   path: string;
   kind: string;
@@ -150,6 +155,55 @@ interface RepoDiscoveryReport {
   warnings: string[];
 }
 
+interface WebsiteDiscoveryReport {
+  schemaVersion: string;
+  mode: string;
+  generatedAt: string;
+  website: {
+    input: string;
+    normalizedUrl: string;
+    origin: string;
+  };
+  inspectedResources: Array<{
+    url: string;
+    status: number | null;
+    contentType: string | null;
+    byteSize: number;
+    truncated: boolean;
+    sourceRole: string;
+  }>;
+  crawlPolicy: {
+    inspectedResourceUrls: string[];
+    sameOriginWellKnownResources: string[];
+    linkedCandidateFetches: false;
+    renderedJavaScript: false;
+    timeoutMs: number;
+    maxBytesPerResponse: number;
+    maxCandidates: number;
+    candidateLimitReached: boolean;
+  };
+  output: {
+    reportPath: string;
+  };
+  candidates: Array<{
+    url: string;
+    sameOrigin: boolean;
+    external: boolean;
+    order: number;
+    evidence: {
+      relations: string[];
+      flags: string[];
+      signals: string[];
+    };
+    sourceResources: Array<{
+      url: string;
+      sourceRole: string;
+      evidence: string;
+    }>;
+  }>;
+  warnings: string[];
+}
+
 interface CliResult {
   stdout: string;
   stderr: string;
@@ -267,6 +321,77 @@ async function runCliWithExit(args: string[], cwd = repoRoot): Promise<CliResult
       exitCode: typeof execError.code === 'number' ? execError.code : null,
     };
   }
+}
+
+async function startTestServer(
+  handler: (request: IncomingMessage, response: ServerResponse) => void
+): Promise<{ baseUrl: string; requests: string[] }> {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? '');
+    handler(request, response);
+  });
+
+  await new Promise<void>((resolvePromise, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolvePromise();
+    });
+  });
+
+  servers.push(server);
+  const address = server.address() as AddressInfo;
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requests,
+  };
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolvePromise, reject) => {
+    if (!server.listening) {
+      resolvePromise();
+      return;
+    }
+
+    server.close((error) => {
+      if (error !== undefined) {
+        reject(error);
+        return;
+      }
+
+      resolvePromise();
+    });
+  });
+}
+
+async function reserveUnusedLocalPort(): Promise<number> {
+  const server = createServer();
+
+  await new Promise<void>((resolvePromise, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolvePromise();
+    });
+  });
+
+  const address = server.address() as AddressInfo;
+  await closeServer(server);
+
+  return address.port;
+}
+
+function writeHttpResponse(
+  response: ServerResponse,
+  status: number,
+  contentType: string,
+  body: string
+): void {
+  response.writeHead(status, { 'content-type': contentType });
+  response.end(body);
 }
 
 async function sha256File(path: string): Promise<string> {
@@ -390,6 +515,7 @@ function compareStringsByCodeUnit(a: string, b: string): number {
 }
 
 afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => closeServer(server)));
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -689,6 +815,716 @@ describe('CLI compatibility behavior', () => {
     expect(combinedOutput).not.toMatch(/\bofficial\b/i);
     expect(combinedOutput).not.toMatch(/\bscore\b/i);
     expect(combinedOutput).not.toMatch(/\bselected\b/i);
+  });
+
+  it('writes a bounded website discovery report from an explicit URL and same-origin well-known resources', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-discover-'));
+    tempDirs.push(dir);
+
+    const { baseUrl, requests } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+      const origin = `http://${request.headers.host ?? ''}`;
+
+      switch (requestUrl.pathname) {
+        case '/docs/page':
+          writeHttpResponse(
+            response,
+            200,
+            'text/html; charset=utf-8',
+            [
+              '<!doctype html>',
+              '<html>',
+              '<head><link rel="canonical" href="/docs/page?view=canonical#section"></head>',
+              '<body>',
+              '<a href="/docs/api#intro">API</a>',
+              '<a href="https://github.com/example/repo">GitHub</a>',
+              '<a href="/openapi.json">Spec</a>',
+              '<a href="/pricing">Pricing</a>',
+              '<a href="/blog">Blog</a>',
+              '</body>',
+              '</html>',
+            ].join('')
+          );
+          return;
+        case '/llms.txt':
+          writeHttpResponse(
+            response,
+            200,
+            'text/plain',
+            [
+              '# Links',
+              '',
+              '[Guide](/docs/llms-guide.md)',
+              'https://external.example/openapi.json',
+              '',
+            ].join('\n')
+          );
+          return;
+        case '/sitemap.xml':
+          writeHttpResponse(
+            response,
+            200,
+            'application/xml',
+            [
+              '<?xml version="1.0" encoding="UTF-8"?>',
+              '<urlset>',
+              `<url><loc>${origin}/docs/sitemap-entry</loc></url>`,
+              `<url><loc>${origin}/docs/api</loc></url>`,
+              '</urlset>',
+            ].join('')
+          );
+          return;
+        default:
+          writeHttpResponse(
+            response,
+            500,
+            'text/plain',
+            `Unexpected request: ${requestUrl.pathname}`
+          );
+      }
+    });
+
+    const outputDir = join(dir, 'reports');
+    const explicitUrl = `${baseUrl}/docs/page`;
+    const { stdout } = await runCli(['discover', '--url', explicitUrl, '--output-dir', outputDir]);
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const reportText = await readFile(reportPath, 'utf-8');
+    const report = JSON.parse(reportText) as WebsiteDiscoveryReport;
+
+    expect(stdout).toContain('Website discovery');
+    expect(stdout).toContain(`URL: ${explicitUrl}`);
+    expect(stdout).toContain('Resources inspected: 3');
+    expect(stdout).toContain('Candidate URLs: 7');
+    expect(stdout).toContain('Warnings: 0');
+    expect(stdout).toContain(`Report: ${reportPath}`);
+    expect(reportText.endsWith('\n')).toBe(true);
+    expect(new Date(report.generatedAt).toISOString()).toBe(report.generatedAt);
+    expect(requests.map((requestPath) => new URL(requestPath, baseUrl).pathname)).toEqual([
+      '/docs/page',
+      '/llms.txt',
+      '/sitemap.xml',
+    ]);
+    expect(report).toMatchObject({
+      schemaVersion: '0.2.0',
+      mode: 'website-bounded-inspection',
+      website: {
+        input: explicitUrl,
+        normalizedUrl: explicitUrl,
+        origin: baseUrl,
+      },
+      output: {
+        reportPath,
+      },
+      crawlPolicy: {
+        inspectedResourceUrls: [explicitUrl, `${baseUrl}/llms.txt`, `${baseUrl}/sitemap.xml`],
+        sameOriginWellKnownResources: [`${baseUrl}/llms.txt`, `${baseUrl}/sitemap.xml`],
+        linkedCandidateFetches: false,
+        renderedJavaScript: false,
+        timeoutMs: 10000,
+        maxBytesPerResponse: 65536,
+        maxCandidates: 200,
+        candidateLimitReached: false,
+      },
+      warnings: [],
+    });
+    expect(report.inspectedResources).toEqual([
+      {
+        url: explicitUrl,
+        status: 200,
+        contentType: 'text/html',
+        byteSize: expect.any(Number),
+        truncated: false,
+        sourceRole: 'explicit-url',
+      },
+      {
+        url: `${baseUrl}/llms.txt`,
+        status: 200,
+        contentType: 'text/plain',
+        byteSize: expect.any(Number),
+        truncated: false,
+        sourceRole: 'llms-txt',
+      },
+      {
+        url: `${baseUrl}/sitemap.xml`,
+        status: 200,
+        contentType: 'application/xml',
+        byteSize: expect.any(Number),
+        truncated: false,
+        sourceRole: 'sitemap-xml',
+      },
+    ]);
+    expect(report.candidates.map((candidate) => candidate.url)).toEqual([
+      `${baseUrl}/docs/page?view=canonical`,
+      `${baseUrl}/docs/api`,
+      'https://github.com/example/repo',
+      `${baseUrl}/openapi.json`,
+      `${baseUrl}/docs/llms-guide.md`,
+      'https://external.example/openapi.json',
+      `${baseUrl}/docs/sitemap-entry`,
+    ]);
+    expect(report.candidates.map((candidate) => candidate.url)).not.toContain(`${baseUrl}/pricing`);
+    expect(report.candidates.map((candidate) => candidate.url)).not.toContain(`${baseUrl}/blog`);
+    expect(report.candidates.map((candidate) => candidate.order)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+
+    const apiCandidate = report.candidates.find(
+      (candidate) => candidate.url === `${baseUrl}/docs/api`
+    );
+    expect(apiCandidate).toMatchObject({
+      sameOrigin: true,
+      external: false,
+      evidence: {
+        relations: ['link', 'sitemap-loc'],
+        flags: ['docs-like-url'],
+      },
+    });
+    expect(apiCandidate?.sourceResources).toEqual([
+      {
+        url: explicitUrl,
+        sourceRole: 'explicit-url',
+        evidence: 'link',
+      },
+      {
+        url: `${baseUrl}/sitemap.xml`,
+        sourceRole: 'sitemap-xml',
+        evidence: 'sitemap-loc',
+      },
+    ]);
+
+    const githubCandidate = report.candidates.find(
+      (candidate) => candidate.url === 'https://github.com/example/repo'
+    );
+    expect(githubCandidate?.evidence.flags).toEqual(['github-url']);
+    expect(githubCandidate?.sameOrigin).toBe(false);
+    expect(githubCandidate?.external).toBe(true);
+
+    const specCandidate = report.candidates.find(
+      (candidate) => candidate.url === `${baseUrl}/openapi.json`
+    );
+    expect(specCandidate?.evidence.flags).toEqual(['machine-readable-url']);
+    expect(specCandidate?.evidence.signals).toContain('path:machine-readable-like');
+  });
+
+  it('rejects unsupported website URL schemes with a non-zero exit', async () => {
+    const result = await runCliWithExit(['discover', '--url', 'ftp://example.com/docs']);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: Unsupported URL scheme for discover --url');
+    expect(result.stderr).toContain('ftp:');
+  });
+
+  it('rejects malformed website URLs with a non-zero exit', async () => {
+    const result = await runCliWithExit(['discover', '--url', 'not-a-url']);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: Malformed URL for discover --url');
+    expect(result.stderr).not.toContain('not-a-url');
+  });
+
+  it('rejects malformed credential-like website URLs without echoing userinfo', async () => {
+    const result = await runCliWithExit(['discover', '--url', 'https://user:secret@']);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: Malformed URL for discover --url');
+    expect(result.stderr).not.toContain('user:secret');
+    expect(result.stderr).not.toContain('secret');
+  });
+
+  it('rejects explicit website URLs with embedded credentials without echoing userinfo', async () => {
+    const result = await runCliWithExit([
+      'discover',
+      '--url',
+      'https://user:secret@example.com/docs',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Discovery failed: Embedded credentials are not supported in discover --url.'
+    );
+    expect(result.stderr).not.toContain('user:secret');
+    expect(result.stderr).not.toContain('secret@example.com');
+  });
+
+  it('validates discover input exclusivity and repo-only options', async () => {
+    const noInput = await runCliWithExit(['discover']);
+    const sourceAndUrl = await runCliWithExit([
+      'discover',
+      '--source',
+      '.',
+      '--url',
+      'https://example.com/docs',
+    ]);
+    const repoAndUrl = await runCliWithExit([
+      'discover',
+      '--repo',
+      'https://github.com/example/repo',
+      '--url',
+      'https://example.com/docs',
+    ]);
+    const urlWithScope = await runCliWithExit([
+      'discover',
+      '--url',
+      'https://example.com/docs',
+      '--scope',
+      'docs',
+    ]);
+    const urlWithCacheDir = await runCliWithExit([
+      'discover',
+      '--url',
+      'https://example.com/docs',
+      '--cache-dir',
+      'cache',
+    ]);
+
+    expect(noInput.exitCode).toBe(1);
+    expect(noInput.stderr).toContain(
+      'Discovery failed: discover requires exactly one of --source, --repo, or --url.'
+    );
+    expect(sourceAndUrl.exitCode).toBe(1);
+    expect(sourceAndUrl.stderr).toContain(
+      'Discovery failed: discover requires exactly one of --source, --repo, or --url.'
+    );
+    expect(repoAndUrl.exitCode).toBe(1);
+    expect(repoAndUrl.stderr).toContain(
+      'Discovery failed: discover requires exactly one of --source, --repo, or --url.'
+    );
+    expect(urlWithScope.exitCode).toBe(1);
+    expect(urlWithScope.stderr).toContain(
+      'Discovery failed: discover --scope and --cache-dir are only supported with --repo.'
+    );
+    expect(urlWithCacheDir.exitCode).toBe(1);
+    expect(urlWithCacheDir.stderr).toContain(
+      'Discovery failed: discover --scope and --cache-dir are only supported with --repo.'
+    );
+  });
+
+  it('warns without failing when same-origin well-known resources return non-2xx responses', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-404-'));
+    tempDirs.push(dir);
+
+    const { baseUrl } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+
+      if (requestUrl.pathname === '/docs/page') {
+        writeHttpResponse(
+          response,
+          200,
+          'text/html',
+          '<html><body><a href="/docs/reference">Reference</a></body></html>'
+        );
+        return;
+      }
+
+      writeHttpResponse(response, 404, 'text/plain', 'not found');
+    });
+
+    const outputDir = join(dir, 'reports');
+    const { stdout, stderr } = await runCli([
+      'discover',
+      '--url',
+      `${baseUrl}/docs/page`,
+      '--output-dir',
+      outputDir,
+    ]);
+    const report = JSON.parse(
+      await readFile(join(outputDir, 'discovery-report.json'), 'utf-8')
+    ) as WebsiteDiscoveryReport;
+
+    expect(stdout).toContain('Website discovery');
+    expect(stdout).toContain('Warnings: 2');
+    expect(stderr).toContain(
+      `Warning: Non-2xx HTTP 404 for llms-txt resource: ${baseUrl}/llms.txt`
+    );
+    expect(stderr).toContain(
+      `Warning: Non-2xx HTTP 404 for sitemap-xml resource: ${baseUrl}/sitemap.xml`
+    );
+    expect(report.inspectedResources.map((resource) => resource.status)).toEqual([200, 404, 404]);
+    expect(report.warnings).toContain(
+      `Non-2xx HTTP 404 for llms-txt resource: ${baseUrl}/llms.txt`
+    );
+    expect(report.warnings).toContain(
+      `Non-2xx HTTP 404 for sitemap-xml resource: ${baseUrl}/sitemap.xml`
+    );
+    expect(report.candidates.map((candidate) => candidate.url)).toEqual([
+      `${baseUrl}/docs/reference`,
+    ]);
+  });
+
+  it('enforces the per-resource timeout through body reads', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-timeout-'));
+    tempDirs.push(dir);
+
+    const { baseUrl } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+
+      if (requestUrl.pathname === '/docs/slow') {
+        response.on('error', () => undefined);
+        response.writeHead(200, { 'content-type': 'text/html' });
+        response.write('<html><body>');
+        setTimeout(() => {
+          if (!response.destroyed) {
+            response.end('<a href="/docs/late">Late</a></body></html>');
+          }
+        }, 500);
+        return;
+      }
+
+      if (requestUrl.pathname === '/llms.txt') {
+        writeHttpResponse(response, 200, 'text/plain', '');
+        return;
+      }
+
+      if (requestUrl.pathname === '/sitemap.xml') {
+        writeHttpResponse(response, 200, 'application/xml', '<urlset></urlset>');
+        return;
+      }
+
+      writeHttpResponse(response, 404, 'text/plain', 'not found');
+    });
+
+    const startedAt = Date.now();
+    const { report } = await discoverWebsite({
+      url: `${baseUrl}/docs/slow`,
+      outputDir: join(dir, 'reports'),
+      timeoutMs: 50,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(1000);
+    expect(report.inspectedResources[0]).toMatchObject({
+      url: `${baseUrl}/docs/slow`,
+      status: 200,
+      contentType: 'text/html',
+      truncated: false,
+      sourceRole: 'explicit-url',
+    });
+    expect(report.inspectedResources[0]?.byteSize).toBeGreaterThan(0);
+    expect(report.warnings).toContain(
+      `Fetch failed for explicit-url resource: ${baseUrl}/docs/slow. Timed out after 50 ms`
+    );
+    expect(report.candidates.map((candidate) => candidate.url)).not.toContain(
+      `${baseUrl}/docs/late`
+    );
+  });
+
+  it('warns and skips extracted candidate URLs with unsupported schemes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-candidate-schemes-'));
+    tempDirs.push(dir);
+
+    const { baseUrl } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+
+      switch (requestUrl.pathname) {
+        case '/docs/page':
+          writeHttpResponse(
+            response,
+            200,
+            'text/html',
+            [
+              '<html><body>',
+              '<a href="mailto:test@example.com">Mail</a>',
+              '<a href="ftp://example.com/file">FTP</a>',
+              '<a href="javascript:alert(1)">Script</a>',
+              '<a href="https://user:leaky-secret@">Malformed credential candidate</a>',
+              '<a href="https://user:secret@example.com/docs/private">Credential candidate</a>',
+              '</body></html>',
+            ].join('')
+          );
+          return;
+        case '/llms.txt':
+          writeHttpResponse(response, 200, 'text/plain', '');
+          return;
+        case '/sitemap.xml':
+          writeHttpResponse(response, 200, 'application/xml', '<urlset></urlset>');
+          return;
+        default:
+          writeHttpResponse(response, 404, 'text/plain', 'not found');
+      }
+    });
+
+    const outputDir = join(dir, 'reports');
+    const { stderr } = await runCli([
+      'discover',
+      '--url',
+      `${baseUrl}/docs/page`,
+      '--output-dir',
+      outputDir,
+    ]);
+    const reportText = await readFile(join(outputDir, 'discovery-report.json'), 'utf-8');
+    const report = JSON.parse(reportText) as WebsiteDiscoveryReport;
+
+    expect(stderr).toContain(
+      'Warning: Skipped unsupported candidate URL scheme mailto: in explicit-url resource.'
+    );
+    expect(stderr).toContain(
+      'Warning: Skipped unsupported candidate URL scheme ftp: in explicit-url resource.'
+    );
+    expect(stderr).toContain(
+      'Warning: Skipped unsupported candidate URL scheme javascript: in explicit-url resource.'
+    );
+    expect(stderr).toContain('Warning: Skipped malformed candidate URL in explicit-url resource.');
+    expect(report.warnings).toContain(
+      'Scrubbed embedded credentials from candidate URL in explicit-url resource.'
+    );
+    expect(report.warnings).toContain('Skipped malformed candidate URL in explicit-url resource.');
+    expect(report.candidates.map((candidate) => candidate.url)).toEqual([
+      'https://example.com/docs/private',
+    ]);
+    expect(stderr).not.toContain('leaky-secret');
+    expect(reportText).not.toContain('user:secret');
+    expect(reportText).not.toContain('secret@example.com');
+    expect(reportText).not.toContain('leaky-secret');
+    expect(reportText).not.toContain('javascript:alert');
+  });
+
+  it('reports candidate limit behavior without fetching linked candidates', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-candidate-limit-'));
+    tempDirs.push(dir);
+
+    const { baseUrl, requests } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+
+      switch (requestUrl.pathname) {
+        case '/docs/page':
+          writeHttpResponse(
+            response,
+            200,
+            'text/html',
+            [
+              '<html><body>',
+              '<a href="/docs/one">One</a>',
+              '<a href="/docs/two">Two</a>',
+              '<a href="/docs/three">Three</a>',
+              '<a href="/docs/four">Four</a>',
+              '</body></html>',
+            ].join('')
+          );
+          return;
+        case '/llms.txt':
+          writeHttpResponse(response, 200, 'text/plain', '');
+          return;
+        case '/sitemap.xml':
+          writeHttpResponse(response, 200, 'application/xml', '<urlset></urlset>');
+          return;
+        default:
+          writeHttpResponse(
+            response,
+            500,
+            'text/plain',
+            `Unexpected request: ${requestUrl.pathname}`
+          );
+      }
+    });
+
+    const { report } = await discoverWebsite({
+      url: `${baseUrl}/docs/page`,
+      outputDir: join(dir, 'reports'),
+      maxCandidates: 2,
+    });
+
+    expect(requests.map((requestPath) => new URL(requestPath, baseUrl).pathname)).toEqual([
+      '/docs/page',
+      '/llms.txt',
+      '/sitemap.xml',
+    ]);
+    expect(report.crawlPolicy).toMatchObject({
+      maxCandidates: 2,
+      candidateLimitReached: true,
+      linkedCandidateFetches: false,
+      renderedJavaScript: false,
+    });
+    expect(report.candidates.map((candidate) => candidate.url)).toEqual([
+      `${baseUrl}/docs/one`,
+      `${baseUrl}/docs/two`,
+    ]);
+    expect(report.warnings).toContain(
+      'Candidate limit reached: 2; additional normalized URLs were not recorded.'
+    );
+  });
+
+  it('writes fetch failure warnings without crashing when resources cannot connect', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-fetch-failure-'));
+    tempDirs.push(dir);
+
+    const port = await reserveUnusedLocalPort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const { report } = await discoverWebsite({
+      url: `${baseUrl}/docs/page`,
+      outputDir: join(dir, 'reports'),
+      timeoutMs: 200,
+    });
+
+    expect(report.inspectedResources).toEqual([
+      {
+        url: `${baseUrl}/docs/page`,
+        status: null,
+        contentType: null,
+        byteSize: 0,
+        truncated: false,
+        sourceRole: 'explicit-url',
+      },
+      {
+        url: `${baseUrl}/llms.txt`,
+        status: null,
+        contentType: null,
+        byteSize: 0,
+        truncated: false,
+        sourceRole: 'llms-txt',
+      },
+      {
+        url: `${baseUrl}/sitemap.xml`,
+        status: null,
+        contentType: null,
+        byteSize: 0,
+        truncated: false,
+        sourceRole: 'sitemap-xml',
+      },
+    ]);
+    expect(report.candidates).toEqual([]);
+    expect(report.warnings).toHaveLength(3);
+    expect(report.warnings[0]).toContain(
+      `Fetch failed for explicit-url resource: ${baseUrl}/docs/page.`
+    );
+    expect(report.warnings[1]).toContain(
+      `Fetch failed for llms-txt resource: ${baseUrl}/llms.txt.`
+    );
+    expect(report.warnings[2]).toContain(
+      `Fetch failed for sitemap-xml resource: ${baseUrl}/sitemap.xml.`
+    );
+  });
+
+  it('warns and skips parsing resources with unsupported content types', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-content-type-'));
+    tempDirs.push(dir);
+
+    const { baseUrl } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+
+      if (requestUrl.pathname === '/data') {
+        writeHttpResponse(response, 200, 'application/json', '{"links":["/docs/reference"]}');
+        return;
+      }
+
+      writeHttpResponse(response, 404, 'text/plain', 'not found');
+    });
+
+    const outputDir = join(dir, 'reports');
+    const { stderr } = await runCli([
+      'discover',
+      '--url',
+      `${baseUrl}/data`,
+      '--output-dir',
+      outputDir,
+    ]);
+    const report = JSON.parse(
+      await readFile(join(outputDir, 'discovery-report.json'), 'utf-8')
+    ) as WebsiteDiscoveryReport;
+
+    expect(stderr).toContain(
+      `Warning: Unsupported content type for explicit-url resource: application/json at ${baseUrl}/data`
+    );
+    expect(report.candidates).toEqual([]);
+    expect(report.warnings).toContain(
+      `Unsupported content type for explicit-url resource: application/json at ${baseUrl}/data`
+    );
+  });
+
+  it('does not make unsupported source authority claims in website discovery output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-claims-'));
+    tempDirs.push(dir);
+
+    const { baseUrl } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+
+      switch (requestUrl.pathname) {
+        case '/docs/page':
+          writeHttpResponse(
+            response,
+            200,
+            'text/html',
+            '<html><body><a href="/docs/reference">Reference</a></body></html>'
+          );
+          return;
+        case '/llms.txt':
+          writeHttpResponse(response, 200, 'text/plain', '[Guide](/docs/guide.md)\n');
+          return;
+        case '/sitemap.xml':
+          writeHttpResponse(response, 200, 'application/xml', '<urlset></urlset>');
+          return;
+        default:
+          writeHttpResponse(response, 404, 'text/plain', 'not found');
+      }
+    });
+
+    const outputDir = join(dir, 'reports');
+    const { stdout, stderr } = await runCli([
+      'discover',
+      '--url',
+      `${baseUrl}/docs/page`,
+      '--output-dir',
+      outputDir,
+    ]);
+    const reportText = await readFile(join(outputDir, 'discovery-report.json'), 'utf-8');
+    const combinedOutput = `${stdout}\n${stderr}\n${reportText}`;
+
+    expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(combinedOutput).not.toMatch(/\bofficial\b/i);
+    expect(combinedOutput).not.toMatch(/\bscore\b/i);
+    expect(combinedOutput).not.toMatch(/\bselected\b/i);
+    expect(combinedOutput).not.toMatch(/\bsource[-\s]?truth\b/i);
+  });
+
+  it('reports truncated website resources when response bytes exceed the cap', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-truncated-'));
+    tempDirs.push(dir);
+
+    const { baseUrl } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+
+      if (requestUrl.pathname === '/docs/page') {
+        writeHttpResponse(
+          response,
+          200,
+          'text/html',
+          `<html><body><a href="/docs/first">First</a>${'x'.repeat(
+            70_000
+          )}<a href="/docs/late">Late</a></body></html>`
+        );
+        return;
+      }
+
+      writeHttpResponse(response, 404, 'text/plain', 'not found');
+    });
+
+    const outputDir = join(dir, 'reports');
+    const { stderr } = await runCli([
+      'discover',
+      '--url',
+      `${baseUrl}/docs/page`,
+      '--output-dir',
+      outputDir,
+    ]);
+    const report = JSON.parse(
+      await readFile(join(outputDir, 'discovery-report.json'), 'utf-8')
+    ) as WebsiteDiscoveryReport;
+
+    expect(stderr).toContain(
+      `Warning: Response truncated at 65536 bytes for explicit-url resource: ${baseUrl}/docs/page`
+    );
+    expect(report.inspectedResources[0]).toMatchObject({
+      url: `${baseUrl}/docs/page`,
+      status: 200,
+      contentType: 'text/html',
+      byteSize: 65536,
+      truncated: true,
+      sourceRole: 'explicit-url',
+    });
+    expect(report.warnings).toContain(
+      `Response truncated at 65536 bytes for explicit-url resource: ${baseUrl}/docs/page`
+    );
+    expect(report.candidates.map((candidate) => candidate.url)).toContain(`${baseUrl}/docs/first`);
+    expect(report.candidates.map((candidate) => candidate.url)).not.toContain(
+      `${baseUrl}/docs/late`
+    );
   });
 
   it('clones a local git repo into an explicit cache and writes a repo discovery report', async () => {

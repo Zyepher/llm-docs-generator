@@ -151,8 +151,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Scoped manifest hash/size verification for current configured SDK output
 - [x] Explicit local `discover --source` bounded inspection report
 - [x] Explicit repo `discover --repo` cache and bounded inspection report
+- [x] Explicit website `discover --url` bounded inspection report
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
-- [ ] Source-code, website discovery, and refresh verification
+- [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
 - [ ] OpenRef backward compatibility tests
 
@@ -166,14 +167,20 @@ Current discovery scope:
   explicit git repo in a cache, optionally inspects repo-relative
   `--scope <path>`, and writes `discovery-report.json` with repo input, cache
   path, commit, dirty state, traversal settings, candidates, and warnings.
+- `llm-docs discover --url <http-or-https-url>` inspects one explicit URL plus
+  same-origin root `/llms.txt` and `/sitemap.xml`. It writes
+  `discovery-report.json` with website input, normalized URL, inspected
+  resources, status/content type/byte counts, truncation flags, crawl policy,
+  candidate URLs, evidence/provenance, and warnings. It does not fetch linked
+  candidates or render JavaScript.
 
-Discovery does not generate docs, crawl websites, choose candidates, score
-trust, infer authority, claim source truth, or implement source-truth codebase
-docs generation. It orders candidates by deterministic evidence category and
-normalized path for agent review only. Repo cache handling is non-destructive;
-clean matching caches fetch remote refs without pulling into the checkout, and
-cached checkouts with local changes or ignored files are warned about and
-inspected as present.
+Discovery does not generate docs, crawl linked website candidates, choose
+candidates, score trust, infer authority, claim source truth, or implement
+source-truth codebase docs generation. It orders candidates deterministically
+for agent review only. Repo cache handling is non-destructive; clean matching
+caches fetch remote refs without pulling into the checkout, and cached
+checkouts with local changes or ignored files are warned about and inspected as
+present.
 
 ## Files Modified/Created
 
