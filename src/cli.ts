@@ -13,7 +13,10 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import packageJson from '../package.json';
-import { rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, rm } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { ConfigLoader } from './config/loader.js';
 import { discoverLocalSource } from './core/discovery.js';
@@ -35,6 +38,47 @@ const GENERATOR_NAME = packageJson.name;
 const GENERATOR_VERSION = packageJson.version;
 const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';
 const CAPABILITIES_SCHEMA_VERSION = '0.1.0';
+const AGENT_CONTEXT_SCHEMA_VERSION = '0.1.0';
+const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+const AGENT_CONTEXT_ARTIFACTS = [
+  {
+    id: 'agent-context',
+    name: 'Agent Context',
+    path: 'AGENT_CONTEXT.md',
+    intendedUse:
+      'Agent-facing product boundary, intent router, current capabilities, limitations, and workflow rules.',
+  },
+  {
+    id: 'project-index',
+    name: 'Project Index',
+    path: 'index.md',
+    intendedUse:
+      'Navigation map for agents, humans, engineers, current CLI commands, and source files.',
+  },
+] as const;
+
+type AgentContextArtifact = {
+  id: string;
+  name: string;
+  path: string;
+  byteSize: number;
+  sha256: string;
+  intendedUse: string;
+};
+
+type AgentContextContract = {
+  schemaVersion: string;
+  mode: string;
+  generator: {
+    packageName: string;
+    packageVersion: string;
+    cliName: string;
+    binary: string;
+  };
+  contextArtifacts: AgentContextArtifact[];
+  limitations: string[];
+};
 
 const CAPABILITIES_CONTRACT = {
   schemaVersion: CAPABILITIES_SCHEMA_VERSION,
@@ -159,6 +203,22 @@ const CAPABILITIES_CONTRACT = {
       ],
     },
     {
+      id: 'agent-context',
+      command: 'agent context',
+      mode: 'agent context --json',
+      status: 'implemented',
+      inputBoundary: 'packaged context files only',
+      outputFiles: ['stdout JSON metadata'],
+      summary: 'read-only metadata for packaged agent context artifacts',
+      limitations: [
+        'packaged context metadata only',
+        'does not install/register skills',
+        'no user config writes',
+        'no environment probing',
+        'no network',
+      ],
+    },
+    {
       id: 'generate-sdk',
       command: 'generate',
       mode: 'generate --sdk',
@@ -275,8 +335,83 @@ const CAPABILITIES_CONTRACT = {
       reason:
         'source-truth generation is limited to observed export, signature, package/config, and path context facts',
     },
+    {
+      id: 'agent-install-codex',
+      command: 'agent install codex',
+      status: 'planned-unsupported',
+      reason:
+        'no current CLI skill installer; installing/registering skills remains separate from packaged context metadata',
+    },
+    {
+      id: 'agent-doctor',
+      command: 'agent doctor',
+      status: 'planned-unsupported',
+      reason:
+        'no current CLI host diagnostics; the CLI does not probe PATH, host config, or skill installation state',
+    },
   ],
 } as const;
+
+function resolvePackageLocalPath(packageRelativePath: string): string {
+  const resolvedPath = resolve(PACKAGE_ROOT, packageRelativePath);
+  const relativePath = relative(PACKAGE_ROOT, resolvedPath);
+
+  if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+    throw new Error(`context artifact path escapes package root: ${packageRelativePath}`);
+  }
+
+  return resolvedPath;
+}
+
+async function readAgentContextArtifact(
+  artifact: (typeof AGENT_CONTEXT_ARTIFACTS)[number]
+): Promise<AgentContextArtifact> {
+  const artifactPath = resolvePackageLocalPath(artifact.path);
+  let content: Buffer;
+
+  try {
+    content = await readFile(artifactPath);
+  } catch (error) {
+    const errorCode =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code: unknown }).code)
+        : 'unknown';
+
+    throw new Error(`packaged context artifact unavailable (${errorCode}): ${artifact.path}`);
+  }
+
+  return {
+    id: artifact.id,
+    name: artifact.name,
+    path: artifact.path,
+    byteSize: content.byteLength,
+    sha256: createHash('sha256').update(content).digest('hex'),
+    intendedUse: artifact.intendedUse,
+  };
+}
+
+async function buildAgentContextContract(): Promise<AgentContextContract> {
+  return {
+    schemaVersion: AGENT_CONTEXT_SCHEMA_VERSION,
+    mode: 'agent-context-packaged-metadata',
+    generator: {
+      packageName: GENERATOR_NAME,
+      packageVersion: GENERATOR_VERSION,
+      cliName: CLI_NAME,
+      binary: 'llm-docs',
+    },
+    contextArtifacts: await Promise.all(
+      AGENT_CONTEXT_ARTIFACTS.map((artifact) => readAgentContextArtifact(artifact))
+    ),
+    limitations: [
+      'Reports packaged context metadata only.',
+      'Does not install or register skills.',
+      'Does not write user config.',
+      'Does not probe environment state.',
+      'Does not perform network access.',
+    ],
+  };
+}
 
 function resolvePlannedOutputVersion(
   sdkName: string,
@@ -316,6 +451,55 @@ program
     console.log(`  Implemented modes: ${CAPABILITIES_CONTRACT.implemented.length}`);
     console.log(`  Planned or unsupported modes: ${CAPABILITIES_CONTRACT.plannedUnsupported.length}`);
     console.log('  Use --json for the stable agent contract.');
+  });
+
+// ============================================================================
+// AGENT COMMAND
+// ============================================================================
+
+const agentCommand = program
+  .command('agent')
+  .description('Report read-only agent metadata packaged with this CLI');
+
+agentCommand
+  .command('context')
+  .description('Report packaged read-only agent context metadata')
+  .option('--json', 'Print deterministic machine-readable agent context metadata')
+  .action(async (options: { json?: boolean }) => {
+    try {
+      const context = await buildAgentContextContract();
+
+      if (options.json === true) {
+        console.log(JSON.stringify(context, null, 2));
+        return;
+      }
+
+      console.log(chalk.bold('llm-docs agent context'));
+      console.log(`  Schema: ${context.schemaVersion}`);
+      console.log(`  Package: ${context.generator.packageName}@${context.generator.packageVersion}`);
+      console.log(`  Binary: ${context.generator.binary}`);
+      console.log('  Context artifacts:');
+
+      for (const artifact of context.contextArtifacts) {
+        console.log(`  - ${artifact.name} (${artifact.id})`);
+        console.log(`    Path: ${artifact.path}`);
+        console.log(`    Size: ${artifact.byteSize} bytes`);
+        console.log(`    SHA-256: ${artifact.sha256}`);
+        console.log(`    Intended use: ${artifact.intendedUse}`);
+      }
+
+      console.log('  Limitations:');
+
+      for (const limitation of context.limitations) {
+        console.log(`  - ${limitation}`);
+      }
+
+      console.log('  Use --json for the stable agent metadata contract.');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Agent context failed: ${errorMsg}`));
+      process.exit(1);
+    }
   });
 
 // ============================================================================
