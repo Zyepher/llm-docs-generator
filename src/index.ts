@@ -5,6 +5,8 @@
 // Core exports
 export { OpenRefParser, parseOpenRefSpec, getParserStats } from './parsers/openref/parser.js';
 export { OpenApiFormatParser, openApiParser, parseOpenApiFile } from './parsers/openapi/index.js';
+export { RstFormatParser, parseRstFile, rstParser } from './parsers/rst/index.js';
+export type { RstDocument } from './parsers/rst/index.js';
 export { LLMFormatter, formatSpecData } from './core/formatter.js';
 export {
   detectFormat,

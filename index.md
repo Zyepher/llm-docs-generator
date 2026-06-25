@@ -125,13 +125,16 @@ The current CLI does not yet expose `generate --source`, refresh, source
 verification, or source-truth codebase docs generation. It writes
 `manifest.json` for successful configured `generate --sdk` tasks and verifies
 current configured SDK manifest source and output file hashes and byte sizes
-only. Markdown / MDX / DocC and OpenAPI 3.x / Swagger 2.0 parsing exist in
-parser modules but are not wired as current CLI generation commands. The
+only. Markdown / MDX / DocC, RST, and OpenAPI 3.x / Swagger 2.0 parsing exist
+in parser modules but are not wired as current CLI generation commands. The
 Markdown parser accepts local `.md`, `.markdown`, and `.mdx` files and
 directories containing them; MDX cleanup is deterministic, preserves fenced
-code, and does not evaluate JSX or imports. Discovery reports do not generate
-docs, choose sources, assign trust scores, infer authority, or claim source
-truth. Discovery candidates are ordered deterministically for agent review only.
+code, and does not evaluate JSX or imports. The RST parser accepts local `.rst`
+files and directories containing nested `.rst` files, supports a documented
+Python-style subset, and records warnings for unsupported directives/includes
+without executing or fetching them. Discovery reports do not generate docs,
+choose sources, assign trust scores, infer authority, or claim source truth.
+Discovery candidates are ordered deterministically for agent review only.
 
 The current CLI is implemented in:
 
@@ -162,6 +165,9 @@ Parsers:
 - [src/parsers/markdown/index.ts](src/parsers/markdown/index.ts)
 - [src/parsers/markdown/parser.ts](src/parsers/markdown/parser.ts)
 - [src/parsers/markdown/adapter.ts](src/parsers/markdown/adapter.ts)
+- [src/parsers/rst/index.ts](src/parsers/rst/index.ts)
+- [src/parsers/rst/parser.ts](src/parsers/rst/parser.ts)
+- [src/parsers/rst/adapter.ts](src/parsers/rst/adapter.ts)
 
 Configuration and source hints:
 

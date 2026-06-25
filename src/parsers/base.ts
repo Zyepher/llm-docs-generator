@@ -15,6 +15,7 @@ export enum FormatType {
   OPENREF = 'openref',
   OPENAPI = 'openapi',
   MARKDOWN = 'markdown',
+  RST = 'rst',
   AUTO = 'auto',
 }
 
