@@ -61,6 +61,12 @@ Current implementation:
   render JavaScript, does not execute content, does not fetch linked resources,
   and does not infer source authority.
 - Can format parsed docs into LLM-friendly text.
+- Can chunk existing DocNode IR through a deterministic library API. The
+  chunker preserves semantic heading/path context, prose, code fences, and data
+  blocks; emits stable path-derived chunk IDs, ordinal order, content hashes,
+  source format/path metadata when present, character counts, estimated token
+  counts, and warnings for oversized indivisible blocks or malformed tree
+  shapes.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks.
 - Verifies current `configured-sdk` manifests by checking the recorded
@@ -88,9 +94,11 @@ Current implementation:
   `generate --sdk`, `verify`, `list-sdks`, and `validate --sdk`.
 - Does not yet implement broad website crawling, refresh, source verification,
   full next-generation manifests, or source-truth codebase documentation
-  generation. Discovery modes are inspection foundations only; they do not
-  generate docs, choose sources, assign trust scores, infer authority, or claim
-  source truth.
+  generation. Semantic chunking exists as a library capability for existing
+  DocNode IR only; current CLI generation, manifests, and discovery reports do
+  not yet consume or publish semantic chunk records. Discovery modes are
+  inspection foundations only; they do not generate docs, choose sources,
+  assign trust scores, infer authority, or claim source truth.
 - Local and repo discovery order candidates by deterministic evidence category
   and normalized path for agent review. Website discovery orders extracted
   candidate URLs by deterministic observation order and aggregates evidence from
