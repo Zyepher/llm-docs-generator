@@ -54,6 +54,12 @@ Current implementation:
   underline headings, paragraphs, simple lists as prose, literal blocks, and
   `code-block` / `code` directives. It does not execute includes, fetch
   content, run Sphinx/docutils transforms, or choose source authority.
+- Can parse local static HTML `.html` / `.htm` files and directories through
+  parser modules. HTML support is a lower-confidence rendered-HTML fallback:
+  title or H1 fallback, H2-H6 hierarchy, paragraphs, simple lists, pre/code
+  blocks, and simple tables. It strips scripts/styles/templates, does not
+  render JavaScript, does not execute content, does not fetch linked resources,
+  and does not infer source authority.
 - Can format parsed docs into LLM-friendly text.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks.

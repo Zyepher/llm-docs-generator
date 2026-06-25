@@ -2,7 +2,7 @@
 
 **Status**: ✅ **COMPLETE AND WORKING**
 
-Successfully implemented a general-purpose, multi-format LLM documentation generator that handles OpenRef YAML (Supabase), Markdown/MDX/DocC, and RST parser inputs.
+Successfully implemented a general-purpose, multi-format LLM documentation generator that handles OpenRef YAML (Supabase), Markdown/MDX/DocC, RST, and static HTML parser inputs.
 
 ## What Was Built
 
@@ -28,10 +28,14 @@ llm-docs-generator/
 │   │   │   ├── parser.ts          ✅ Markdown/MDX/DocC parser
 │   │   │   ├── adapter.ts         ✅ Markdown/MDX → IR adapter
 │   │   │   └── index.ts           ✅ Markdown wrapper
-│   │   └── rst/
-│   │       ├── parser.ts          ✅ deterministic RST subset parser
-│   │       ├── adapter.ts         ✅ RST → IR adapter
-│   │       └── index.ts           ✅ RST wrapper
+│   │   ├── rst/
+│   │   │   ├── parser.ts          ✅ deterministic RST subset parser
+│   │   │   ├── adapter.ts         ✅ RST → IR adapter
+│   │   │   └── index.ts           ✅ RST wrapper
+│   │   └── html/
+│   │       ├── parser.ts          ✅ static HTML extraction fallback parser
+│   │       ├── adapter.ts         ✅ HTML → IR adapter
+│   │       └── index.ts           ✅ HTML wrapper
 │   └── config/
 │       └── presets/
 │           └── swift-book.json    ✅ Swift-book configuration
@@ -53,6 +57,9 @@ llm-docs-generator/
      Swift Programming Language book
    - **RST**: explicit local `.rst` files and directories containing `.rst`
      files parsed as a deterministic Python-style documentation subset
+   - **HTML**: explicit local `.html` / `.htm` files and directories containing
+     HTML files parsed as a deterministic lower-confidence rendered-HTML
+     fallback
    - Extensible: Add new formats easily
 
 3. **Auto-Detection**
@@ -174,6 +181,19 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - Unsupported directives/includes → warnings plus safe prose where possible;
   includes are not executed or fetched
 
+**HTML → IR:**
+
+- File → SECTION DocNode with `format: html`, `sourcePath`, parser details,
+  warnings, and lower-confidence rendered-HTML fallback metadata
+- Directory → ROOT DocNode containing sorted file SECTION nodes
+- Document `<title>` with H1 fallback → document title
+- H2 → CATEGORY, H3 → OPERATION, H4-H6 → nested ITEM hierarchy
+- Paragraphs and simple list items → PROSE ContentBlocks
+- `pre` / `code` blocks → CODE ContentBlocks with simple language hints
+- Simple tables → DATA ContentBlocks
+- `script`, `style`, and `template` elements are stripped; JavaScript is not
+  rendered or executed, and linked resources are not fetched
+
 ## Benefits
 
 1. **Reusability**: One tool for multiple doc sources
@@ -195,6 +215,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit repo `discover --repo` cache and bounded inspection report
 - [x] Explicit website `discover --url` bounded inspection report
 - [x] RST parser foundation for explicit local Python-style documentation
+- [x] Static HTML parser foundation for explicit local rendered-HTML fallback
 - [ ] Manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, and refresh verification
 - [ ] Plugin system for custom parsers
@@ -267,6 +288,24 @@ Current RST parser scope:
 - Exists as parser/library support and is not yet a `generate --source` CLI
   workflow.
 
+Current HTML parser scope:
+
+- Accepts explicit local `.html` and `.htm` files.
+- Accepts directories containing nested HTML files, traverses local filesystem
+  entries deterministically, sorts parsed files, and does not follow symlinked
+  entries.
+- Records `format: html`, `sourcePath`, parser details, warnings,
+  `sourceKind: rendered-html-fallback`, `renderedHtmlFallback: true`, and
+  `confidence: lower` metadata.
+- Preserves document title with H1 fallback, H2-H6 hierarchy, paragraphs,
+  simple list items as prose, `pre` / `code` blocks as CODE, and simple tables
+  as DATA.
+- Strips `script`, `style`, and `template` elements before parsing.
+- Does not render JavaScript, execute content, fetch linked resources, follow
+  links, infer source authority, or choose candidate sources.
+- Exists as parser/library support and is not yet a `generate --source` CLI
+  workflow.
+
 ## Files Modified/Created
 
 **New Core Files:**
@@ -280,6 +319,7 @@ Current RST parser scope:
 - `src/parsers/base.ts` - Parser interface
 - `src/parsers/openref/` - OpenRef parser + adapter
 - `src/parsers/markdown/` - Markdown parser + adapter
+- `src/parsers/html/` - Static HTML parser + adapter
 
 **Configuration:**
 

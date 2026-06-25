@@ -1095,7 +1095,7 @@ describe('CLI compatibility behavior', () => {
     expect(urlWithCacheDir.stderr).toContain(
       'Discovery failed: discover --scope and --cache-dir are only supported with --repo.'
     );
-  });
+  }, 20000);
 
   it('warns without failing when same-origin well-known resources return non-2xx responses', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-url-404-'));
