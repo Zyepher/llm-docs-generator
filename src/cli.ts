@@ -320,9 +320,11 @@ const CAPABILITIES_CONTRACT = {
       status: 'implemented',
       inputBoundary: 'explicit local file or directory',
       outputFiles: ['discovery-report.json', 'manifest.json'],
-      summary: 'bounded local source inspection with deterministic candidate file evidence',
+      summary:
+        'bounded local source inspection with deterministic candidate file evidence and a compact content-free candidate evidence manifest index',
       limitations: [
         'candidate evidence for agent review only',
+        'candidate evidence index is manifest metadata only',
         'no docs generation',
         'no source selection',
         'no trust scoring',
@@ -337,9 +339,10 @@ const CAPABILITIES_CONTRACT = {
       options: ['--scope <path>', '--cache-dir <dir>', '--output-dir <dir>'],
       outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
-        'bounded repository inspection with stable cache reuse and optional repo-relative scope',
+        'bounded repository inspection with stable cache reuse, optional repo-relative scope, and a compact content-free candidate evidence manifest index',
       limitations: [
         'candidate evidence for agent review only',
+        'candidate evidence index is manifest metadata only',
         'no repo script execution',
         'no docs generation',
         'no source selection',
@@ -354,9 +357,10 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'explicit http or https URL',
       outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
-        'bounded static website inspection for the explicit URL plus same-origin /llms.txt and /sitemap.xml',
+        'bounded static website inspection for the explicit URL plus same-origin /llms.txt and /sitemap.xml, with a compact content-free candidate evidence manifest index',
       limitations: [
         'candidate evidence for agent review only',
+        'candidate evidence index is manifest metadata only',
         'no linked candidate fetching',
         'no JavaScript rendering',
         'no broad crawling',
@@ -505,10 +509,11 @@ const CAPABILITIES_CONTRACT = {
       status: 'implemented',
       inputBoundary: 'discovery-report manifest.json',
       summary:
-        'file integrity and basic schema consistency checks for discovery report manifests',
+        'file integrity, basic schema consistency, and optional candidate evidence index checks for discovery report manifests',
       limitations: [
         'discovery-report manifest mode only',
         'candidate evidence for agent review only',
+        'candidate evidence indexes are content-free and do not score candidates',
         'no task fit decision',
         'no source selection',
         'verify does not refresh discovery reports',

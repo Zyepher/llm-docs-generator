@@ -318,7 +318,38 @@ interface DiscoveryReportManifest {
     warningCount: number;
     urlResourceCount?: number;
   };
+  candidateEvidenceIndex?: CandidateEvidenceManifestIndex;
   generatedOutputs: ManifestFileEntry[];
+}
+
+interface CandidateEvidenceManifestIndex {
+  candidateCount: number;
+  aggregateHash: string;
+  context: Record<string, unknown>;
+  candidates: Array<{
+    path?: string;
+    url?: string;
+    order: number;
+    kind?: string;
+    format?: string;
+    hints?: string[];
+    formatHints?: string[];
+    evidence: {
+      category?: string;
+      signals?: string[];
+      relations?: string[];
+      flags?: string[];
+    };
+    byteSize?: number;
+    sha256?: string;
+    sameOrigin?: boolean;
+    external?: boolean;
+    sourceResources?: Array<{
+      url: string;
+      sourceRole: string;
+      evidence: string;
+    }>;
+  }>;
 }
 
 interface CapabilitiesContract {
@@ -657,6 +688,89 @@ function semanticChunkIndexAggregateHashForTest(index: SemanticChunkManifestInde
   hash.update('\n');
 
   return `sha256:${hash.digest('hex')}`;
+}
+
+function candidateEvidenceIndexAggregateHashForTest(index: CandidateEvidenceManifestIndex): string {
+  const hash = createHash('sha256');
+  hash.update('llm-docs-generator:discovery-candidate-evidence-index:v1\n');
+  hash.update(
+    JSON.stringify({
+      candidateCount: index.candidateCount,
+      context: index.context,
+      candidates: index.candidates,
+    })
+  );
+  hash.update('\n');
+
+  return `sha256:${hash.digest('hex')}`;
+}
+
+function expectLocalCandidateEvidenceIndex(
+  index: CandidateEvidenceManifestIndex | undefined,
+  report: { candidates: DiscoveryCandidate[] },
+  expectedContext: CandidateEvidenceManifestIndex['context']
+): asserts index is CandidateEvidenceManifestIndex {
+  expect(index).toBeDefined();
+  expect(index).toMatchObject({
+    candidateCount: report.candidates.length,
+    context: expectedContext,
+  });
+  expect(index.aggregateHash).toBe(candidateEvidenceIndexAggregateHashForTest(index));
+  expect(index.candidates).toEqual(
+    report.candidates.map((candidate) => ({
+      path: candidate.path,
+      order: candidate.order,
+      kind: candidate.kind,
+      format: candidate.format,
+      ...(candidate.hints.length === 0 ? {} : { hints: candidate.hints }),
+      ...(candidate.formatHints.length === 0 ? {} : { formatHints: candidate.formatHints }),
+      evidence: candidate.evidence,
+      byteSize: candidate.byteSize,
+      sha256: candidate.sha256,
+    }))
+  );
+}
+
+function expectWebsiteCandidateEvidenceIndex(
+  index: CandidateEvidenceManifestIndex | undefined,
+  report: WebsiteDiscoveryReport
+): asserts index is CandidateEvidenceManifestIndex {
+  expect(index).toBeDefined();
+  expect(index).toMatchObject({
+    candidateCount: report.candidates.length,
+    context: {
+      website: report.website,
+      crawlPolicy: {
+        linkedCandidateFetches: false,
+        renderedJavaScript: false,
+        inspectedResourceCount: report.inspectedResources.length,
+        sameOriginWellKnownResourceCount: report.crawlPolicy.sameOriginWellKnownResources.length,
+      },
+    },
+  });
+  expect(index.aggregateHash).toBe(candidateEvidenceIndexAggregateHashForTest(index));
+  expect(index.candidates).toEqual(
+    report.candidates.map((candidate) => ({
+      url: candidate.url,
+      order: candidate.order,
+      evidence: candidate.evidence,
+      sameOrigin: candidate.sameOrigin,
+      external: candidate.external,
+      ...(candidate.sourceResources.length === 0
+        ? {}
+        : { sourceResources: candidate.sourceResources }),
+    }))
+  );
+}
+
+function expectCandidateEvidenceIndexHasNoReportContent(
+  index: CandidateEvidenceManifestIndex
+): void {
+  const text = JSON.stringify(index);
+
+  expect(text).not.toContain('Stable docs.');
+  expect(text).not.toContain('<h1>Home</h1>');
+  expect(text).not.toContain('Readme\\n======');
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -1707,6 +1821,14 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
+    expectLocalCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report, {
+      source: {
+        input: sourceDir,
+        resolvedPath: sourceDir,
+        type: 'directory',
+      },
+    });
+    expectCandidateEvidenceIndexHasNoReportContent(manifest.candidateEvidenceIndex);
     expect(report.traversal.skippedDirectoryNames).toContain('node_modules');
     expect(report.candidates.map((candidate) => candidate.path)).toEqual([
       'spec/openapi.json',
@@ -2511,6 +2633,7 @@ describe('CLI compatibility behavior', () => {
         },
       ],
     });
+    expectWebsiteCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report);
     expect(requests.map((requestPath) => new URL(requestPath, baseUrl).pathname)).toEqual([
       '/docs/page',
       '/llms.txt',
@@ -3221,6 +3344,20 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
+    expectLocalCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report, {
+      repo: {
+        input: report.repo.input,
+        normalizedInput: report.repo.normalizedInput,
+        commit: report.repo.git.commit,
+        dirty: report.repo.git.dirty,
+      },
+      scope: {
+        input: report.scope.input,
+        path: report.scope.path,
+        resolvedPath: report.scope.resolvedPath,
+        type: report.scope.type,
+      },
+    });
     expect(report.repo.normalizedInput.endsWith(basename(repoDir))).toBe(true);
     expect(report.repo.git.remoteUrl?.endsWith(basename(repoDir))).toBe(true);
     expect(report.repo.cachePath.startsWith(`${cacheDir}/`)).toBe(true);
@@ -6416,6 +6553,192 @@ describe('CLI compatibility behavior', () => {
       'generatedOutputs[0].path must match discovery.reportPath'
     );
     expect(pathResult.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects stale discovery candidate evidence index metadata', async () => {
+    const { outputDir, reportPath, manifestPath } = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-discovery-candidate-index-stale-'
+    );
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+    const firstCandidate = report.candidates[0];
+
+    if (firstCandidate === undefined) {
+      throw new Error('expected discovery report candidate');
+    }
+
+    firstCandidate.formatHints.push('stale-index-test-hint');
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+    await refreshDiscoveryManifestReportMetadata(manifestPath, reportPath);
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 1');
+    expect(result.stderr).toContain(
+      'discovery candidate evidence index: manifest metadata does not match discovery-report.json'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects discovery candidate evidence index content leakage and score fields', async () => {
+    const { outputDir, manifestPath } = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-discovery-candidate-index-leak-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest & {
+      candidateEvidenceIndex: CandidateEvidenceManifestIndex & {
+        score?: number;
+      };
+    };
+    const firstCandidate = manifest.candidateEvidenceIndex.candidates[0] as
+      | (CandidateEvidenceManifestIndex['candidates'][number] & {
+          content?: string;
+          authorityScore?: number;
+        })
+      | undefined;
+
+    if (firstCandidate === undefined) {
+      throw new Error('expected discovery candidate evidence index candidate');
+    }
+
+    manifest.candidateEvidenceIndex.score = 0.99;
+    firstCandidate.content = '# Leaked report content\n';
+    firstCandidate.authorityScore = 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('candidateEvidenceIndex.score is not supported');
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.candidates[0].content is not supported'
+    );
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.candidates[0].authorityScore is not supported'
+    );
+  });
+
+  it('rejects URL-only fields on path discovery candidate evidence indexes', async () => {
+    const { outputDir, manifestPath } = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-discovery-candidate-index-path-wrong-kind-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest & {
+      candidateEvidenceIndex: CandidateEvidenceManifestIndex;
+    };
+    const firstCandidate = manifest.candidateEvidenceIndex.candidates[0];
+
+    if (firstCandidate === undefined) {
+      throw new Error('expected discovery candidate evidence index candidate');
+    }
+
+    firstCandidate.url = 'https://example.com/not-a-path-candidate';
+    firstCandidate.sourceResources = [
+      {
+        url: 'https://example.com/source-with-report-content',
+        sourceRole: 'explicit-url',
+        evidence: 'link',
+      },
+    ];
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('candidateEvidenceIndex.candidates[0].url is not supported');
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.candidates[0].sourceResources is not supported'
+    );
+  });
+
+  it('rejects path-only fields on URL discovery candidate evidence indexes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discovery-candidate-index-url-wrong-kind-'));
+    tempDirs.push(dir);
+    const { baseUrl } = await startTestServer((request, response) => {
+      const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
+
+      switch (requestUrl.pathname) {
+        case '/docs':
+          writeHttpResponse(
+            response,
+            200,
+            'text/html',
+            '<a href="/docs/api">API reference</a>\n'
+          );
+          return;
+        case '/llms.txt':
+          writeHttpResponse(response, 200, 'text/plain', '');
+          return;
+        case '/sitemap.xml':
+          writeHttpResponse(response, 200, 'application/xml', '<urlset></urlset>\n');
+          return;
+        default:
+          writeHttpResponse(response, 404, 'text/plain', 'missing\n');
+      }
+    });
+    const outputDir = join(dir, 'reports');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await runCli(['discover', '--url', `${baseUrl}/docs`, '--output-dir', outputDir]);
+
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest & {
+      candidateEvidenceIndex: CandidateEvidenceManifestIndex;
+    };
+    const firstCandidate = manifest.candidateEvidenceIndex.candidates[0];
+
+    if (firstCandidate === undefined) {
+      throw new Error('expected URL discovery candidate evidence index candidate');
+    }
+
+    firstCandidate.path = 'docs/api.md';
+    firstCandidate.kind = 'markdown';
+    firstCandidate.format = 'markdown';
+    firstCandidate.byteSize = 42;
+    firstCandidate.sha256 = '0'.repeat(64);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('candidateEvidenceIndex.candidates[0].path is not supported');
+    expect(result.stderr).toContain('candidateEvidenceIndex.candidates[0].kind is not supported');
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.candidates[0].format is not supported'
+    );
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.candidates[0].byteSize is not supported'
+    );
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.candidates[0].sha256 is not supported'
+    );
+  });
+
+  it('accepts older discovery manifests without a candidate evidence index', async () => {
+    const { outputDir, manifestPath } = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-discovery-candidate-index-backcompat-'
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
+
+    delete manifest.candidateEvidenceIndex;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 1');
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
   });
 
   it('rejects tampered swift-book preset metadata during source docs verification', async () => {

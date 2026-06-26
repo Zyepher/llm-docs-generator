@@ -114,7 +114,8 @@ The current `discover --source` command performs local, explicit, bounded file
 inspection for a provided file or directory. It writes `discovery-report.json`
 and a discovery-report `manifest.json` with candidate file hints, deterministic
 evidence categories and signals, report order, hashes, traversal settings, and
-warnings.
+warnings. The manifest also records a compact content-free
+`candidateEvidenceIndex` derived from `discovery-report.json`.
 
 The current `discover --repo` command clones or reuses an explicit git repo in
 a stable cache, optionally inspects one repo-relative scope path, and writes a
@@ -123,7 +124,8 @@ commit, dirty state, traversal settings, candidates, and warnings. For clean
 matching caches it fetches remote refs but does not pull or mutate the
 checked-out commit, and it does not run repo scripts. Ignored local files in the
 cache are treated as dirty cache contents, so fetches are skipped before any
-update step can risk those files.
+update step can risk those files. The manifest also records a compact
+content-free `candidateEvidenceIndex` derived from `discovery-report.json`.
 
 The current `discover --url` command performs bounded static inspection for one
 explicit HTTP(S) URL. It fetches only the explicit URL, same-origin root
@@ -131,7 +133,8 @@ explicit HTTP(S) URL. It fetches only the explicit URL, same-origin root
 or fetch linked candidates. It writes a website discovery report with inspected
 resources, response status/content type/byte counts, crawl policy, extracted
 candidate URLs, evidence/provenance, warnings, and a discovery-report
-`manifest.json`.
+`manifest.json` with a compact content-free `candidateEvidenceIndex` derived
+from `discovery-report.json`.
 
 The current `capabilities --json` command prints a deterministic
 machine-readable contract for agents. The contract includes schema version
@@ -235,9 +238,10 @@ source path existence/type, source file hashes and byte sizes, generated output
 paths, hashes, byte sizes, line counts, deterministic estimated token counts,
 symlink/path containment, and count consistency with `source-truth-report.json`
 when available. Discovery-report verification checks report file integrity and
-basic schema/mode/kind/count consistency only. Discovery reports do not
-generate docs, choose sources, assign trust scores, infer authority, or claim
-source truth.
+basic schema/mode/kind/count consistency, and optional candidate evidence index
+metadata against `discovery-report.json`. Discovery reports do not generate
+docs, choose sources, assign trust scores, infer authority, or claim source
+truth.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable
