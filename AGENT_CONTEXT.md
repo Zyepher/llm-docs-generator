@@ -78,11 +78,13 @@ Current implementation:
   derived only from generated JSONL records and excluding chunk content.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks,
-  including generated output hashes, byte sizes, line counts, and deterministic
-  estimated token counts.
+  including generator/sdk/parser/formatter metadata, generated output hashes,
+  byte sizes, line counts, and deterministic estimated token counts.
 - Verifies current `configured-sdk` manifests by checking the recorded
-  configured source and generated output file hashes, byte sizes, and valid
-  generated output line counts and estimated token counts when present.
+  generator metadata, sdk name/resolvedVersion/displayName, OpenRef parser
+  metadata, legacy formatter metadata, configured source, generated output file
+  hashes, byte sizes, and valid generated output line counts and estimated
+  token counts when present.
 - Verifies current `local-source-docs` manifests by checking source manifest
   shape, recorded generator/parser/formatter metadata, local source path
   existence, recorded source file byte sizes and SHA-256 hashes, generated
@@ -694,19 +696,21 @@ output kind/name metadata, optional `chunks/semantic-chunks.jsonl` metadata when
 `--chunks jsonl` is requested, optional compact semantic chunk manifest indexes
 derived from the JSONL records, and warnings. The current
 configured SDK generation path writes a scoped `manifest.json` with configured
-source details, hashes, parser and formatter metadata, generated file hashes,
-byte sizes, line counts, and deterministic estimated token counts. The current
-discovery commands write a scoped `manifest.json` beside `discovery-report.json`
-with discovery kind, report path, report schema/mode, factual counts, and
-report file hash, byte size, line count, deterministic estimated token count,
-and compact content-free candidate evidence index metadata derived from the
-report. The current `verify` command supports `configured-sdk`,
+source details, hashes, generator/sdk/parser/formatter metadata, generated file
+hashes, byte sizes, line counts, and deterministic estimated token counts. The
+current discovery commands write a scoped `manifest.json` beside
+`discovery-report.json` with discovery kind, report path, report schema/mode,
+factual counts, and report file hash, byte size, line count, deterministic
+estimated token count, and compact content-free candidate evidence index
+metadata derived from the report. The current `verify` command supports
+`configured-sdk`,
 `local-source-docs`, `source-truth-local-docs`, `discovery-report`, and
 `source-verification-local-evidence` manifests.
 For configured SDK manifests, it checks source and generated output hashes,
-byte sizes, and valid generated output line/token metadata when present, and
-rejects malformed optional line/token metadata before file checks. For
-source-mode manifests, it checks recorded generator/parser/formatter metadata,
+byte sizes, recorded generator/sdk/parser/formatter metadata, and valid
+generated output line/token metadata when present, and rejects malformed
+metadata before file checks. For source-mode manifests, it checks recorded
+generator/parser/formatter metadata,
 local source path shape and existence, source file hashes and byte sizes,
 generated output paths, hashes, byte sizes, line counts, and deterministic
 estimated token counts; when optional semantic chunk manifest indexes are

@@ -84,8 +84,9 @@ Current implemented capabilities include:
   hashes, parser/formatter metadata, and warnings
 - configured OpenRef SDK generation plus configured-SDK, source-docs,
   source-truth docs, discovery-report, and source-verification manifest
-  verification, including recorded generator/parser/formatter metadata checks
-  for local source-docs manifests
+  verification, including recorded generator/sdk/parser/formatter metadata
+  checks for configured-SDK manifests and recorded generator/parser/formatter
+  metadata checks for local source-docs manifests
 - explicit-manifest refresh for local source docs and source-truth docs that
   already record a local source path, with post-refresh manifest integrity
   verification
@@ -209,10 +210,12 @@ llm-docs refresh --manifest ./reports/source-truth/manifest.json
 Verification currently supports `configured-sdk`, `local-source-docs`,
 `source-truth-local-docs`, `discovery-report`, and
 `source-verification-local-evidence` manifests. Configured SDK verification
-checks manifest shape, source path existence, source content hash and byte
-size, generated file hashes, byte sizes, and valid generated output line counts
-and deterministic estimated token counts when present. Source-docs
-verification checks recorded generator metadata, parser name/version/format,
+checks recorded generator metadata, sdk name/resolvedVersion/displayName,
+OpenRef parser metadata, legacy formatter metadata, source path existence,
+source content hash and byte size, generated file hashes, byte sizes, and valid
+generated output line counts and deterministic estimated token counts when
+present. Source-docs verification checks recorded generator metadata, parser
+name/version/format,
 formatter name/version/format, local source path shape and existence, recorded
 source file hashes and byte sizes, generated output paths, hashes, byte sizes,
 line counts, deterministic estimated token counts, and optional semantic chunk

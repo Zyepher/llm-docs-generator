@@ -485,7 +485,10 @@ const testSpecYaml = [
   '',
 ].join('\n');
 
-async function createTestConfig(versionOrder: Array<'v1' | 'v2'> = ['v2', 'v1']): Promise<string> {
+async function createTestConfig(
+  versionOrder: Array<'v1' | 'v2'> = ['v2', 'v1'],
+  specFormat = 'openref-0.1'
+): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
   tempDirs.push(dir);
 
@@ -500,7 +503,7 @@ async function createTestConfig(versionOrder: Array<'v1' | 'v2'> = ['v2', 'v1'])
         spec: {
           url: `http://127.0.0.1:9/supabase_swift_${version}.yml`,
           localPath: specPath,
-          format: 'openref-0.1',
+          format: specFormat,
         },
         output: {
           baseDir: 'swift',
@@ -936,6 +939,34 @@ async function generateSwiftFixture(): Promise<{
     configDir,
     outputDir: join(outputDir, 'swift/v2'),
     manifestPath: join(outputDir, 'swift/v2/manifest.json'),
+  };
+}
+
+function validConfiguredSdkManifestMetadata(): Pick<
+  GenerationManifest,
+  'generator' | 'sdk' | 'parser' | 'formatter'
+> {
+  return {
+    generator: {
+      name: 'llm-docs-generator',
+      version: '1.0.0',
+      cliName: 'supabase-llm-docs',
+    },
+    sdk: {
+      name: 'swift',
+      resolvedVersion: 'v2',
+      displayName: 'Supabase Swift SDK v2',
+    },
+    parser: {
+      name: 'OpenRefParser',
+      version: '1.0.0',
+      format: 'openref-0.1',
+    },
+    formatter: {
+      name: 'LLMFormatter',
+      version: '1.0.0',
+      format: 'legacy-llm-docs',
+    },
   };
 }
 
@@ -1868,6 +1899,9 @@ describe('CLI compatibility behavior', () => {
       '--format openref|openref-0.1',
     ]);
     expect(implemented.get('generate-sdk')?.limitations).toContain('no preset generation');
+    expect(implemented.get('verify-configured-sdk')?.summary).toContain(
+      'recorded generator/sdk/parser/formatter metadata'
+    );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain('when present');
     expect(implemented.get('verify-discovery-report')).toMatchObject({
       command: 'verify',
@@ -4861,6 +4895,35 @@ describe('CLI compatibility behavior', () => {
     }
   );
 
+  it('canonicalizes configured SDK manifest format metadata for openref config aliases', async () => {
+    const configDir = await createTestConfig(['v2', 'v1'], 'openref');
+    const outputDir = join(configDir, 'output');
+
+    await runCli([
+      'generate',
+      '--sdk',
+      'swift',
+      '--sdk-version',
+      'v2',
+      '--config-dir',
+      configDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifestPath = join(outputDir, 'swift/v2/manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const verifyResult = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(manifest.mode).toBe('configured-sdk');
+    expect(manifest.source.format).toBe('openref-0.1');
+    expect(manifest.parser.format).toBe('openref-0.1');
+    expect(verifyResult.stdout).toContain('Manifest verification');
+    expect(verifyResult.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
   it('generates local Markdown and MDX directory source docs with manifest provenance', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-dir-'));
     tempDirs.push(dir);
@@ -7624,6 +7687,171 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).not.toContain('line count mismatch');
   });
 
+  it('rejects missing or malformed configured SDK manifest metadata before file checks', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const validManifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const cases: Array<{
+      name: string;
+      mutate(manifest: GenerationManifest & Record<string, unknown>): void;
+      expectedFailures: string[];
+    }> = [
+      {
+        name: 'missing generator',
+        mutate(nextManifest): void {
+          delete (nextManifest as Partial<GenerationManifest>).generator;
+        },
+        expectedFailures: ['missing generator object'],
+      },
+      {
+        name: 'non-object generator',
+        mutate(nextManifest): void {
+          (nextManifest as Record<string, unknown>).generator = 'llm-docs-generator';
+        },
+        expectedFailures: ['missing generator object'],
+      },
+      {
+        name: 'malformed generator',
+        mutate(nextManifest): void {
+          nextManifest.generator = {
+            name: '',
+            version: '',
+            cliName: '',
+          };
+        },
+        expectedFailures: [
+          'generator.name must be a non-empty string',
+          'generator.version must be a non-empty string',
+          'generator.cliName must be a non-empty string when present',
+        ],
+      },
+      {
+        name: 'missing sdk',
+        mutate(nextManifest): void {
+          delete (nextManifest as Partial<GenerationManifest>).sdk;
+        },
+        expectedFailures: ['missing sdk object'],
+      },
+      {
+        name: 'non-object sdk',
+        mutate(nextManifest): void {
+          (nextManifest as Record<string, unknown>).sdk = null;
+        },
+        expectedFailures: ['missing sdk object'],
+      },
+      {
+        name: 'malformed sdk',
+        mutate(nextManifest): void {
+          nextManifest.sdk = {
+            name: '',
+            resolvedVersion: '',
+            displayName: '',
+          };
+        },
+        expectedFailures: [
+          'sdk.name must be a non-empty string',
+          'sdk.resolvedVersion must be a non-empty string',
+          'sdk.displayName must be a non-empty string',
+        ],
+      },
+      {
+        name: 'missing parser',
+        mutate(nextManifest): void {
+          delete (nextManifest as Partial<GenerationManifest>).parser;
+        },
+        expectedFailures: ['missing parser object'],
+      },
+      {
+        name: 'non-object parser',
+        mutate(nextManifest): void {
+          (nextManifest as Record<string, unknown>).parser = [];
+        },
+        expectedFailures: ['missing parser object'],
+      },
+      {
+        name: 'malformed parser',
+        mutate(nextManifest): void {
+          nextManifest.parser = {
+            name: '',
+            version: '',
+            format: '',
+          };
+        },
+        expectedFailures: [
+          'parser.name must be a non-empty string',
+          'parser.version must be a non-empty string',
+          'parser.format must be openref-0.1',
+        ],
+      },
+      {
+        name: 'parser name mismatch',
+        mutate(nextManifest): void {
+          nextManifest.parser.name = 'MarkdownParser';
+        },
+        expectedFailures: ['parser.name must be OpenRefParser'],
+      },
+      {
+        name: 'parser format mismatch',
+        mutate(nextManifest): void {
+          nextManifest.parser.format = 'openapi';
+        },
+        expectedFailures: ['parser.format must be openref-0.1'],
+      },
+      {
+        name: 'missing formatter',
+        mutate(nextManifest): void {
+          delete (nextManifest as Partial<GenerationManifest>).formatter;
+        },
+        expectedFailures: ['missing formatter object'],
+      },
+      {
+        name: 'non-object formatter',
+        mutate(nextManifest): void {
+          (nextManifest as Record<string, unknown>).formatter = 'LLMFormatter';
+        },
+        expectedFailures: ['missing formatter object'],
+      },
+      {
+        name: 'malformed formatter',
+        mutate(nextManifest): void {
+          nextManifest.formatter = {
+            name: '',
+            version: '',
+            format: '',
+          };
+        },
+        expectedFailures: [
+          'formatter.name must be LLMFormatter',
+          'formatter.version must be a non-empty string',
+          'formatter.format must be legacy-llm-docs',
+        ],
+      },
+      {
+        name: 'formatter format mismatch',
+        mutate(nextManifest): void {
+          nextManifest.formatter.format = 'universal-llm-docs';
+        },
+        expectedFailures: ['formatter.format must be legacy-llm-docs'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const nextManifest = structuredClone(validManifest) as GenerationManifest &
+        Record<string, unknown>;
+      testCase.mutate(nextManifest);
+      await writeFile(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stdout, testCase.name).toContain('Manifest verification');
+      expect(result.stdout, testCase.name).toContain('Checked files: 0');
+      for (const expectedFailure of testCase.expectedFailures) {
+        expect(result.stderr, testCase.name).toContain(expectedFailure);
+      }
+      expect(result.stderr, testCase.name).not.toContain('hash mismatch');
+    }
+  }, 30_000);
+
   it('continues to follow configured SDK generated output symlinks during verification', async () => {
     const { outputDir, manifestPath } = await generateSwiftFixture();
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
@@ -8044,6 +8272,7 @@ describe('CLI compatibility behavior', () => {
         {
           schemaVersion: '0.1.0',
           mode: 'configured-sdk',
+          ...validConfiguredSdkManifestMetadata(),
           source: {
             resolvedSpecPath: 'config/source.yml',
             byteSize: await byteSize(sourcePath),
@@ -8100,6 +8329,7 @@ describe('CLI compatibility behavior', () => {
         {
           schemaVersion: '0.1.0',
           mode: 'configured-sdk',
+          ...validConfiguredSdkManifestMetadata(),
           source: {
             resolvedSpecPath: 'config/source.yml',
             byteSize: await byteSize(sourcePath),
@@ -8183,6 +8413,7 @@ describe('CLI compatibility behavior', () => {
         {
           schemaVersion: '0.1.0',
           mode: 'configured-sdk',
+          ...validConfiguredSdkManifestMetadata(),
           source: {
             resolvedSpecPath: sourcePath,
             byteSize: await byteSize(sourcePath),
@@ -8455,6 +8686,7 @@ describe('CLI compatibility behavior', () => {
         {
           schemaVersion: '0.1.0',
           mode: 'configured-sdk',
+          ...validConfiguredSdkManifestMetadata(),
           source: {
             resolvedSpecPath: sourcePath,
             byteSize: await byteSize(sourcePath),
@@ -8536,6 +8768,7 @@ describe('CLI compatibility behavior', () => {
         {
           schemaVersion: '0.1.0',
           mode: 'configured-sdk',
+          ...validConfiguredSdkManifestMetadata(),
           source: {
             resolvedSpecPath: sourcePath,
             byteSize: await byteSize(sourcePath),

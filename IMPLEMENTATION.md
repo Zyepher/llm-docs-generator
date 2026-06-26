@@ -239,8 +239,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] OpenAPI 3.x / Swagger 2.0 parser foundation for explicit local JSON/YAML
       files
 - [x] Scoped manifest generation for configured OpenRef CLI output
-- [x] Scoped manifest hash/size and valid line/token metadata verification for
-      current configured SDK output
+- [x] Scoped manifest recorded generator/sdk/parser/formatter metadata,
+      hash/size, and valid line/token metadata verification for current
+      configured SDK output
 - [x] Explicit local `discover --source` bounded inspection report
 - [x] Explicit repo `discover --repo` cache and bounded inspection report
 - [x] Explicit website `discover --url` bounded inspection report
@@ -527,9 +528,12 @@ Current explicit local source docs generation scope:
   metadata is present, verification rebuilds it from `discovery-report.json`
   and fails on malformed or stale index data; it does not choose candidates,
   validate task fit, claim source truth, refresh repos or websites, or perform
-  source-code verification. Source-docs verification checks recorded
-  generator/parser/formatter metadata, source files, and all generated text
-  outputs, including opt-in chunk JSONL when present. When a source-docs
+  source-code verification. Configured-SDK verification checks recorded
+  generator/sdk/parser/formatter metadata, configured source, and generated
+  outputs.
+  Source-docs verification checks recorded generator/parser/formatter metadata,
+  source files, and all generated text outputs, including opt-in chunk JSONL
+  when present. When a source-docs
   semantic chunk index is present, verification rebuilds it from the JSONL
   records and fails on malformed JSONL or stale index facts.
   Source-truth docs verification checks deterministic source-truth manifest

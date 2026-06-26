@@ -109,6 +109,10 @@ const DISCOVERY_REPORT_MODE_BY_KIND = {
 } as const;
 const SOURCE_DOCS_GENERATED_OUTPUT_KINDS = new Set(['llm-docs', 'semantic-chunks-jsonl']);
 const SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND = 'semantic-chunks-jsonl';
+const CONFIGURED_SDK_PARSER_NAME = 'OpenRefParser';
+const CONFIGURED_SDK_PARSER_FORMAT = 'openref-0.1';
+const CONFIGURED_SDK_FORMATTER_NAME = 'LLMFormatter';
+const CONFIGURED_SDK_FORMATTER_FORMAT = 'legacy-llm-docs';
 const SOURCE_DOCS_FORMATTER_NAME = 'UniversalFormatter';
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
 const SOURCE_DOCS_SOURCE_TYPES = new Set(['file', 'directory']);
@@ -645,11 +649,39 @@ async function verifyConfiguredSdkManifest(
   manifest: Record<string, unknown>
 ): Promise<VerifyGenerationManifestResult> {
   const failures: string[] = [];
+  const generator = manifest.generator;
+  const sdk = manifest.sdk;
   const source = manifest.source;
+  const parser = manifest.parser;
+  const formatter = manifest.formatter;
   const generatedOutputs = manifest.generatedOutputs;
+
+  if (!isObjectRecord(generator)) {
+    failures.push('malformed manifest: missing generator object');
+  } else {
+    validateGeneratorMetadata(generator, failures);
+  }
+
+  if (!isObjectRecord(sdk)) {
+    failures.push('malformed manifest: missing sdk object');
+  } else {
+    validateConfiguredSdkMetadata(sdk, failures);
+  }
 
   if (!isObjectRecord(source)) {
     failures.push('malformed manifest: missing source object');
+  }
+
+  if (!isObjectRecord(parser)) {
+    failures.push('malformed manifest: missing parser object');
+  } else {
+    validateConfiguredSdkParserMetadata(parser, failures);
+  }
+
+  if (!isObjectRecord(formatter)) {
+    failures.push('malformed manifest: missing formatter object');
+  } else {
+    validateConfiguredSdkFormatterMetadata(formatter, failures);
   }
 
   if (!Array.isArray(generatedOutputs)) {
@@ -1725,6 +1757,58 @@ function validateGeneratorMetadata(generator: Record<string, unknown>, failures:
 
   if ('cliName' in generator && !isNonEmptyString(generator.cliName)) {
     failures.push('malformed manifest: generator.cliName must be a non-empty string when present');
+  }
+}
+
+function validateConfiguredSdkMetadata(sdk: Record<string, unknown>, failures: string[]): void {
+  if (!isNonEmptyString(sdk.name)) {
+    failures.push('malformed manifest: sdk.name must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(sdk.resolvedVersion)) {
+    failures.push('malformed manifest: sdk.resolvedVersion must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(sdk.displayName)) {
+    failures.push('malformed manifest: sdk.displayName must be a non-empty string');
+  }
+}
+
+function validateConfiguredSdkParserMetadata(
+  parser: Record<string, unknown>,
+  failures: string[]
+): void {
+  if (!isNonEmptyString(parser.name)) {
+    failures.push('malformed manifest: parser.name must be a non-empty string');
+  } else if (parser.name !== CONFIGURED_SDK_PARSER_NAME) {
+    failures.push(`malformed manifest: parser.name must be ${CONFIGURED_SDK_PARSER_NAME}`);
+  }
+
+  if (!isNonEmptyString(parser.version)) {
+    failures.push('malformed manifest: parser.version must be a non-empty string');
+  }
+
+  if (parser.format !== CONFIGURED_SDK_PARSER_FORMAT) {
+    failures.push(`malformed manifest: parser.format must be ${CONFIGURED_SDK_PARSER_FORMAT}`);
+  }
+}
+
+function validateConfiguredSdkFormatterMetadata(
+  formatter: Record<string, unknown>,
+  failures: string[]
+): void {
+  if (formatter.name !== CONFIGURED_SDK_FORMATTER_NAME) {
+    failures.push(`malformed manifest: formatter.name must be ${CONFIGURED_SDK_FORMATTER_NAME}`);
+  }
+
+  if (!isNonEmptyString(formatter.version)) {
+    failures.push('malformed manifest: formatter.version must be a non-empty string');
+  }
+
+  if (formatter.format !== CONFIGURED_SDK_FORMATTER_FORMAT) {
+    failures.push(
+      `malformed manifest: formatter.format must be ${CONFIGURED_SDK_FORMATTER_FORMAT}`
+    );
   }
 }
 
