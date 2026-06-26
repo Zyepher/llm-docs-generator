@@ -565,7 +565,7 @@ async function createTestConfig(
   versionOrder: Array<'v1' | 'v2'> = ['v2', 'v1'],
   specFormat = 'openref-0.1'
 ): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-cli-'));
   tempDirs.push(dir);
 
   const specPath = join(dir, 'supabase_swift_v2.yml');
@@ -1490,7 +1490,7 @@ describe('CLI compatibility behavior', () => {
       /verify` checks recorded plugin metadata\s+against the plugin manifest/
     );
     expect(docs.get('README.md')).toMatch(
-      /Parser-plugin `local-source-docs`\s+manifests are not refreshed yet/
+      /Parser-plugin `local-source-docs`\s+manifests are not refreshed\s+yet/
     );
     expect(docs.get('IMPLEMENTATION.md')).toContain('- [ ] Plugin system for custom parsers');
     expect(docs.get('IMPLEMENTATION.md')).toContain(
@@ -1585,7 +1585,7 @@ describe('CLI compatibility behavior', () => {
       'Print the deterministic machine-readable capabilities contract'
     );
     expect(refreshHelp.stdout).toMatch(
-      /Refresh built-in local source docs or source-truth docs from an existing\s+explicit local manifest/
+      /Refresh built-in local source docs, source-truth docs, or local\s+configured SDK\s+docs from an existing explicit local manifest/
     );
     expect(refreshHelp.stdout).toContain('--manifest <path>');
     expect(refreshHelp.stdout).toContain('--output-dir <dir>');
@@ -1988,6 +1988,7 @@ describe('CLI compatibility behavior', () => {
       'verify-source-verification',
       'refresh-source-docs',
       'refresh-source-truth-docs',
+      'refresh-configured-sdk',
       'list-sdks',
       'validate-sdk',
     ]);
@@ -2260,7 +2261,6 @@ describe('CLI compatibility behavior', () => {
         'no crawling',
         'no source selection',
         'no discovery report refresh',
-        'no configured SDK refresh',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
@@ -2283,11 +2283,36 @@ describe('CLI compatibility behavior', () => {
         'no crawling',
         'no source selection',
         'no discovery report refresh',
-        'no configured SDK refresh',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
         'no behavior inference',
+      ]),
+    });
+    expect(implemented.get('refresh-configured-sdk')).toMatchObject({
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for configured-sdk',
+      status: 'implemented',
+      inputBoundary:
+        'existing configured-sdk manifest.json with recorded absolute local source.resolvedSpecPath',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: [
+        'manifest.json',
+        'parsed/<sdk>-<resolved-version>-spec.json',
+        'llm-docs/*-llms.txt',
+      ],
+      summary: expect.stringContaining('manifest-recorded absolute local spec path'),
+      limitations: expect.arrayContaining([
+        'configured-sdk manifests only',
+        'requires source.resolvedSpecPath to be an absolute local non-symlink file outside the output directory',
+        'uses only the recorded local spec path, SDK metadata, parser/formatter metadata, and manifest-recorded filename prefix',
+        'OpenRef parser and legacy LLM formatter only',
+        'no registry lookup',
+        'no URL fetching',
+        'no discovery report refresh',
+        'no candidate report consumption',
+        'no candidate auto-selection',
+        'no remote network work',
       ]),
     });
     expect(planned.has('generate-source')).toBe(false);
@@ -2298,7 +2323,7 @@ describe('CLI compatibility behavior', () => {
       'generate --source'
     );
     expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
-      'only explicit built-in-parser local-source-docs and source-truth-local-docs manifest refresh is implemented'
+      'only explicit built-in-parser local-source-docs, source-truth-local-docs, and configured-sdk manifests with recorded absolute local spec paths can be refreshed'
     );
     expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
       'parser-plugin source-docs'
@@ -2397,7 +2422,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 22');
+    expect(stdout).toContain('Implemented modes: 23');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
@@ -8644,6 +8669,411 @@ describe('CLI compatibility behavior', () => {
     expect(verifyResult.stdout).toContain('Verification passed');
   });
 
+  it('refreshes configured SDK docs from the manifest recorded local OpenRef spec path', async () => {
+    const { manifestPath, outputDir } = await generateSwiftFixture();
+    const firstManifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const sourcePath = firstManifest.source.resolvedSpecPath;
+    const outputFile = firstManifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
+
+    if (outputFile === undefined) {
+      throw new Error('expected configured SDK generated docs output');
+    }
+
+    await writeFile(
+      sourcePath,
+      [
+        'info:',
+        '  id: swift',
+        '  title: Supabase Swift SDK',
+        '  description: Test fixture',
+        'functions:',
+        '  - id: select',
+        '    title: Select refreshed data',
+        '    description: Read refreshed rows',
+        '    examples:',
+        '      - id: select-basic',
+        '        name: Basic refreshed select',
+        '        code: supabase.from("todos").select("id")',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    await writeFile(join(outputDir, outputFile.path), 'tampered configured output\n', 'utf-8');
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const refreshedManifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as GenerationManifest;
+    const refreshedFullOutput = refreshedManifest.generatedOutputs.find((output) =>
+      output.path.endsWith('-full-llms.txt')
+    );
+    const expectedRefreshCheckedFiles = refreshedManifest.generatedOutputs.length + 1;
+
+    if (refreshedFullOutput === undefined) {
+      throw new Error('expected refreshed configured SDK full output');
+    }
+
+    const refreshedText = await readFile(join(outputDir, refreshedFullOutput.path), 'utf-8');
+    const parsedSpec = JSON.parse(
+      await readFile(join(outputDir, 'parsed', 'swift-v2-spec.json'), 'utf-8')
+    ) as { operations: Array<{ title: string; description: string }> };
+    const verifyResult = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(refreshResult.stdout).toContain('Manifest refresh');
+    expect(refreshResult.stdout).toContain('Mode: configured-sdk');
+    expect(refreshResult.stdout).toContain(`Source: ${sourcePath}`);
+    expect(refreshResult.stdout).toContain('Post-refresh verification: passed');
+    expect(refreshResult.stdout).toContain(`Checked files: ${expectedRefreshCheckedFiles}`);
+    expect(refreshResult.stdout).toContain('Refresh complete');
+    expect(refreshedManifest.source.resolvedSpecPath).toBe(sourcePath);
+    expect(refreshedManifest.source.contentHash).toBe(await sha256File(sourcePath));
+    expect(refreshedManifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'llm-docs/supabase-swift-v2-database-llms.txt',
+      'llm-docs/supabase-swift-v2-full-llms.txt',
+      'parsed/swift-v2-spec.json',
+    ]);
+    expect(parsedSpec.operations[0]).toMatchObject({
+      title: 'Select refreshed data',
+      description: 'Read refreshed rows',
+    });
+    expect(refreshedText).toContain('Select refreshed data');
+    expect(refreshedText).toContain('Basic refreshed select');
+    expect(refreshedText).not.toContain('tampered configured output');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+
+    await writeFile(
+      sourcePath,
+      testSpecYaml.replace('Select data', 'Select via output dir refresh'),
+      'utf-8'
+    );
+
+    const outputDirRefresh = await runCli(['refresh', '--output-dir', outputDir]);
+    const outputDirRefreshedText = await readFile(
+      join(outputDir, 'llm-docs', 'supabase-swift-v2-full-llms.txt'),
+      'utf-8'
+    );
+
+    expect(outputDirRefresh.stdout).toContain('Mode: configured-sdk');
+    expect(outputDirRefreshedText).toContain('Select via output dir refresh');
+  });
+
+  it('refresh rejects unsafe configured SDK filename metadata before writing outside output', async () => {
+    const { manifestPath, outputDir } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const outsidePath = resolve(outputDir, 'parsed', '../../outside-v2-spec.json');
+
+    manifest.sdk.name = '../../outside';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['refresh', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('sdk.name must be a safe filename component');
+    expect(await pathExists(outsidePath)).toBe(false);
+  });
+
+  it('refresh rejects unsafe manifest-derived configured SDK filename prefixes', async () => {
+    const { manifestPath, outputDir } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const fullOutput = manifest.generatedOutputs.find((output) =>
+      output.path.endsWith('-full-llms.txt')
+    );
+    const escapedFullPath = join(outputDir, 'escape-full-llms.txt');
+    const escapedModulePath = join(outputDir, 'escape-database-llms.txt');
+
+    if (fullOutput === undefined) {
+      throw new Error('expected configured SDK full output');
+    }
+
+    fullOutput.path = 'llm-docs/../escape-full-llms.txt';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['refresh', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'generatedOutputs[1] full-doc filename prefix must be a safe filename component'
+    );
+    expect(await pathExists(escapedFullPath)).toBe(false);
+    expect(await pathExists(escapedModulePath)).toBe(false);
+  });
+
+  it.each([
+    {
+      name: 'parsed output directory',
+      setup: async (fixture: { outputDir: string; outsideDir: string }) => {
+        await rm(join(fixture.outputDir, 'parsed'), { recursive: true, force: true });
+        await symlink(fixture.outsideDir, join(fixture.outputDir, 'parsed'), 'dir');
+
+        return join(fixture.outsideDir, 'swift-v2-spec.json');
+      },
+      expected: 'configured-sdk parsed output path: symbolic links are not allowed',
+      outsideContent: undefined,
+    },
+    {
+      name: 'llm-docs output directory',
+      setup: async (fixture: { outputDir: string; outsideDir: string }) => {
+        await rm(join(fixture.outputDir, 'llm-docs'), { recursive: true, force: true });
+        await symlink(fixture.outsideDir, join(fixture.outputDir, 'llm-docs'), 'dir');
+
+        return join(fixture.outsideDir, 'supabase-swift-v2-full-llms.txt');
+      },
+      expected: 'configured-sdk llm-docs output directory: symbolic links are not allowed',
+      outsideContent: undefined,
+    },
+    {
+      name: 'llm-docs output file',
+      setup: async (fixture: { outputDir: string; outsideDir: string }) => {
+        const outsidePath = join(fixture.outsideDir, 'outside-full-llms.txt');
+        const targetPath = join(
+          fixture.outputDir,
+          'llm-docs',
+          'supabase-swift-v2-full-llms.txt'
+        );
+
+        await writeFile(outsidePath, 'preserve outside full doc\n', 'utf-8');
+        await rm(targetPath, { force: true });
+        await symlink(outsidePath, targetPath, 'file');
+
+        return outsidePath;
+      },
+      expected: 'configured-sdk llm-docs output path: symbolic links are not allowed',
+      outsideContent: 'preserve outside full doc\n',
+    },
+  ])(
+    'refresh rejects configured SDK symlinked $name before writing outside output',
+    async (testCase) => {
+      const { manifestPath, outputDir } = await generateSwiftFixture();
+      const outsideDir = join(dirname(outputDir), `outside-${testCase.name.replaceAll(' ', '-')}`);
+
+      await mkdir(outsideDir, { recursive: true });
+      const outsidePath = await testCase.setup({ outputDir, outsideDir });
+
+      const result = await runCliWithExit(['refresh', '--manifest', manifestPath]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(testCase.expected);
+
+      if (testCase.outsideContent === undefined) {
+        expect(await pathExists(outsidePath)).toBe(false);
+      } else {
+        expect(await readFile(outsidePath, 'utf-8')).toBe(testCase.outsideContent);
+      }
+    }
+  );
+
+  it.each([
+    {
+      name: 'URL-like',
+      setup: async (fixture: { manifest: GenerationManifest }) => {
+        fixture.manifest.source.resolvedSpecPath = 'https://example.com/spec.yml';
+      },
+      expected: 'source.resolvedSpecPath must be a local path',
+    },
+    {
+      name: 'relative',
+      setup: async (fixture: { manifest: GenerationManifest }) => {
+        fixture.manifest.source.resolvedSpecPath = 'config/source.yml';
+      },
+      expected: 'source.resolvedSpecPath must be absolute',
+    },
+    {
+      name: 'missing',
+      setup: async (fixture: { dir: string; manifest: GenerationManifest }) => {
+        fixture.manifest.source.resolvedSpecPath = join(fixture.dir, 'missing.yml');
+      },
+      expected: 'source.resolvedSpecPath not found',
+    },
+    {
+      name: 'symlinked',
+      setup: async (fixture: { dir: string; sourcePath: string; manifest: GenerationManifest }) => {
+        const linkPath = join(fixture.dir, 'linked-spec.yml');
+        await symlink(fixture.sourcePath, linkPath, 'file');
+        fixture.manifest.source.resolvedSpecPath = linkPath;
+      },
+      expected: 'source.resolvedSpecPath must not be a symbolic link',
+    },
+    {
+      name: 'directory',
+      setup: async (fixture: { dir: string; manifest: GenerationManifest }) => {
+        const specDir = join(fixture.dir, 'spec-dir');
+        await mkdir(specDir, { recursive: true });
+        fixture.manifest.source.resolvedSpecPath = specDir;
+      },
+      expected: 'source.resolvedSpecPath must be an existing local OpenRef spec file',
+    },
+    {
+      name: 'inside output',
+      setup: async (fixture: {
+        outputDir: string;
+        manifest: GenerationManifest;
+        preservedOutputPath: string;
+      }) => {
+        const insideSpecPath = join(fixture.outputDir, 'source.yml');
+        await writeFile(insideSpecPath, testSpecYaml, 'utf-8');
+        await writeFile(fixture.preservedOutputPath, 'preserve configured output\n', 'utf-8');
+        fixture.manifest.source.resolvedSpecPath = insideSpecPath;
+      },
+      expected: 'manifest source path must not be the same as, or inside, the manifest output directory',
+    },
+  ])('refresh rejects configured SDK manifests with $name resolvedSpecPath', async (testCase) => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-refresh-sdk-path-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const sourcePath = join(dir, 'source.yml');
+    const preservedOutputPath = join(
+      outputDir,
+      'llm-docs',
+      'supabase-swift-v2-full-llms.txt'
+    );
+
+    await mkdir(dirname(preservedOutputPath), { recursive: true });
+    await writeFile(sourcePath, testSpecYaml, 'utf-8');
+
+    const manifest: GenerationManifest = {
+      schemaVersion: '0.1.0',
+      generatedAt: new Date(0).toISOString(),
+      mode: 'configured-sdk',
+      ...validConfiguredSdkManifestMetadata(),
+      source: {
+        configuredUrl: 'http://127.0.0.1:9/supabase_swift_v2.yml',
+        configuredLocalPath: sourcePath,
+        resolvedSpecPath: sourcePath,
+        format: 'openref-0.1',
+        byteSize: await byteSize(sourcePath),
+        contentHash: await sha256File(sourcePath),
+      },
+      generatedOutputs: [
+        {
+          path: 'llm-docs/supabase-swift-v2-full-llms.txt',
+          kind: 'llm-docs',
+          byteSize: 0,
+          hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        },
+      ],
+      warnings: [],
+    };
+
+    await testCase.setup({ dir, outputDir, sourcePath, preservedOutputPath, manifest });
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['refresh', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(testCase.expected);
+
+    if (testCase.name === 'inside output') {
+      expect(await readFile(preservedOutputPath, 'utf-8')).toBe('preserve configured output\n');
+    }
+  });
+
+  it.each([
+    {
+      name: 'empty sdk name',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.sdk.name = '';
+      },
+      expected: 'sdk.name must be a non-empty string',
+    },
+    {
+      name: 'unsafe resolved version',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.sdk.resolvedVersion = '../v2';
+      },
+      expected: 'sdk.resolvedVersion must be a safe filename component',
+    },
+    {
+      name: 'missing source byte size',
+      mutate: (manifest: GenerationManifest) => {
+        delete (manifest.source as Record<string, unknown>).byteSize;
+      },
+      expected: 'source.byteSize must be a non-negative integer',
+    },
+    {
+      name: 'malformed source byte size',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.source.byteSize = -1;
+      },
+      expected: 'source.byteSize must be a non-negative integer',
+    },
+    {
+      name: 'missing source content hash',
+      mutate: (manifest: GenerationManifest) => {
+        delete (manifest.source as Record<string, unknown>).contentHash;
+      },
+      expected: 'source.contentHash must be a sha256 hash',
+    },
+    {
+      name: 'malformed source content hash',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.source.contentHash = 'sha256:not-a-real-hash';
+      },
+      expected: 'source.contentHash must be a sha256 hash',
+    },
+    {
+      name: 'invalid configured URL',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.source.configuredUrl = 'not-a-url';
+      },
+      expected: 'source.configuredUrl must be a valid URL',
+    },
+    {
+      name: 'missing configured local path',
+      mutate: (manifest: GenerationManifest) => {
+        delete (manifest.source as Record<string, unknown>).configuredLocalPath;
+      },
+      expected: 'source.configuredLocalPath must be a non-empty string or null',
+    },
+    {
+      name: 'unsupported source format',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.source.format = 'openref';
+      },
+      expected: 'source.format must be openref-0.1',
+    },
+    {
+      name: 'unsupported parser format',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.parser.format = 'openapi';
+      },
+      expected: 'parser.format must be openref-0.1',
+    },
+    {
+      name: 'unsupported formatter format',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.formatter.format = 'universal-llm-docs';
+      },
+      expected: 'formatter.format must be legacy-llm-docs',
+    },
+    {
+      name: 'missing full docs output',
+      mutate: (manifest: GenerationManifest) => {
+        manifest.generatedOutputs = [
+          {
+            path: 'parsed/swift-v2-spec.json',
+            kind: 'parsed-spec-json',
+            byteSize: 0,
+            hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+          },
+        ];
+      },
+      expected: 'requires exactly one llm-docs/*-full-llms.txt generated output',
+    },
+  ])('refresh rejects configured SDK manifests with $name metadata', async (testCase) => {
+    const fixture = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(fixture.manifestPath, 'utf-8')) as GenerationManifest;
+
+    testCase.mutate(manifest);
+    await writeFile(fixture.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['refresh', '--manifest', fixture.manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(testCase.expected);
+  });
+
   it('refresh rejects local source docs manifests whose source is inside the output directory', async () => {
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-refresh-source-in-output-'));
     tempDirs.push(dir);
@@ -8824,26 +9254,17 @@ describe('CLI compatibility behavior', () => {
     expect(await readFile(markdownPath, 'utf-8')).toBe(preservedMarkdown);
   });
 
-  it('refresh rejects configured SDK and discovery report manifests', async () => {
-    const configuredSdkFixture = await generateSwiftFixture();
+  it('refresh rejects discovery report manifests', async () => {
     const discoveryFixture = await createSourceDiscoveryVerifyFixture(
       'llm-docs-refresh-discovery-'
     );
 
-    const configuredResult = await runCliWithExit([
-      'refresh',
-      '--manifest',
-      configuredSdkFixture.manifestPath,
-    ]);
     const discoveryResult = await runCliWithExit([
       'refresh',
       '--output-dir',
       discoveryFixture.outputDir,
     ]);
 
-    expect(configuredResult.exitCode).toBe(1);
-    expect(configuredResult.stderr).toContain('refresh does not support configured-sdk manifests');
-    expect(configuredResult.stderr).toContain('local-source-docs and source-truth-local-docs');
     expect(discoveryResult.exitCode).toBe(1);
     expect(discoveryResult.stderr).toContain('refresh does not support discovery-report manifests');
     expect(discoveryResult.stderr).toContain('candidate evidence');

@@ -88,9 +88,9 @@ Current implemented capabilities include:
   verification, including recorded generator/sdk/parser/formatter metadata
   checks for configured-SDK manifests and recorded generator/parser/formatter
   metadata checks for local source-docs manifests
-- explicit-manifest refresh for built-in-parser local source docs and
-  source-truth docs that already record a local source path, with post-refresh
-  manifest integrity verification
+- explicit-manifest refresh for built-in-parser local source docs, source-truth
+  docs, and configured OpenRef SDK manifests that already record an absolute
+  local source path, with post-refresh manifest integrity verification
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
 - narrow explicit-local source/docs evidence reports that compare Markdown/MDX
@@ -105,13 +105,12 @@ Current implemented capabilities include:
   trusted local plugin execution and parser provenance in the source-docs
   manifest
 
-Planned capabilities such as configured SDK refresh, discovery report refresh,
-remote freshness checks, diff, host install helpers, broad crawling, documented
-automation-flag candidate handling, broad official-docs behavior/API claim
-verification, additional presets, parser plugin discovery/install/package
-resolution, parser plugin auto-selection, directory plugin generation,
-sandboxing, and broad custom parser workflows are not implemented in the
-current CLI.
+Planned capabilities such as discovery report refresh, remote freshness checks,
+diff, host install helpers, broad crawling, documented automation-flag
+candidate handling, broad official-docs behavior/API claim verification,
+additional presets, parser plugin discovery/install/package resolution, parser
+plugin auto-selection, directory plugin generation, sandboxing, and broad
+custom parser workflows are not implemented in the current CLI.
 
 ## Command Model
 
@@ -139,6 +138,7 @@ llm-docs source-truth verify-docs --source ./src --docs ./docs --output-dir ./re
 
 llm-docs refresh --output-dir ./agent-docs
 llm-docs refresh --manifest ./reports/source-truth/manifest.json
+llm-docs refresh --manifest ./output/swift/v2/manifest.json
 
 llm-docs plugins validate --manifest ./parser-plugin.json
 llm-docs plugins validate --manifest ./parser-plugin.json --json
@@ -226,9 +226,10 @@ The CLI is responsible for:
 - executing one explicitly selected local parser plugin for one explicit local
   source file only when `generate --source --parser-plugin-manifest --format`
   is used, as trusted local code without sandboxing
-- refreshing only existing built-in-parser `local-source-docs` and
-  `source-truth-local-docs` manifests that already record explicit local source
-  paths, then verifying the regenerated manifest outputs
+- refreshing only existing built-in-parser `local-source-docs`,
+  `source-truth-local-docs`, and configured OpenRef SDK manifests that already
+  record explicit absolute local source paths, then verifying the regenerated
+  manifest outputs
 - failing clearly when a requested source, format, parser, permission, or mode
   cannot be used
 
@@ -265,6 +266,7 @@ llm-docs verify --output-dir ./reports/local-docs
 llm-docs verify --output-dir ./reports/source-verification
 llm-docs refresh --output-dir ./agent-docs
 llm-docs refresh --manifest ./reports/source-truth/manifest.json
+llm-docs refresh --manifest ./output/swift/v2/manifest.json
 ```
 
 Verification currently supports `configured-sdk`, `local-source-docs`,
@@ -302,22 +304,29 @@ validate source-code behavior or runtime behavior, decide candidate authority,
 task fit, source truth, or source selection, or prove that docs statements are
 correct.
 
-Refresh currently supports only existing built-in-parser `local-source-docs`
-and `source-truth-local-docs` manifests. Parser-plugin `local-source-docs`
-manifests are not refreshed yet; rerun the explicit parser-plugin generate
-command instead. For source docs, refresh reads the manifest, uses the recorded
-absolute local source path, `source.formatHint`, preset metadata if present,
-and whether the prior manifest recorded `semantic-chunks-jsonl`, then
-regenerates into the same output directory. For source-truth docs, it uses only
-the recorded absolute local source path and regenerates into the same output
-directory. After successful regeneration, refresh runs the existing manifest
-verifier over the newly written manifest and reports the checked-file count.
-This post-refresh check is deterministic manifest/output integrity verification
-only; it does not claim freshness, source truth, source-code behavior, or
-runtime behavior. Refresh does not support parser-plugin source-docs manifests,
-configured SDK manifests, discovery-report manifests, URLs, repo freshness,
-broad website crawling, source selection, source-code verification, behavior
-validation, remote network work, or source project script execution.
+Refresh currently supports existing built-in-parser `local-source-docs`,
+`source-truth-local-docs`, and configured OpenRef SDK manifests with recorded
+local sources. Parser-plugin `local-source-docs` manifests are not refreshed
+yet; rerun the explicit parser-plugin generate command instead. For source
+docs, refresh reads the manifest, uses the recorded absolute local source path,
+`source.formatHint`, preset metadata if present, and whether the prior manifest
+recorded `semantic-chunks-jsonl`, then regenerates into the same output
+directory. For source-truth docs, it uses only the recorded absolute local
+source path and regenerates into the same output directory. For
+`configured-sdk` manifests, refresh requires `source.resolvedSpecPath` to be an
+absolute local, existing, non-symlink OpenRef spec file outside the output
+directory; it reparses that exact path, rewrites
+`parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs in the
+same output directory, and rewrites `manifest.json`. After successful
+regeneration, refresh runs the existing manifest verifier over the newly
+written manifest and reports the checked-file count. This post-refresh check is
+deterministic manifest/output integrity verification only; it does not claim
+freshness, source truth, source-code behavior, or runtime behavior. Refresh
+does not support parser-plugin source-docs manifests, discovery-report
+manifests, URLs, repo freshness, broad website crawling, source selection,
+source-code verification, behavior validation, remote network work, registry
+lookup, candidate report consumption, candidate auto-selection, or source
+project script execution.
 
 When `generate --source` is run with `--chunks jsonl`, it also writes
 `chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a

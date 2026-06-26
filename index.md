@@ -268,24 +268,30 @@ source-code verification. Additional preset names remain planned/unsupported.
 
 The current `refresh --manifest <path>` / `refresh --output-dir <dir>` command
 supports current built-in-parser `local-source-docs` and
-`source-truth-local-docs` manifests only. Parser-plugin `local-source-docs`
-manifests are not refreshed yet; rerun the explicit parser-plugin generate
-command instead. Source-docs refresh reads the existing manifest, uses only the
-recorded absolute local source path, `source.formatHint`, preset metadata if
-present, and whether
+`source-truth-local-docs` manifests, plus configured OpenRef SDK manifests with
+recorded absolute local `source.resolvedSpecPath` values. Parser-plugin
+`local-source-docs` manifests are not refreshed yet; rerun the explicit
+parser-plugin generate command instead. Source-docs refresh reads the existing
+manifest, uses only the recorded absolute local source path,
+`source.formatHint`, preset metadata if present, and whether
 `semantic-chunks-jsonl` was previously present, then regenerates through the
 current source docs generator into the manifest directory, including refreshed
 chunk index metadata.
 Source-truth refresh reads the existing manifest, uses only the recorded
 absolute local source path, and regenerates through the current source-truth
-docs generator into the manifest directory. After successful regeneration,
-refresh runs the existing manifest verifier over the newly written manifest
-outputs and reports the checked-file count. This is deterministic
-manifest/output integrity verification only; it does not claim freshness, source
-truth, source-code behavior, or runtime behavior. Refresh does not support
-configured-SDK manifests, discovery-report manifests, URLs, repo freshness,
-broad crawling, source selection, source-code verification, behavior
-validation, remote network work, or source project script execution.
+docs generator into the manifest directory. Configured SDK refresh requires the
+recorded spec path to be an absolute local, existing, non-symlink OpenRef spec
+file outside the output directory; it reparses that exact path, rewrites
+`parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs, and
+rewrites `manifest.json`. After successful regeneration, refresh runs the
+existing manifest verifier over the newly written manifest outputs and reports
+the checked-file count. This is deterministic manifest/output integrity
+verification only; it does not claim freshness, source truth, source-code
+behavior, or runtime behavior. Refresh does not support discovery-report
+manifests, URLs, repo freshness, broad crawling, source selection, source-code
+verification, behavior validation, remote network work, registry lookup,
+candidate report consumption, candidate auto-selection, or source project
+script execution.
 
 The current CLI exposes only narrow explicit-local source/docs lexical evidence
 through `source-truth verify-docs`; broad official-docs behavior/API claim
@@ -459,11 +465,12 @@ agent intent/source/scope resolution
 --output-dir`. Narrow explicit-local source/docs reference evidence is
   available through `source-truth verify-docs --source --docs --output-dir`.
   Explicit local manifest refresh for current built-in-parser
-  `local-source-docs` and `source-truth-local-docs` manifests is available
-  through `refresh --manifest <path>` or `refresh --output-dir <dir>`, with
+  `local-source-docs`, `source-truth-local-docs`, and configured OpenRef SDK
+  manifests with recorded absolute local source paths is available through
+  `refresh --manifest <path>` or `refresh --output-dir <dir>`, with
   deterministic post-refresh manifest/output integrity verification.
-  Parser-plugin `local-source-docs` refresh, broader crawling, configured SDK
-  refresh, discovery-report refresh, remote freshness refresh, broad
+  Parser-plugin `local-source-docs` refresh, broader crawling,
+  discovery-report refresh, remote freshness refresh, broad
   official-docs behavior/API claim verification, and behavior-level source
   documentation remain planned.
 - Every generated output should eventually include full manifest provenance:

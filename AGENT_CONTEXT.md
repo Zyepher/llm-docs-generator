@@ -194,9 +194,10 @@ Current implementation:
   sources, verify source truth, claim completeness, or perform source-code
   verification. `--chunks jsonl` remains compatible with this preset.
 - Can run `refresh --manifest <path>` or `refresh --output-dir <dir>` for
-  current built-in-parser `local-source-docs` and `source-truth-local-docs`
-  manifests only. Parser-plugin `local-source-docs` manifests are not
-  refreshed yet; rerun the explicit parser-plugin generate command instead.
+  current built-in-parser `local-source-docs`, `source-truth-local-docs`, and
+  configured OpenRef SDK manifests that already record explicit absolute local
+  source paths. Parser-plugin `local-source-docs` manifests are not refreshed
+  yet; rerun the explicit parser-plugin generate command instead.
   Source-docs refresh reads the existing manifest and uses only the recorded
   absolute local `source.resolvedPath`, `source.formatHint`, preset metadata if
   present, and whether the previous manifest contained
@@ -204,15 +205,21 @@ Current implementation:
   the current local source docs generator, including refreshed chunk index
   metadata. Source-truth refresh reads the existing manifest and uses only the
   recorded absolute local source path, then regenerates through the current
-  source-truth docs generator. After regeneration, refresh runs the existing
-  manifest verifier against the newly written manifest outputs and reports the
-  checked-file count. This is deterministic post-refresh integrity verification
-  only; it does not claim freshness, source truth, source-code behavior, or
-  runtime behavior. Refresh does not support parser-plugin source-docs
-  manifests, configured SDK manifests,
-  discovery-report manifests, URLs, repo freshness, broad website crawling,
-  source selection, source-code verification, behavior validation, remote
-  network work, or source project script execution.
+  source-truth docs generator. Configured SDK refresh reads only the existing
+  manifest, requires `source.resolvedSpecPath` to be an absolute local,
+  existing, non-symlink OpenRef spec file outside the output directory,
+  reparses that exact recorded path, rewrites
+  `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs in
+  the manifest directory, and rewrites `manifest.json`. After regeneration,
+  refresh runs the existing manifest verifier against the newly written
+  manifest outputs and reports the checked-file count. This is deterministic
+  post-refresh integrity verification only; it does not claim freshness, source
+  truth, source-code behavior, or runtime behavior. Refresh does not support
+  parser-plugin source-docs manifests, discovery-report manifests, URLs, repo
+  freshness, broad website crawling, source selection, source-code
+  verification, behavior validation, remote network work, registry lookup,
+  candidate report consumption, candidate auto-selection, or source project
+  script execution.
 - Can run `capabilities --json` to print a deterministic, machine-readable
   contract of implemented commands and planned/unsupported capabilities for
   agents. The contract has schema version `0.1.0`, package name/version
@@ -245,10 +252,10 @@ Current implementation:
   `generate --sdk`, `refresh`, `verify`, `list-sdks`, `validate --sdk`,
   `capabilities --json`, read-only `agent context`, and read-only
   `agent doctor`.
-- Does not yet implement broad website crawling, configured SDK refresh,
-  discovery-report refresh, remote freshness refresh, broad official-docs
-  behavior/API claim verification, full next-generation manifests, or
-  behavior-level source documentation from code. Parser plugin discovery,
+- Does not yet implement broad website crawling, discovery-report refresh,
+  remote freshness refresh, broad official-docs behavior/API claim
+  verification, full next-generation manifests, or behavior-level source
+  documentation from code. Parser plugin discovery,
   install, package resolution, auto-selection, directory source generation,
   sandboxing, and broad custom parser workflows remain planned/unsupported.
   Semantic chunking exists as a library capability for existing DocNode IR and
@@ -461,11 +468,19 @@ Agent workflow:
    `llm-docs refresh --manifest <path>` or `--output-dir <dir>` and will use
    only the recorded local source path, then verify the regenerated manifest
    outputs.
-4. If the manifest is `configured-sdk`, `discovery-report`,
-   `source-verification-local-evidence`, URL/repo/website, or requires
-   freshness/source-code verification, treat refresh as planned and unsupported
-   in the CLI.
-5. For future remote/freshness workflows, re-resolve source URL, repo, path,
+4. If the manifest mode is `configured-sdk` and `source.resolvedSpecPath`
+   records an absolute local, existing, non-symlink OpenRef spec file outside
+   the output directory, the current CLI can run `llm-docs refresh --manifest
+   <path>` or `--output-dir <dir>`. It reparses that exact recorded local path,
+   regenerates `parsed/<sdk>-<resolvedVersion>-spec.json` and LLM docs in the
+   existing manifest directory, rewrites `manifest.json`, and verifies the
+   regenerated manifest outputs. It does not look up registries, fetch source
+   URLs, consume discovery reports, or choose source candidates.
+5. If the manifest is `discovery-report`,
+   `source-verification-local-evidence`, URL/repo/website, parser-plugin
+   source-docs, or requires freshness/source-code verification, treat refresh
+   as planned and unsupported in the CLI.
+6. For future remote/freshness workflows, re-resolve source URL, repo, path,
    branch, tag, or commit as the agent, respect pinned versions, and report
    what changed before regenerating.
 
@@ -777,22 +792,27 @@ official-docs claim verification, validate source-code behavior, make
 candidate selection, task-fit judgments, source truth resolutions, or source
 selection decisions, or prove docs correctness. The current
 `refresh` command
-supports only built-in-parser `local-source-docs` and
-`source-truth-local-docs` manifests that already record an absolute local
-source path. Parser-plugin `local-source-docs` manifests are not refreshable
-yet. It regenerates into the existing manifest directory, preserves source-docs
-chunk JSONL output only when the previous manifest recorded
-`semantic-chunks-jsonl`, regenerates source-docs chunk index metadata through
-the current source generator, and preserves source-docs preset metadata when
-present. After successful regeneration, it runs the existing manifest verifier
-over the newly written manifest outputs and reports the checked-file count.
-This is deterministic manifest/output integrity verification only, not
-freshness, source truth, source-code behavior, or runtime behavior
-verification. It does not refresh parser-plugin source-docs manifests,
-configured SDK manifests, discovery reports, URLs, repos, websites, remote
+supports only built-in-parser `local-source-docs`,
+`source-truth-local-docs`, and configured OpenRef SDK manifests that already
+record explicit absolute local source paths. Parser-plugin `local-source-docs`
+manifests are not refreshable yet. Source-docs refresh regenerates into the
+existing manifest directory, preserves source-docs chunk JSONL output only when
+the previous manifest recorded `semantic-chunks-jsonl`, regenerates
+source-docs chunk index metadata through the current source generator, and
+preserves source-docs preset metadata when present. Configured SDK refresh
+requires `source.resolvedSpecPath` to be an absolute local, existing,
+non-symlink OpenRef spec file outside the output directory; it reparses exactly
+that recorded file and rewrites `parsed/<sdk>-<resolvedVersion>-spec.json`,
+legacy LLM docs, and `manifest.json`. After successful regeneration, refresh
+runs the existing manifest verifier over the newly written manifest outputs and
+reports the checked-file count. This is deterministic manifest/output
+integrity verification only, not freshness, source truth, source-code behavior,
+or runtime behavior verification. It does not refresh parser-plugin
+source-docs manifests, discovery reports, URLs, repos, websites, remote
 freshness, source-code verification, task-fit decisions, source truth
-resolution, or behavior validation. It performs no remote network work and
-runs no source project scripts. Future implementations should extend manifest
+resolution, or behavior validation. It performs no remote network work,
+registry lookup, candidate report consumption, candidate auto-selection, or
+source project script execution. Future implementations should extend manifest
 coverage to the broader provenance fields above.
 
 ## Clarifying Questions

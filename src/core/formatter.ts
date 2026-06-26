@@ -15,6 +15,7 @@ import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 
 import type { ConfigLoader } from '../config/loader.js';
+import type { CategoryConfig, SDKVersionConfig } from '../config/schemas.js';
 import {
   addOperationToCategory,
   CategorizedOperations,
@@ -42,6 +43,13 @@ const DOUBLE_NEWLINE = '\n\n';
 // FORMATTER CLASS
 // ============================================================================
 
+export interface LLMFormatterConfig {
+  getSDKVersionConfig(sdkName: string, version: string): SDKVersionConfig;
+  getCategories(): ReadonlyMap<string, CategoryConfig>;
+  getCategory(name: string): CategoryConfig;
+  getSortedCategories(): ReadonlyArray<[string, CategoryConfig]>;
+}
+
 export class LLMFormatter {
   private readonly versionConfig: {
     displayName: string;
@@ -54,7 +62,7 @@ export class LLMFormatter {
 
   constructor(
     private readonly specData: SpecData,
-    private readonly config: ConfigLoader,
+    private readonly config: LLMFormatterConfig,
     sdkName: string,
     version: string,
     specPath?: string
