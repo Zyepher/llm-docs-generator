@@ -79,9 +79,11 @@ Current implemented capabilities include:
 - narrow explicit-local source/docs evidence reports that compare Markdown/MDX
   inline-code references against observed local source exported names
 - read-only bundled agent context metadata
+- read-only `agent doctor` diagnostics for packaged artifact hashes, expected
+  binary metadata, PATH visibility, and skipped/not-configured host checks
 
 Planned capabilities such as configured SDK refresh, discovery report refresh,
-remote freshness checks, diff, host setup helpers, broad crawling, automatic
+remote freshness checks, diff, host install helpers, broad crawling, automatic
 source selection, broad official-docs behavior/API claim verification, and
 additional presets are not implemented in the current CLI.
 
@@ -112,6 +114,8 @@ llm-docs refresh --output-dir ./agent-docs
 llm-docs refresh --manifest ./reports/source-truth/manifest.json
 
 llm-docs agent context
+llm-docs agent doctor
+llm-docs agent doctor --json
 ```
 
 Compatibility commands remain available for configured Supabase/OpenRef specs:
@@ -303,8 +307,10 @@ npx tsx src/cli.ts capabilities --json
 ```
 
 Bundled agent context can be inspected with `llm-docs agent context` or
-`llm-docs agent context --json`. Host installation and doctor commands are
-planned but not implemented.
+`llm-docs agent context --json`. Read-only packaging diagnostics can be run with
+`llm-docs agent doctor` or `llm-docs agent doctor --json`; missing `llm-docs` on
+`PATH` is reported as a warning in development. Host installation remains
+planned and unsupported.
 
 ## For Contributors
 

@@ -14,8 +14,9 @@ import chalk from 'chalk';
 import ora from 'ora';
 import packageJson from '../package.json';
 import { createHash } from 'node:crypto';
-import { lstat, readFile, rm } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { constants as fsConstants } from 'node:fs';
+import { access, lstat, readFile, rm, stat } from 'node:fs/promises';
+import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ConfigLoader } from './config/loader.js';
@@ -52,6 +53,8 @@ const GENERATOR_VERSION = packageJson.version;
 const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';
 const CAPABILITIES_SCHEMA_VERSION = '0.1.0';
 const AGENT_CONTEXT_SCHEMA_VERSION = '0.2.0';
+const AGENT_DOCTOR_SCHEMA_VERSION = '0.1.0';
+const EXPECTED_BINARY_NAME = 'llm-docs';
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIGURED_SDK_GENERATE_FORMATS = ['openref', 'openref-0.1'] as const;
 const SOURCE_GENERATE_FORMATS = [
@@ -131,6 +134,37 @@ type AgentContextContract = {
   };
   contextArtifacts: AgentContextArtifact[];
   skillArtifacts: AgentContextArtifact[];
+  limitations: string[];
+};
+
+type AgentDoctorCheckStatus = 'pass' | 'warning' | 'fail' | 'skipped';
+
+type AgentDoctorCheck = {
+  id: string;
+  name: string;
+  status: AgentDoctorCheckStatus;
+  summary: string;
+  facts: Record<string, unknown>;
+};
+
+type AgentDoctorContract = {
+  schemaVersion: string;
+  mode: string;
+  generator: AgentContextContract['generator'];
+  summary: {
+    overallStatus: AgentDoctorCheckStatus;
+    totalChecks: number;
+    passed: number;
+    warnings: number;
+    failed: number;
+    skipped: number;
+    hardFailureCount: number;
+    packagedArtifactCount: number;
+    contextArtifactCount: number;
+    skillArtifactCount: number;
+    pathBinaryFound: boolean;
+  };
+  checks: AgentDoctorCheck[];
   limitations: string[];
 };
 
@@ -298,7 +332,7 @@ const CAPABILITIES_CONTRACT = {
     packageName: GENERATOR_NAME,
     packageVersion: GENERATOR_VERSION,
     cliName: CLI_NAME,
-    binary: 'llm-docs',
+    binary: EXPECTED_BINARY_NAME,
   },
   productBoundary: {
     cliRole: 'deterministic-scriptable-capability-layer',
@@ -459,6 +493,26 @@ const CAPABILITIES_CONTRACT = {
         'no user config writes',
         'no environment probing',
         'no network',
+      ],
+    },
+    {
+      id: 'agent-doctor',
+      command: 'agent doctor',
+      mode: 'agent doctor --json',
+      status: 'implemented',
+      inputBoundary: 'packaged artifacts and explicit process environment PATH only',
+      options: ['--json'],
+      outputFiles: ['stdout diagnostics', 'stdout JSON diagnostics'],
+      summary:
+        'read-only diagnostics for packaged context/skill artifact readability, expected binary metadata, PATH visibility, and skipped host-install checks',
+      limitations: [
+        'does not install/register skills',
+        'does not write user config',
+        'does not mutate host skill directories',
+        'does not perform network access',
+        'PATH check is informational and may warn in development',
+        'host skill installation check is skipped unless a future explicit option is implemented',
+        'no source-selection or task-fit inference',
       ],
     },
     {
@@ -762,13 +816,6 @@ const CAPABILITIES_CONTRACT = {
       reason:
         'no current CLI skill installer; installing/registering skills remains separate from packaged context metadata',
     },
-    {
-      id: 'agent-doctor',
-      command: 'agent doctor',
-      status: 'planned-unsupported',
-      reason:
-        'no current CLI host diagnostics; the CLI does not probe PATH, host config, or skill installation state',
-    },
   ],
 } as const;
 
@@ -818,7 +865,7 @@ async function buildAgentContextContract(): Promise<AgentContextContract> {
       packageName: GENERATOR_NAME,
       packageVersion: GENERATOR_VERSION,
       cliName: CLI_NAME,
-      binary: 'llm-docs',
+      binary: EXPECTED_BINARY_NAME,
     },
     contextArtifacts: await Promise.all(
       AGENT_CONTEXT_ARTIFACTS.map((artifact) => readPackagedAgentArtifact(artifact))
@@ -832,6 +879,213 @@ async function buildAgentContextContract(): Promise<AgentContextContract> {
       'Does not write user config.',
       'Does not probe environment state.',
       'Does not perform network access.',
+    ],
+  };
+}
+
+function readExpectedPackageBinaryEntry(): string {
+  const metadata = packageJson as { bin?: unknown };
+
+  if (!isObjectRecord(metadata.bin)) {
+    throw new Error('malformed package metadata: bin map is missing');
+  }
+
+  const binaryPath = metadata.bin[EXPECTED_BINARY_NAME];
+
+  if (typeof binaryPath !== 'string' || binaryPath.length === 0) {
+    throw new Error(`malformed package metadata: expected ${EXPECTED_BINARY_NAME} bin entry`);
+  }
+
+  return binaryPath;
+}
+
+function getPathEnvironmentValue(): string {
+  return process.env.PATH ?? process.env.Path ?? '';
+}
+
+function getExecutableCandidateNames(binary: string): string[] {
+  if (process.platform !== 'win32') {
+    return [binary];
+  }
+
+  const lowerBinary = binary.toLowerCase();
+  const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((extension) => extension.trim())
+    .filter((extension) => extension.length > 0);
+
+  if (extensions.some((extension) => lowerBinary.endsWith(extension.toLowerCase()))) {
+    return [binary];
+  }
+
+  return [binary, ...extensions.map((extension) => `${binary}${extension.toLowerCase()}`)];
+}
+
+async function isExecutableFile(path: string): Promise<boolean> {
+  try {
+    const fileStats = await stat(path);
+
+    if (!fileStats.isFile()) {
+      return false;
+    }
+
+    await access(path, process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK);
+    return true;
+  } catch (error) {
+    if (isPathNotFoundError(error)) {
+      return false;
+    }
+
+    return false;
+  }
+}
+
+async function findExecutableOnPath(binary: string): Promise<{
+  pathConfigured: boolean;
+  pathEntryCount: number;
+  found: boolean;
+  matches: string[];
+}> {
+  const pathValue = getPathEnvironmentValue();
+  const pathEntries = pathValue.length === 0 ? [] : pathValue.split(delimiter);
+  const candidateNames = getExecutableCandidateNames(binary);
+  const matches: string[] = [];
+  const seen = new Set<string>();
+
+  for (const pathEntry of pathEntries) {
+    const basePath = resolve(pathEntry.length === 0 ? '.' : pathEntry);
+
+    for (const candidateName of candidateNames) {
+      const candidatePath = resolve(basePath, candidateName);
+
+      if (seen.has(candidatePath)) {
+        continue;
+      }
+
+      seen.add(candidatePath);
+
+      if (await isExecutableFile(candidatePath)) {
+        matches.push(candidatePath);
+      }
+    }
+  }
+
+  return {
+    pathConfigured: pathValue.length > 0,
+    pathEntryCount: pathEntries.length,
+    found: matches.length > 0,
+    matches,
+  };
+}
+
+function summarizeDoctorChecks(
+  checks: AgentDoctorCheck[],
+  options: {
+    packagedArtifactCount: number;
+    contextArtifactCount: number;
+    skillArtifactCount: number;
+    pathBinaryFound: boolean;
+  }
+): AgentDoctorContract['summary'] {
+  const passed = checks.filter((check) => check.status === 'pass').length;
+  const warnings = checks.filter((check) => check.status === 'warning').length;
+  const failed = checks.filter((check) => check.status === 'fail').length;
+  const skipped = checks.filter((check) => check.status === 'skipped').length;
+  const overallStatus: AgentDoctorCheckStatus =
+    failed > 0 ? 'fail' : warnings > 0 ? 'warning' : 'pass';
+
+  return {
+    overallStatus,
+    totalChecks: checks.length,
+    passed,
+    warnings,
+    failed,
+    skipped,
+    hardFailureCount: failed,
+    packagedArtifactCount: options.packagedArtifactCount,
+    contextArtifactCount: options.contextArtifactCount,
+    skillArtifactCount: options.skillArtifactCount,
+    pathBinaryFound: options.pathBinaryFound,
+  };
+}
+
+async function buildAgentDoctorContract(): Promise<AgentDoctorContract> {
+  const context = await buildAgentContextContract();
+  const packageBinEntry = readExpectedPackageBinaryEntry();
+  const pathCheck = await findExecutableOnPath(EXPECTED_BINARY_NAME);
+  const contextArtifactCount = context.contextArtifacts.length;
+  const skillArtifactCount = context.skillArtifacts.length;
+  const packagedArtifactCount = contextArtifactCount + skillArtifactCount;
+  const checks: AgentDoctorCheck[] = [
+    {
+      id: 'packaged-agent-artifacts',
+      name: 'Packaged agent artifacts',
+      status: 'pass',
+      summary: 'Packaged context and skill artifacts are readable and hashable.',
+      facts: {
+        contextArtifactCount,
+        skillArtifactCount,
+        artifacts: [...context.contextArtifacts, ...context.skillArtifacts],
+      },
+    },
+    {
+      id: 'expected-binary-name',
+      name: 'Expected binary name',
+      status: 'pass',
+      summary: `Expected CLI binary name is ${EXPECTED_BINARY_NAME}.`,
+      facts: {
+        expectedBinary: EXPECTED_BINARY_NAME,
+        packageBinEntry,
+      },
+    },
+    {
+      id: 'path-binary',
+      name: 'PATH binary visibility',
+      status: pathCheck.found ? 'pass' : 'warning',
+      summary: pathCheck.found
+        ? `${EXPECTED_BINARY_NAME} was found on PATH.`
+        : `${EXPECTED_BINARY_NAME} was not found on PATH; this is a warning, not a hard failure.`,
+      facts: {
+        expectedBinary: EXPECTED_BINARY_NAME,
+        pathConfigured: pathCheck.pathConfigured,
+        pathEntryCount: pathCheck.pathEntryCount,
+        found: pathCheck.found,
+        matches: pathCheck.matches,
+      },
+    },
+    {
+      id: 'codex-skill-installation',
+      name: 'Codex skill installation',
+      status: 'skipped',
+      summary:
+        'No explicit Codex home or skill-installation location was provided; host skill installation was not checked.',
+      facts: {
+        checked: false,
+        reason: 'not-configured',
+      },
+    },
+  ];
+
+  return {
+    schemaVersion: AGENT_DOCTOR_SCHEMA_VERSION,
+    mode: 'agent-doctor-read-only-diagnostics',
+    generator: context.generator,
+    summary: summarizeDoctorChecks(checks, {
+      packagedArtifactCount,
+      contextArtifactCount,
+      skillArtifactCount,
+      pathBinaryFound: pathCheck.found,
+    }),
+    checks,
+    limitations: [
+      'Read-only diagnostics only.',
+      'Does not install or register skills.',
+      'Does not write user config.',
+      'Does not mutate host skill directories.',
+      'Does not perform network access.',
+      'Does not infer source authority, source truth, or task fit.',
+      'Missing llm-docs on PATH is reported as a warning for development installs.',
+      'Codex host skill installation is not checked without an explicit supported configuration.',
     ],
   };
 }
@@ -1193,6 +1447,48 @@ agentCommand
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Agent context failed: ${errorMsg}`));
+      process.exit(1);
+    }
+  });
+
+agentCommand
+  .command('doctor')
+  .description('Run read-only agent packaging and PATH diagnostics')
+  .option('--json', 'Print deterministic machine-readable agent doctor diagnostics')
+  .action(async (options: { json?: boolean }) => {
+    try {
+      const diagnostics = await buildAgentDoctorContract();
+
+      if (options.json === true) {
+        console.log(JSON.stringify(diagnostics, null, 2));
+        return;
+      }
+
+      console.log(chalk.bold('llm-docs agent doctor'));
+      console.log(`  Schema: ${diagnostics.schemaVersion}`);
+      console.log(
+        `  Package: ${diagnostics.generator.packageName}@${diagnostics.generator.packageVersion}`
+      );
+      console.log(`  Binary: ${diagnostics.generator.binary}`);
+      console.log(`  Overall: ${diagnostics.summary.overallStatus}`);
+      console.log(
+        `  Checks: ${diagnostics.summary.passed} passed, ${diagnostics.summary.warnings} warning, ${diagnostics.summary.failed} failed, ${diagnostics.summary.skipped} skipped`
+      );
+      console.log(
+        `  Packaged artifacts: ${diagnostics.summary.packagedArtifactCount} readable/hashable`
+      );
+
+      const pathCheck = diagnostics.checks.find((check) => check.id === 'path-binary');
+      const pathFound = pathCheck?.facts.found === true;
+      console.log(
+        `  PATH ${EXPECTED_BINARY_NAME}: ${pathFound ? 'found' : 'not found (warning only)'}`
+      );
+      console.log('  Codex skill installation: skipped (not configured)');
+      console.log('  Read-only: no installs, config writes, host mutations, or network access.');
+      console.log('  Use --json for the stable diagnostics contract.');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Agent doctor failed: ${errorMsg}`));
       process.exit(1);
     }
   });

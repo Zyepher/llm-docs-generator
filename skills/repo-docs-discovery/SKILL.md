@@ -45,7 +45,11 @@ llm-docs discover --url https://example.com/docs --output-dir ./reports/site-doc
 
 - Use `source-truth inspect` or `source-truth generate` only when the user asks for implementation-source evidence and the installed CLI reports those modes.
 - Use configured SDK generation only for supported configured SDKs.
-- Treat general `generate --source`, refresh, source-code verification of official docs, broad crawling, `agent install codex`, and `agent doctor` as unsupported unless `capabilities --json` reports them implemented.
+- Treat general `generate --source`, refresh, source-code verification of official docs, broad crawling, and `agent install codex` as unsupported unless `capabilities --json` reports them implemented.
+- Use `agent doctor` only as read-only diagnostics when `capabilities --json`
+  reports it as implemented; it does not install skills, write user config,
+  mutate host skill directories, or prove host registration unless a future
+  explicit check reports that fact directly.
 
 ## Reporting Back
 

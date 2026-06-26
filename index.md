@@ -28,8 +28,11 @@ Important distribution note:
 - Installing the CLI makes `llm-docs` available as a command.
 - Installing or registering skills is a separate step unless a future installer
   command performs it for the user's AI host.
-- Future commands such as `llm-docs agent install codex` and
-  `llm-docs agent doctor` should make this explicit.
+- `llm-docs agent doctor` is read-only diagnostics; it reports packaged
+  artifact hashes, expected binary metadata, PATH visibility, and skipped host
+  checks without installing/registering skills or mutating user config.
+- A future command such as `llm-docs agent install codex` should keep host
+  installation explicit.
 
 ## Start Here By Role
 
@@ -109,6 +112,7 @@ npx tsx src/cli.ts verify --output-dir ./output/swift/v2
 npx tsx src/cli.ts refresh --output-dir ./agent-docs
 npx tsx src/cli.ts refresh --manifest ./reports/source-truth/manifest.json
 npx tsx src/cli.ts validate --sdk swift --version v2
+npx tsx src/cli.ts agent doctor --json
 ```
 
 The current `discover --source` command performs local, explicit, bounded file
@@ -152,8 +156,17 @@ agent context and skill artifacts. The JSON form reports schema version
 `skills/repo-docs-discovery/SKILL.md` package-relative paths, byte sizes,
 SHA-256 hashes, intended uses, and explicit limitations. It reports packaged
 metadata only and does not install or register skills, write user config, probe
-the environment, or perform network work. `agent install codex` and
-`agent doctor` remain planned/unsupported and are reported that way through
+the environment, or perform network work.
+
+The current `agent doctor` command prints read-only packaging and environment
+diagnostics. The JSON form reports schema version `0.1.0`, package
+name/version metadata, the `llm-docs` binary, summary counts, packaged context
+and skill artifact hash checks, the expected binary name, an informational PATH
+check for `llm-docs`, and a skipped/not-configured Codex skill-installation
+check. Missing `llm-docs` on PATH is a warning, not a hard failure. The command
+does not install/register skills, write user config, mutate host skill
+directories, run network requests, or infer source truth/task fit. `agent
+install codex` remains planned/unsupported and is reported that way through
 `capabilities --json`.
 
 The current `source-truth inspect --source` command accepts one explicit local

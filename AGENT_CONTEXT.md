@@ -211,12 +211,22 @@ Current implementation:
   limitations. It reports packaged context and skill artifact metadata only; it
   does not install or register skills, write user config, probe environment
   state, or perform network work.
+- Can run `agent doctor` or `agent doctor --json` for read-only diagnostics.
+  The JSON contract has schema version `0.1.0`, package name/version metadata,
+  summary counts, packaged context/skill artifact readability and hash facts,
+  expected binary metadata, an informational `PATH` check for `llm-docs`, and a
+  skipped/not-configured Codex skill-installation check. Missing `llm-docs` on
+  `PATH` is a warning and exits successfully; hard failures are reserved for
+  packaged artifact read/hash failures or malformed internal package state.
+  Doctor does not install/register skills, write user config, mutate host skill
+  directories, perform network access, infer source truth, or decide task fit.
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`,
   `source-truth verify-docs`, `generate --source`,
   `generate --source --preset swift-book`, `generate --sdk`, `refresh`,
   `verify`, `list-sdks`, `validate --sdk`,
-  `capabilities --json`, and read-only `agent context`.
+  `capabilities --json`, read-only `agent context`, and read-only
+  `agent doctor`.
 - Does not yet implement broad website crawling, configured SDK refresh,
   discovery-report refresh, remote freshness refresh, broad official-docs
   behavior/API claim verification, full next-generation manifests, or
@@ -575,6 +585,8 @@ Current helper commands:
 ```bash
 llm-docs agent context
 llm-docs agent context --json
+llm-docs agent doctor
+llm-docs agent doctor --json
 llm-docs capabilities --json
 ```
 
@@ -582,7 +594,6 @@ Planned/unsupported helper commands:
 
 ```bash
 llm-docs agent install codex
-llm-docs agent doctor
 ```
 
 Expected behavior:
@@ -594,12 +605,20 @@ Expected behavior:
   `AGENT_CONTEXT.md`, `index.md`, `skills/llm-docs-generator/SKILL.md`, and
   `skills/repo-docs-discovery/SKILL.md`. It does not install/register skills,
   write user config, probe the environment, or perform network work.
+- `llm-docs agent doctor` currently prints concise read-only diagnostics and
+  points humans to `--json`.
+- `llm-docs agent doctor --json` currently prints a deterministic diagnostics
+  contract with schema version `0.1.0`, generator/package metadata, summary
+  counts, packaged artifact readability/hash facts aligned with
+  `agent context`, the expected binary name `llm-docs`, an informational PATH
+  lookup result, skipped/not-configured Codex skill-installation status, and
+  limitations. Missing `llm-docs` on PATH is a warning, not a hard failure.
+  The command does not install/register skills, write user config, mutate host
+  skill directories, perform network access, infer source truth, or decide task
+  fit.
 - `llm-docs agent install codex` is planned/unsupported. A future
   implementation may copy bundled skills into the Codex skill directory when
   supported.
-- `llm-docs agent doctor` is planned/unsupported. A future implementation may
-  check whether the binary is on `PATH`, bundled skills are available, host
-  skill installation exists, and versions match.
 - `llm-docs capabilities --json` reports implemented modes so agents do not
   assume planned features exist. This command is currently implemented as a
   static deterministic contract and does not perform hidden environment probing.
@@ -829,6 +848,7 @@ llm-docs discover --source ./docs --output-dir ./reports/local-docs
 llm-docs discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
 llm-docs discover --url https://example.com/docs --output-dir ./reports/website
 llm-docs capabilities --json
+llm-docs agent doctor --json
 llm-docs source-truth inspect --source ./src
 llm-docs source-truth verify-docs --source ./src --docs ./docs --output-dir ./reports/source-verification
 llm-docs generate --source ./TSPL.docc --preset swift-book --output-dir ./swift-book-agent-docs
