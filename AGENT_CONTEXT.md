@@ -173,10 +173,14 @@ Current implementation:
   the current local source docs generator, including refreshed chunk index
   metadata. Source-truth refresh reads the existing manifest and uses only the
   recorded absolute local source path, then regenerates through the current
-  source-truth docs generator. Refresh does not support configured SDK
-  manifests, discovery-report manifests, URLs, repo freshness, broad website
-  crawling, source selection, source-code verification, behavior validation,
-  remote network work, or source project script execution.
+  source-truth docs generator. After regeneration, refresh runs the existing
+  manifest verifier against the newly written manifest outputs and reports the
+  checked-file count. This is deterministic post-refresh integrity verification
+  only; it does not claim freshness, source truth, source-code behavior, or
+  runtime behavior. Refresh does not support configured SDK manifests,
+  discovery-report manifests, URLs, repo freshness, broad website crawling,
+  source selection, source-code verification, behavior validation, remote
+  network work, or source project script execution.
 - Can run `capabilities --json` to print a deterministic, machine-readable
   contract of implemented commands and planned/unsupported capabilities for
   agents. The contract has schema version `0.1.0`, package name/version
@@ -385,10 +389,12 @@ Agent workflow:
 2. If the manifest mode is `local-source-docs`, the current CLI can run
    `llm-docs refresh --manifest <path>` or `--output-dir <dir>` and will use
    only the recorded local source path, format hint, preset metadata if present,
-   and prior chunk-output presence.
+   and prior chunk-output presence, then verify the regenerated manifest
+   outputs.
 3. If the manifest mode is `source-truth-local-docs`, the current CLI can run
    `llm-docs refresh --manifest <path>` or `--output-dir <dir>` and will use
-   only the recorded local source path.
+   only the recorded local source path, then verify the regenerated manifest
+   outputs.
 4. If the manifest is `configured-sdk`, `discovery-report`, URL/repo/website,
    or requires freshness/source-code verification, treat refresh as planned and
    unsupported in the CLI.
@@ -644,11 +650,15 @@ already record an absolute local source path. It regenerates into the existing
 manifest directory, preserves source-docs chunk JSONL output only when the
 previous manifest recorded `semantic-chunks-jsonl`, regenerates source-docs
 chunk index metadata through the current source generator, and preserves
-source-docs preset metadata when present. It does not refresh configured SDK manifests,
-discovery reports, URLs, repos, websites, remote freshness, source-code
-verification, task-fit decisions, source truth resolution, or behavior
-validation. It performs no remote network work and runs no source project
-scripts. Future implementations should extend manifest coverage to the broader
+source-docs preset metadata when present. After successful regeneration, it
+runs the existing manifest verifier over the newly written manifest outputs and
+reports the checked-file count. This is deterministic manifest/output integrity
+verification only, not freshness, source truth, source-code behavior, or runtime
+behavior verification. It does not refresh configured SDK manifests, discovery
+reports, URLs, repos, websites, remote freshness, source-code verification,
+task-fit decisions, source truth resolution, or behavior validation. It
+performs no remote network work and runs no source project scripts. Future
+implementations should extend manifest coverage to the broader
 provenance fields above.
 
 ## Clarifying Questions

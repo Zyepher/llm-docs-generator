@@ -1566,6 +1566,7 @@ describe('CLI compatibility behavior', () => {
       inputBoundary: 'existing local-source-docs manifest.json with recorded local source path',
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
+      summary: expect.stringContaining('manifest integrity verification'),
       limitations: expect.arrayContaining([
         'local-source-docs manifests only',
         'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',
@@ -1588,6 +1589,7 @@ describe('CLI compatibility behavior', () => {
         'existing source-truth-local-docs manifest.json with recorded local source path',
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json'],
+      summary: expect.stringContaining('manifest integrity verification'),
       limitations: expect.arrayContaining([
         'source-truth-local-docs manifests only',
         'uses only source.resolvedPath from the existing manifest',
@@ -5922,6 +5924,8 @@ describe('CLI compatibility behavior', () => {
     const refreshedOutput = refreshedManifest.generatedOutputs.find(
       (output) => output.kind === 'llm-docs'
     );
+    const expectedRefreshCheckedFiles =
+      refreshedManifest.sourceFiles.length + refreshedManifest.generatedOutputs.length;
 
     if (refreshedOutput === undefined) {
       throw new Error('expected refreshed source docs output');
@@ -5932,6 +5936,8 @@ describe('CLI compatibility behavior', () => {
 
     expect(refreshResult.stdout).toContain('Manifest refresh');
     expect(refreshResult.stdout).toContain('Mode: local-source-docs');
+    expect(refreshResult.stdout).toContain('Post-refresh verification: passed');
+    expect(refreshResult.stdout).toContain(`Checked files: ${expectedRefreshCheckedFiles}`);
     expect(refreshResult.stdout).toContain('Refresh complete');
     expect(refreshedManifest.source.input).toBe(firstManifest.source.resolvedPath);
     expect(refreshedManifest.source.resolvedPath).toBe(firstManifest.source.resolvedPath);
@@ -6115,8 +6121,15 @@ describe('CLI compatibility behavior', () => {
       await readFile(join(outputDir, 'source-truth-report.json'), 'utf-8')
     ) as SourceTruthInspectionReport;
     const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+    const refreshedManifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceTruthDocsManifest;
+    const expectedRefreshCheckedFiles =
+      refreshedManifest.sourceFiles.length + refreshedManifest.generatedOutputs.length;
 
     expect(refreshResult.stdout).toContain('Mode: source-truth-local-docs');
+    expect(refreshResult.stdout).toContain('Post-refresh verification: passed');
+    expect(refreshResult.stdout).toContain(`Checked files: ${expectedRefreshCheckedFiles}`);
     expect(refreshResult.stdout).toContain('Refresh complete');
     expect(report.facts.map((fact) => fact.exportedName)).toEqual(
       expect.arrayContaining(['value', 'run'])
