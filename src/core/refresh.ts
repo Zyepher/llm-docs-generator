@@ -41,9 +41,7 @@ export class RefreshManifestVerificationError extends RefreshManifestError {
   failures: string[];
 
   constructor(result: VerifyGenerationManifestResult) {
-    super(
-      `post-refresh manifest verification failed with ${result.failures.length} failure(s)`
-    );
+    super(`post-refresh manifest verification failed with ${result.failures.length} failure(s)`);
     this.name = 'RefreshManifestVerificationError';
     this.checkedFiles = result.checkedFiles;
     this.failures = result.failures;
@@ -142,6 +140,13 @@ async function refreshSourceDocsManifest(options: {
   const generatedOutputs = requiredArray(options.manifest.generatedOutputs, 'generatedOutputs');
   const sourcePath = requiredAbsoluteLocalPath(source.resolvedPath, 'source.resolvedPath');
   const formatHint = requiredNonEmptyString(source.formatHint, 'source.formatHint');
+  const parser = options.manifest.parser;
+
+  if (isObjectRecord(parser) && parser.plugin !== undefined) {
+    throw new RefreshManifestError(
+      'refresh does not support parser-plugin local-source-docs manifests; rerun generate --source --parser-plugin-manifest --format explicitly'
+    );
+  }
 
   if (!SOURCE_DOCS_FORMAT_HINTS.has(formatHint)) {
     throw new RefreshManifestError(
@@ -243,9 +248,7 @@ function sourceDocsPresetFromManifest(preset: unknown): SourceDocsPresetMetadata
   const failures = validateSourceDocsPresetContract(preset);
 
   if (failures.length > 0) {
-    throw new RefreshManifestError(
-      `malformed manifest: ${failures.join('; ')}`
-    );
+    throw new RefreshManifestError(`malformed manifest: ${failures.join('; ')}`);
   }
 
   return preset as SourceDocsPresetMetadata;

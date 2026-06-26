@@ -5,7 +5,7 @@
 import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, relative, resolve, sep, win32 } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
@@ -15,6 +15,11 @@ import {
   type SemanticChunkManifestIndex,
   type SemanticChunkManifestIndexChunk,
 } from './semantic-chunk-index.js';
+import {
+  validateParserPluginManifestFile,
+  type ParserPluginFormatMetadata,
+  type ParserPluginManifestMetadata,
+} from './parser-plugin-manifest.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 
 const HASH_PREFIX = 'sha256:';
@@ -126,6 +131,7 @@ const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'html',
 ]);
 const SOURCE_DOCS_RESOLVED_FORMATS = new Set(['markdown', 'openapi', 'openref', 'rst', 'html']);
+const SOURCE_DOCS_PLUGIN_FORMAT_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 const SOURCE_DOCS_SEMANTIC_CHUNK_INDEX_KEYS = new Set([
   'path',
   'format',
@@ -807,6 +813,13 @@ async function verifySourceDocsManifest(
   const sourceHash = sourceRecord.hash;
   const sourceFileCount = sourceRecord.fileCount;
   const sourceAggregateHash = sourceRecord.aggregateHash;
+  const parserPluginMetadata = validateSourceDocsParserPluginMetadata(
+    parserRecord.plugin,
+    failures,
+    fileChecks
+  );
+  const parserPluginFormatId = parserPluginMetadata?.format.id;
+  const hasParserPluginMetadata = parserRecord.plugin !== undefined;
 
   if (!isNonEmptyString(sourceInput)) {
     failures.push('malformed manifest: source.input must be a non-empty string');
@@ -816,18 +829,48 @@ async function verifySourceDocsManifest(
     failures.push('malformed manifest: source.type must be file or directory');
   }
 
-  if (!isNonEmptyString(sourceFormatHint) || !SOURCE_DOCS_FORMAT_HINTS.has(sourceFormatHint)) {
+  if (hasParserPluginMetadata && sourceType === 'directory') {
+    failures.push(
+      'malformed manifest: parser.plugin source manifests must record source.type file'
+    );
+  }
+
+  if (hasParserPluginMetadata && preset !== undefined) {
+    failures.push('malformed manifest: parser.plugin source manifests must not include preset');
+  }
+
+  if (hasParserPluginMetadata && semanticChunkIndexes !== undefined) {
+    failures.push(
+      'malformed manifest: parser.plugin source manifests must not include semanticChunkIndexes'
+    );
+  }
+
+  if (!isNonEmptyString(sourceFormatHint)) {
+    failures.push('malformed manifest: source.formatHint must be a supported source format hint');
+  } else if (hasParserPluginMetadata) {
+    if (parserPluginFormatId !== undefined && sourceFormatHint !== parserPluginFormatId) {
+      failures.push('malformed manifest: source.formatHint must match parser.plugin.format.id');
+    }
+  } else if (!SOURCE_DOCS_FORMAT_HINTS.has(sourceFormatHint)) {
     failures.push('malformed manifest: source.formatHint must be a supported source format hint');
   }
 
-  if (
-    !isNonEmptyString(sourceResolvedFormat) ||
-    !SOURCE_DOCS_RESOLVED_FORMATS.has(sourceResolvedFormat)
-  ) {
+  if (!isNonEmptyString(sourceResolvedFormat)) {
+    failures.push('malformed manifest: source.resolvedFormat must be a supported source format');
+  } else if (hasParserPluginMetadata) {
+    if (parserPluginFormatId !== undefined && sourceResolvedFormat !== parserPluginFormatId) {
+      failures.push('malformed manifest: source.resolvedFormat must match parser.plugin.format.id');
+    }
+  } else if (!SOURCE_DOCS_RESOLVED_FORMATS.has(sourceResolvedFormat)) {
     failures.push('malformed manifest: source.resolvedFormat must be a supported source format');
   }
 
-  validateSourceDocsParserMetadata(parserRecord, sourceResolvedFormat, failures);
+  validateSourceDocsParserMetadata(
+    parserRecord,
+    sourceResolvedFormat,
+    parserPluginFormatId,
+    failures
+  );
   validateSourceDocsFormatterMetadata(formatterRecord, failures);
 
   if (!isNonEmptyString(sourcePath)) {
@@ -929,6 +972,9 @@ async function verifySourceDocsManifest(
     rejectSymlinks: true,
     allowedKinds: SOURCE_DOCS_GENERATED_OUTPUT_KINDS,
   });
+  if (hasParserPluginMetadata) {
+    validateSourceDocsParserPluginGeneratedOutputs(outputRecords, failures);
+  }
   const semanticChunkIndexEntries = validateSourceDocsSemanticChunkIndexes({
     semanticChunkIndexes,
     generatedOutputs: outputRecords,
@@ -936,6 +982,10 @@ async function verifySourceDocsManifest(
     failures,
   });
   validateSourceDocsPresetMetadata(preset, failures);
+
+  if (failures.length === 0 && parserPluginMetadata !== undefined) {
+    await verifySourceDocsParserPluginManifestMetadata(parserPluginMetadata, failures);
+  }
 
   if (failures.length === 0) {
     for (const check of pathTypeChecks) {
@@ -1812,9 +1862,24 @@ function validateConfiguredSdkFormatterMetadata(
   }
 }
 
+interface SourceDocsParserPluginRecord {
+  manifestPath: string;
+  resolvedManifestPath: string;
+  manifestByteSize: number;
+  manifestHash: string;
+  name: string;
+  version: string;
+  module: {
+    path: string;
+    resolvedPath: string;
+  };
+  format: ParserPluginFormatMetadata;
+}
+
 function validateSourceDocsParserMetadata(
   parser: Record<string, unknown>,
   sourceResolvedFormat: unknown,
+  parserPluginFormatId: string | undefined,
   failures: string[]
 ): void {
   const parserFormat = parser.format;
@@ -1827,17 +1892,386 @@ function validateSourceDocsParserMetadata(
     failures.push('malformed manifest: parser.version must be a non-empty string');
   }
 
-  if (!isNonEmptyString(parserFormat) || !SOURCE_DOCS_RESOLVED_FORMATS.has(parserFormat)) {
+  if (!isNonEmptyString(parserFormat)) {
     failures.push('malformed manifest: parser.format must be a supported source format');
     return;
   }
 
-  if (
-    isNonEmptyString(sourceResolvedFormat) &&
-    SOURCE_DOCS_RESOLVED_FORMATS.has(sourceResolvedFormat) &&
-    parserFormat !== sourceResolvedFormat
-  ) {
+  if (parserPluginFormatId === undefined && !SOURCE_DOCS_RESOLVED_FORMATS.has(parserFormat)) {
+    failures.push('malformed manifest: parser.format must be a supported source format');
+    return;
+  }
+
+  if (parserPluginFormatId !== undefined && parserFormat !== parserPluginFormatId) {
+    failures.push('malformed manifest: parser.format must match parser.plugin.format.id');
+  }
+
+  if (isNonEmptyString(sourceResolvedFormat) && parserFormat !== sourceResolvedFormat) {
     failures.push('malformed manifest: parser.format must match source.resolvedFormat');
+  }
+}
+
+function validateSourceDocsParserPluginMetadata(
+  plugin: unknown,
+  failures: string[],
+  fileChecks: FileCheck[]
+): SourceDocsParserPluginRecord | undefined {
+  if (plugin === undefined) {
+    return undefined;
+  }
+
+  if (!isObjectRecord(plugin)) {
+    failures.push('malformed manifest: parser.plugin must be an object when present');
+    return undefined;
+  }
+
+  const manifestPath = plugin.manifestPath;
+  const resolvedManifestPath = plugin.resolvedManifestPath;
+  const manifestByteSize = plugin.manifestByteSize;
+  const manifestHash = plugin.manifestHash;
+  const moduleMetadata = plugin.module;
+  const formatMetadata = plugin.format;
+  const execution = plugin.execution;
+
+  if (!isNonEmptyString(manifestPath)) {
+    failures.push('malformed manifest: parser.plugin.manifestPath must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(resolvedManifestPath)) {
+    failures.push(
+      'malformed manifest: parser.plugin.resolvedManifestPath must be a non-empty string'
+    );
+  } else if (!isAbsolute(resolvedManifestPath)) {
+    failures.push('malformed manifest: parser.plugin.resolvedManifestPath must be absolute');
+  }
+
+  if (!isNonNegativeInteger(manifestByteSize)) {
+    failures.push(
+      'malformed manifest: parser.plugin.manifestByteSize must be a non-negative integer'
+    );
+  }
+
+  if (!isSha256Hash(manifestHash)) {
+    failures.push('malformed manifest: parser.plugin.manifestHash must be a sha256 hash');
+  }
+
+  if (!isNonEmptyString(plugin.name)) {
+    failures.push('malformed manifest: parser.plugin.name must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(plugin.version)) {
+    failures.push('malformed manifest: parser.plugin.version must be a non-empty string');
+  }
+
+  const moduleRecord = validateSourceDocsParserPluginModuleMetadata(moduleMetadata, failures);
+  const formatRecord = validateSourceDocsParserPluginFormatMetadata(formatMetadata, failures);
+  validateSourceDocsParserPluginExecutionMetadata(execution, failures);
+
+  if (
+    isNonEmptyString(resolvedManifestPath) &&
+    isAbsolute(resolvedManifestPath) &&
+    isNonNegativeInteger(manifestByteSize) &&
+    isSha256Hash(manifestHash)
+  ) {
+    fileChecks.push({
+      label: 'parser.plugin.manifest',
+      path: resolvedManifestPath,
+      expectedByteSize: manifestByteSize,
+      expectedHash: manifestHash,
+    });
+  }
+
+  if (
+    !isNonEmptyString(manifestPath) ||
+    !isNonEmptyString(resolvedManifestPath) ||
+    !isAbsolute(resolvedManifestPath) ||
+    !isNonNegativeInteger(manifestByteSize) ||
+    !isSha256Hash(manifestHash) ||
+    !isNonEmptyString(plugin.name) ||
+    !isNonEmptyString(plugin.version) ||
+    moduleRecord === undefined ||
+    formatRecord === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    manifestPath,
+    resolvedManifestPath,
+    manifestByteSize,
+    manifestHash,
+    name: plugin.name,
+    version: plugin.version,
+    module: moduleRecord,
+    format: formatRecord,
+  };
+}
+
+function validateSourceDocsParserPluginModuleMetadata(
+  moduleMetadata: unknown,
+  failures: string[]
+): SourceDocsParserPluginRecord['module'] | undefined {
+  if (!isObjectRecord(moduleMetadata)) {
+    failures.push('malformed manifest: parser.plugin.module must be an object');
+    return undefined;
+  }
+
+  const modulePath = moduleMetadata.path;
+  const moduleResolvedPath = moduleMetadata.resolvedPath;
+  let valid = true;
+
+  if (!isNonEmptyString(modulePath)) {
+    failures.push('malformed manifest: parser.plugin.module.path must be a non-empty string');
+    valid = false;
+  } else if (
+    isUrlLikePath(modulePath) ||
+    isAbsolute(modulePath) ||
+    win32.isAbsolute(modulePath) ||
+    hasEmptyOrParentPathSegment(modulePath)
+  ) {
+    failures.push('malformed manifest: parser.plugin.module.path must be relative');
+    valid = false;
+  }
+
+  if (!isNonEmptyString(moduleResolvedPath)) {
+    failures.push(
+      'malformed manifest: parser.plugin.module.resolvedPath must be a non-empty string'
+    );
+    valid = false;
+  } else if (!isAbsolute(moduleResolvedPath)) {
+    failures.push('malformed manifest: parser.plugin.module.resolvedPath must be absolute');
+    valid = false;
+  }
+
+  return valid && isNonEmptyString(modulePath) && isNonEmptyString(moduleResolvedPath)
+    ? {
+        path: modulePath,
+        resolvedPath: moduleResolvedPath,
+      }
+    : undefined;
+}
+
+function validateSourceDocsParserPluginFormatMetadata(
+  formatMetadata: unknown,
+  failures: string[]
+): ParserPluginFormatMetadata | undefined {
+  if (!isObjectRecord(formatMetadata)) {
+    failures.push('malformed manifest: parser.plugin.format must be an object');
+    return undefined;
+  }
+
+  const formatId = formatMetadata.id;
+  const extensions = formatMetadata.extensions;
+  const mediaTypes = formatMetadata.mediaTypes;
+  const directorySupport = formatMetadata.directorySupport;
+  let valid = true;
+
+  if (!isNonEmptyString(formatId) || !SOURCE_DOCS_PLUGIN_FORMAT_ID_PATTERN.test(formatId)) {
+    failures.push("malformed manifest: parser.plugin.format.id must match '^[a-z][a-z0-9-]*$'");
+    valid = false;
+  }
+
+  if (!isNonEmptyString(formatMetadata.displayName)) {
+    failures.push(
+      'malformed manifest: parser.plugin.format.displayName must be a non-empty string'
+    );
+    valid = false;
+  }
+
+  if (!Array.isArray(extensions) || extensions.length === 0) {
+    failures.push('malformed manifest: parser.plugin.format.extensions must be a non-empty array');
+    valid = false;
+  } else if (!extensions.every((extension) => isNonEmptyString(extension))) {
+    failures.push('malformed manifest: parser.plugin.format.extensions must contain only strings');
+    valid = false;
+  }
+
+  let parsedMediaTypes: string[] | undefined;
+  if (mediaTypes !== undefined) {
+    parsedMediaTypes = validateOptionalStringArray(
+      mediaTypes,
+      'parser.plugin.format.mediaTypes',
+      failures
+    );
+
+    if (parsedMediaTypes === undefined) {
+      valid = false;
+    }
+
+    if (
+      parsedMediaTypes !== undefined &&
+      parsedMediaTypes.some((mediaType) => mediaType.length === 0)
+    ) {
+      failures.push(
+        'malformed manifest: parser.plugin.format.mediaTypes must contain only non-empty strings'
+      );
+      valid = false;
+    }
+  }
+
+  if (directorySupport !== undefined && typeof directorySupport !== 'boolean') {
+    failures.push('malformed manifest: parser.plugin.format.directorySupport must be a boolean');
+    valid = false;
+  }
+
+  return valid &&
+    isNonEmptyString(formatId) &&
+    SOURCE_DOCS_PLUGIN_FORMAT_ID_PATTERN.test(formatId) &&
+    isNonEmptyString(formatMetadata.displayName) &&
+    Array.isArray(extensions) &&
+    extensions.length > 0 &&
+    extensions.every((extension) => isNonEmptyString(extension))
+    ? {
+        id: formatId,
+        displayName: formatMetadata.displayName,
+        extensions,
+        ...(parsedMediaTypes === undefined ? {} : { mediaTypes: parsedMediaTypes }),
+        ...(typeof directorySupport === 'boolean' ? { directorySupport } : {}),
+      }
+    : undefined;
+}
+
+function validateSourceDocsParserPluginExecutionMetadata(
+  execution: unknown,
+  failures: string[]
+): void {
+  if (!isObjectRecord(execution)) {
+    failures.push('malformed manifest: parser.plugin.execution must be an object');
+    return;
+  }
+
+  if (execution.codeExecuted !== true) {
+    failures.push('malformed manifest: parser.plugin.execution.codeExecuted must be true');
+  }
+
+  if (execution.trust !== 'trusted-local-code') {
+    failures.push("malformed manifest: parser.plugin.execution.trust must be 'trusted-local-code'");
+  }
+
+  if (execution.sandboxed !== false) {
+    failures.push('malformed manifest: parser.plugin.execution.sandboxed must be false');
+  }
+
+  if (!isNonEmptyString(execution.statement)) {
+    failures.push(
+      'malformed manifest: parser.plugin.execution.statement must be a non-empty string'
+    );
+  }
+}
+
+function validateSourceDocsParserPluginGeneratedOutputs(
+  generatedOutputs: unknown[],
+  failures: string[]
+): void {
+  for (const [index, output] of generatedOutputs.entries()) {
+    if (!isObjectRecord(output)) {
+      continue;
+    }
+
+    if (output.kind === SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND) {
+      failures.push(
+        `malformed manifest: generatedOutputs[${index}].kind must not be semantic-chunks-jsonl for parser.plugin source manifests`
+      );
+    }
+  }
+}
+
+async function verifySourceDocsParserPluginManifestMetadata(
+  recorded: SourceDocsParserPluginRecord,
+  failures: string[]
+): Promise<void> {
+  try {
+    const actualManifestFile = await describeFile(recorded.resolvedManifestPath);
+
+    if (actualManifestFile.byteSize !== recorded.manifestByteSize) {
+      failures.push(
+        'parser.plugin.manifest: byte size does not match parser.plugin.manifestByteSize'
+      );
+    }
+
+    if (actualManifestFile.hash !== recorded.manifestHash) {
+      failures.push('parser.plugin.manifest: hash does not match parser.plugin.manifestHash');
+    }
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      failures.push(`parser.plugin.manifest: missing file at ${recorded.resolvedManifestPath}`);
+      return;
+    }
+
+    failures.push(
+      `parser.plugin.manifest: cannot read ${recorded.resolvedManifestPath}: ${errorMessage(error)}`
+    );
+    return;
+  }
+
+  const validation = await validateParserPluginManifestFile({
+    manifestPath: recorded.resolvedManifestPath,
+  });
+
+  if (!validation.valid || validation.manifest === undefined) {
+    const details = validation.errors.map((error) => `${error.path}: ${error.message}`).join('; ');
+
+    failures.push(`parser.plugin.manifest: recorded plugin manifest is invalid: ${details}`);
+    return;
+  }
+
+  compareParserPluginManifestMetadata(recorded, validation.manifest, failures);
+}
+
+function compareParserPluginManifestMetadata(
+  recorded: SourceDocsParserPluginRecord,
+  manifest: ParserPluginManifestMetadata,
+  failures: string[]
+): void {
+  if (recorded.name !== manifest.name) {
+    failures.push('parser.plugin.name must match parser plugin manifest name');
+  }
+
+  if (recorded.version !== manifest.version) {
+    failures.push('parser.plugin.version must match parser plugin manifest version');
+  }
+
+  if (recorded.module.path !== manifest.module) {
+    failures.push('parser.plugin.module.path must match parser plugin manifest module');
+  }
+
+  const selectedFormat = manifest.formats.find((format) => format.id === recorded.format.id);
+
+  if (selectedFormat === undefined) {
+    failures.push('parser.plugin.format.id must match a format declared by the plugin manifest');
+    return;
+  }
+
+  compareParserPluginFormatMetadata(recorded.format, selectedFormat, failures);
+}
+
+function compareParserPluginFormatMetadata(
+  recorded: ParserPluginFormatMetadata,
+  selectedFormat: ParserPluginFormatMetadata,
+  failures: string[]
+): void {
+  if (recorded.displayName !== selectedFormat.displayName) {
+    failures.push(
+      'parser.plugin.format.displayName must match parser plugin manifest selected format'
+    );
+  }
+
+  if (!sameStringArray(recorded.extensions, selectedFormat.extensions)) {
+    failures.push(
+      'parser.plugin.format.extensions must match parser plugin manifest selected format'
+    );
+  }
+
+  if (!sameOptionalStringArray(recorded.mediaTypes, selectedFormat.mediaTypes)) {
+    failures.push(
+      'parser.plugin.format.mediaTypes must match parser plugin manifest selected format'
+    );
+  }
+
+  if (recorded.directorySupport !== selectedFormat.directorySupport) {
+    failures.push(
+      'parser.plugin.format.directorySupport must match parser plugin manifest selected format'
+    );
   }
 }
 
@@ -1854,9 +2288,7 @@ function validateSourceDocsFormatterMetadata(
   }
 
   if (formatter.format !== SOURCE_DOCS_FORMATTER_FORMAT) {
-    failures.push(
-      `malformed manifest: formatter.format must be ${SOURCE_DOCS_FORMATTER_FORMAT}`
-    );
+    failures.push(`malformed manifest: formatter.format must be ${SOURCE_DOCS_FORMATTER_FORMAT}`);
   }
 }
 
@@ -3412,7 +3844,6 @@ function validateSourceFiles(options: {
       failures.push(`malformed manifest: ${label}.format must be a non-empty string`);
     } else if (
       isNonEmptyString(sourceResolvedFormat) &&
-      SOURCE_DOCS_RESOLVED_FORMATS.has(sourceResolvedFormat) &&
       sourceFileFormat !== sourceResolvedFormat
     ) {
       failures.push(`malformed manifest: ${label}.format must match source.resolvedFormat`);
@@ -4393,6 +4824,29 @@ function compareStringsByCodeUnit(a: string, b: string): number {
   return a.length - b.length;
 }
 
+function sameStringArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameOptionalStringArray(left: string[] | undefined, right: string[] | undefined): boolean {
+  if (left === undefined || right === undefined) {
+    return left === right;
+  }
+
+  return sameStringArray(left, right);
+}
+
+function isUrlLikePath(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('//') || value.startsWith('\\\\');
+}
+
+function hasEmptyOrParentPathSegment(value: string): boolean {
+  return value
+    .replace(/\\/g, '/')
+    .split('/')
+    .some((segment) => segment.length === 0 || segment === '..');
+}
+
 interface FileCheck {
   label: string;
   path: string;
@@ -4499,7 +4953,7 @@ async function verifyNoSymlinkPathComponents(
   const targetPath = resolve(check.path);
   const relativePath = relative(trustedRoot, targetPath);
 
-  if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+  if (isParentRelativePath(relativePath) || isAbsolute(relativePath)) {
     failures.push(`${check.label}: path escapes trusted root: ${targetPath}`);
     return false;
   }
@@ -4746,7 +5200,11 @@ function isSourceTruthSourceType(value: unknown): value is 'file' | 'directory' 
 function isInsideDirectory(parentDir: string, childPath: string): boolean {
   const relativePath = relative(parentDir, childPath);
 
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+  return relativePath === '' || (!isParentRelativePath(relativePath) && !isAbsolute(relativePath));
+}
+
+function isParentRelativePath(path: string): boolean {
+  return path === '..' || path.startsWith(`..${sep}`);
 }
 
 function isFileNotFoundError(error: unknown): boolean {

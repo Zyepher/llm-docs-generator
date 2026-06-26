@@ -269,8 +269,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       expected binary metadata, PATH visibility, and skipped host-install checks
 - [x] Bundled package skill files for current CLI usage and repo/docs discovery
 - [x] Deterministic local explicit-manifest refresh for current
-      `local-source-docs` and `source-truth-local-docs` manifests only, with
-      post-refresh manifest integrity verification for regenerated outputs
+      built-in-parser `local-source-docs` and `source-truth-local-docs`
+      manifests only, with post-refresh manifest integrity verification for
+      regenerated outputs
 - [x] Deterministic semantic chunk manifest-index metadata for opt-in
       source-docs `chunks/semantic-chunks.jsonl` exports
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
@@ -280,7 +281,14 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [ ] Plugin system for custom parsers
   - [x] Deterministic read-only parser plugin manifest validation for explicit
         local JSON manifests, without loading or executing plugin code
-  - [ ] Parser plugin execution and custom parser generation
+  - [x] Explicit single-file parser plugin execution for `generate --source`
+        with `--parser-plugin-manifest` and explicit custom `--format`, with
+        trusted local execution, DocNode validation, formatter normalization,
+        parser plugin provenance, and verify checks against recorded plugin
+        manifest data without importing plugin code
+  - [ ] Parser plugin discovery, install, package resolution, auto-selection,
+        directory source generation, sandboxing, and broad custom parser
+        workflows
 - [x] OpenRef backward compatibility tests
 
 Current discovery scope:
@@ -341,18 +349,21 @@ Current capabilities contract scope:
   `source-truth verify-docs --source --docs --output-dir`, read-only
   `agent context`, read-only `agent doctor`, read-only
   `plugins validate --manifest`,
+  explicit single-file `generate --source --parser-plugin-manifest --format`,
   explicit local `generate --source` with parser hints and optional
   `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
   `--format openref-0.1`, configured SDK, source-docs, source-truth docs, and
   discovery-report/source-verification `verify`, local explicit-manifest
-  source-docs/source-truth `refresh`, `list-sdks`, and `validate --sdk`.
+  built-in-parser source-docs/source-truth `refresh`, `list-sdks`, and
+  `validate --sdk`.
 - Planned/unsupported entries include additional `generate --preset` names,
   configured SDK refresh, discovery-report refresh, remote freshness refresh,
   broad official-docs behavior/API claim verification, broad website crawling,
   documented automation-flag candidate handling, framework/route
-  understanding, behavior-level generation from source code, and
-  parser plugin execution/custom parser generation, and `agent install codex`.
+  understanding, behavior-level generation from source code, parser plugin
+  discovery/install/package resolution/auto-selection/directory generation/
+  sandboxing/broad custom parser workflows, and `agent install codex`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `source-verification-report.json`, `manifest.json`, `failure.json`, source
@@ -557,20 +568,24 @@ Current explicit local source docs generation scope:
   docs correctness.
 
 - `refresh --manifest <path>` / `refresh --output-dir <dir>` supports only
-  current `local-source-docs` and `source-truth-local-docs` manifests. For
-  source docs it reads the existing manifest and uses only the recorded
-  absolute local source path, `source.formatHint`, preset metadata if present,
-  and whether `semantic-chunks-jsonl` was previously present, then regenerates
-  through the current source docs generator into the manifest directory. For
-  source-truth docs it uses only the recorded absolute local source path and
-  regenerates through the current source-truth docs generator into the manifest
-  directory. After successful regeneration, it runs the existing manifest
-  verifier over the newly written manifest outputs and reports the checked-file
-  count. This post-refresh check is deterministic manifest/output integrity
-  verification only; it does not claim freshness, source truth, source-code
-  behavior, or runtime behavior. It rejects configured-SDK manifests,
-  discovery-report manifests, malformed/missing manifests, URL-like or
-  non-absolute recorded source paths, and unsupported manifest modes. It does
+  current built-in-parser `local-source-docs` and `source-truth-local-docs`
+  manifests. Parser-plugin `local-source-docs` manifests are intentionally not
+  refreshed in this slice; rerun the explicit parser-plugin generate command
+  instead. For source docs it reads the existing manifest and uses only the
+  recorded absolute local source path, `source.formatHint`, preset metadata if
+  present, and whether
+  `semantic-chunks-jsonl` was previously present, then regenerates through the
+  current source docs generator into the manifest directory. For source-truth
+  docs it uses only the recorded absolute local source path and regenerates
+  through the current source-truth docs generator into the manifest directory.
+  After successful regeneration, it runs the existing manifest verifier over
+  the newly written manifest outputs and reports the checked-file count. This
+  post-refresh check is deterministic manifest/output integrity verification
+  only; it does not claim freshness, source truth, source-code behavior, or
+  runtime behavior. It rejects parser-plugin source-docs manifests,
+  configured-SDK manifests, discovery-report manifests, malformed/missing
+  manifests, URL-like or non-absolute recorded source paths, and unsupported
+  manifest modes. It does
   not perform URL fetching, repo freshness checks, broad website crawling,
   source selection, source-code verification, behavior validation, remote
   network work, or source project script execution.

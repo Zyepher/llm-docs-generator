@@ -184,8 +184,18 @@ array. Format objects may contain only `id`, `displayName`, `extensions`,
 optional `mediaTypes`, and optional `directorySupport`; duplicate format ids,
 duplicate extensions anywhere in the manifest, and unsupported keys are
 rejected. The command does not load, import, execute, or trust plugin code.
-Parser plugin execution and custom parser generation remain
-planned/unsupported.
+
+The current explicit parser-plugin generate path (`generate --source` with
+`--parser-plugin-manifest` and explicit custom `--format`) executes one
+selected local parser plugin module for one explicit local source file. The
+requested custom format id must be declared by the manifest and must not be
+`auto` or a built-in source format. Plugin code is trusted local code and is
+not sandboxed. The generated source-docs manifest records parser plugin
+provenance under `parser.plugin`, and `verify` checks recorded plugin metadata
+against the plugin manifest contents and manifest file hash/byte size without
+importing or executing plugin code. Plugin discovery, install, package
+resolution, auto-selection, directory plugin generation, sandboxing, and broad
+custom parser workflows remain planned/unsupported.
 
 The current `source-truth inspect --source` command accepts one explicit local
 file or directory and prints a deterministic JSON evidence report to stdout. It
@@ -257,12 +267,15 @@ repos, select sources, verify source truth, claim completeness, or perform
 source-code verification. Additional preset names remain planned/unsupported.
 
 The current `refresh --manifest <path>` / `refresh --output-dir <dir>` command
-supports current `local-source-docs` and `source-truth-local-docs` manifests
-only. Source-docs refresh reads the existing manifest, uses only the recorded
-absolute local source path, `source.formatHint`, preset metadata if present,
-and whether `semantic-chunks-jsonl` was previously present, then regenerates
-through the current source docs generator into the manifest directory,
-including refreshed chunk index metadata.
+supports current built-in-parser `local-source-docs` and
+`source-truth-local-docs` manifests only. Parser-plugin `local-source-docs`
+manifests are not refreshed yet; rerun the explicit parser-plugin generate
+command instead. Source-docs refresh reads the existing manifest, uses only the
+recorded absolute local source path, `source.formatHint`, preset metadata if
+present, and whether
+`semantic-chunks-jsonl` was previously present, then regenerates through the
+current source docs generator into the manifest directory, including refreshed
+chunk index metadata.
 Source-truth refresh reads the existing manifest, uses only the recorded
 absolute local source path, and regenerates through the current source-truth
 docs generator into the manifest directory. After successful regeneration,
@@ -421,8 +434,10 @@ agent intent/source/scope resolution
   generator/parser/formatter
   metadata, local source path shape and existence, source file hashes and byte
   sizes, generated output paths, hashes, byte sizes, line counts,
-  deterministic estimated token counts, and optional semantic chunk indexes
-  when present. It verifies
+  deterministic estimated token counts, optional parser plugin metadata
+  against recorded plugin manifest contents and manifest hash/byte size, and
+  optional semantic chunk indexes when present. It parses plugin manifests as
+  data and does not import or execute parser plugin modules. It verifies
   `source-truth-local-docs` manifests with deterministic integrity/schema
   checks over source files, generated outputs, inspection shape, and raw report
   count consistency. It also verifies discovery-report manifests by checking
@@ -443,13 +458,14 @@ agent intent/source/scope resolution
   evidence-bound Markdown is available through `source-truth generate --source
 --output-dir`. Narrow explicit-local source/docs reference evidence is
   available through `source-truth verify-docs --source --docs --output-dir`.
-  Explicit local manifest refresh for current
+  Explicit local manifest refresh for current built-in-parser
   `local-source-docs` and `source-truth-local-docs` manifests is available
   through `refresh --manifest <path>` or `refresh --output-dir <dir>`, with
-  deterministic post-refresh manifest/output integrity verification. Broader
-  crawling, configured SDK refresh, discovery-report refresh, remote freshness
-  refresh, broad official-docs behavior/API claim verification, and
-  behavior-level source documentation remain planned.
+  deterministic post-refresh manifest/output integrity verification.
+  Parser-plugin `local-source-docs` refresh, broader crawling, configured SDK
+  refresh, discovery-report refresh, remote freshness refresh, broad
+  official-docs behavior/API claim verification, and behavior-level source
+  documentation remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL
@@ -461,8 +477,11 @@ agent intent/source/scope resolution
   - parser and formatter
   - generated files
   - warnings
-- Parser plugin execution and custom parser generation remain future work.
-  The current CLI validates explicit local parser plugin manifests only.
+- Broad parser plugin workflows remain future work. The current CLI implements
+  only explicit single-file local parser plugin generation from one selected
+  manifest and custom format id. Plugin discovery, install, package resolution,
+  auto-selection, directory generation, sandboxing, and broad custom parser
+  workflows remain future work.
 
 ## Agent Crawl Order
 
