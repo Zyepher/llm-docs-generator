@@ -722,10 +722,14 @@ schema/mode/kind/count consistency. When optional candidate evidence index
 metadata is present, it rebuilds that metadata from `discovery-report.json` and
 fails on malformed or stale index data. For source-verification manifests, it
 checks `source-verification-report.json` existence, hash, byte size, line count,
-deterministic estimated token count, and basic schema/count consistency. It
-does not perform refresh, repo freshness verification, broad official-docs
-claim verification, candidate selection, task-fit judgment, source truth
-resolution, or behavior validation. The current
+deterministic estimated token count, report schema/mode/output path
+consistency, source/docs endpoint provenance against the report, manifest
+summary consistency with report metadata, report summary consistency with body
+arrays, and `sourceInspection.source` consistency. It does not perform refresh,
+inspect additional source/docs files, verify repo freshness, perform broad
+official-docs claim verification, validate source-code behavior, make
+candidate selection, task-fit judgments, source truth resolutions, or source
+selection decisions, or prove docs correctness. The current
 `refresh` command
 supports only `local-source-docs` and `source-truth-local-docs` manifests that
 already record an absolute local source path. It regenerates into the existing

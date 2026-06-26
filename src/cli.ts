@@ -669,13 +669,15 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'source-verification-local-evidence manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'file integrity and basic schema/count consistency checks for source-verification evidence manifests',
+        'deterministic source-verification report integrity, provenance, report-path, manifest/report summary, report-body count, and sourceInspection.source consistency checks',
       limitations: [
         'source-verification-local-evidence manifest mode only',
-        'verify does not refresh outputs',
+        'verify does not refresh outputs or sources',
         'no additional source/docs inspection',
         'no broad official-docs claim checking',
-        'no source selection',
+        'no source-code behavior validation',
+        'no task-fit, source-truth, or source-selection decision',
+        'no proof that docs statements are correct',
       ],
     },
     {
