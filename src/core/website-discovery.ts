@@ -1,9 +1,10 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { request } from 'undici';
 
 import { DISCOVERY_REPORT_SCHEMA_VERSION } from './discovery.js';
+import { writeTextFileSafely } from '../utils/safe-write.js';
 
 export const WEBSITE_BOUNDED_INSPECTION_MODE = 'website-bounded-inspection';
 export const DEFAULT_WEBSITE_FETCH_TIMEOUT_MS = 10_000;
@@ -186,7 +187,7 @@ export async function discoverWebsite(
   };
 
   await mkdir(outputDir, { recursive: true });
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+  await writeTextFileSafely(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 
   return { report, reportPath };
 }

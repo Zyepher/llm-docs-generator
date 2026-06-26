@@ -110,23 +110,26 @@ npx tsx src/cli.ts validate --sdk swift --version v2
 
 The current `discover --source` command performs local, explicit, bounded file
 inspection for a provided file or directory. It writes `discovery-report.json`
-with candidate file hints, deterministic evidence categories and signals,
-report order, hashes, traversal settings, and warnings.
+and a discovery-report `manifest.json` with candidate file hints, deterministic
+evidence categories and signals, report order, hashes, traversal settings, and
+warnings.
 
 The current `discover --repo` command clones or reuses an explicit git repo in
 a stable cache, optionally inspects one repo-relative scope path, and writes a
-repo discovery report with cache path, commit, dirty state, traversal settings,
-candidates, and warnings. For clean matching caches it fetches remote refs but
-does not pull or mutate the checked-out commit, and it does not run repo
-scripts. Ignored local files in the cache are treated as dirty cache contents,
-so fetches are skipped before any update step can risk those files.
+repo discovery report and discovery-report `manifest.json` with cache path,
+commit, dirty state, traversal settings, candidates, and warnings. For clean
+matching caches it fetches remote refs but does not pull or mutate the
+checked-out commit, and it does not run repo scripts. Ignored local files in the
+cache are treated as dirty cache contents, so fetches are skipped before any
+update step can risk those files.
 
 The current `discover --url` command performs bounded static inspection for one
 explicit HTTP(S) URL. It fetches only the explicit URL, same-origin root
 `/llms.txt`, and same-origin root `/sitemap.xml`; it does not render JavaScript
 or fetch linked candidates. It writes a website discovery report with inspected
 resources, response status/content type/byte counts, crawl policy, extracted
-candidate URLs, evidence/provenance, and warnings.
+candidate URLs, evidence/provenance, warnings, and a discovery-report
+`manifest.json`.
 
 The current `capabilities --json` command prints a deterministic
 machine-readable contract for agents. The contract includes schema version
@@ -198,17 +201,20 @@ repos, select sources, verify source truth, claim completeness, refresh, or
 perform source-code verification. Additional preset names remain
 planned/unsupported.
 
-The current CLI still does not expose refresh or source-code verification. It also
-writes `manifest.json` for successful configured `generate --sdk` tasks with
-generated output hashes, byte sizes, line counts, and deterministic estimated
-token counts. Current `verify` supports configured-SDK and source-mode
-manifests. Configured SDK verification checks source and output file hashes and
-byte sizes, and validates optional line/token metadata shape when present
-without recomputing those counts. Source-mode verification checks local source
-path shape and existence, recorded source file hashes and byte sizes, generated
+The current CLI still does not expose refresh or source-code verification. It
+also writes `manifest.json` for successful configured `generate --sdk` tasks and
+successful discovery tasks with generated output or report hashes, byte sizes,
+line counts, and deterministic estimated token counts. Current `verify`
+supports configured-SDK, source-mode, and discovery-report manifests.
+Configured SDK verification checks source and output file hashes and byte sizes,
+and validates optional line/token metadata shape when present without
+recomputing those counts. Source-mode verification checks local source path
+shape and existence, recorded source file hashes and byte sizes, generated
 output paths, hashes, byte sizes, line counts, and deterministic estimated token
-counts. Discovery reports do not generate docs, choose sources, assign trust
-scores, infer authority, or claim source truth.
+counts. Discovery-report verification checks report file integrity and basic
+schema/mode/kind/count consistency only. Discovery reports do not generate
+docs, choose sources, assign trust scores, infer authority, or claim source
+truth.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable
@@ -316,7 +322,11 @@ agent intent/source/scope resolution
   also verifies `local-source-docs` manifests by checking local source path
   shape and existence, source file hashes and byte sizes, generated output
   paths, hashes, byte sizes, line counts, and deterministic estimated token
-  counts. Local source docs generation is available through
+  counts. It also verifies discovery-report manifests by checking
+  `discovery-report.json` existence, hashes, byte sizes, line counts,
+  deterministic estimated token counts, and basic report
+  schema/mode/kind/count consistency only. Local source docs generation is
+  available through
   `generate --source <local-file-or-directory> --output-dir <dir>` for explicit
   local Markdown/MDX, OpenAPI, OpenRef, RST, and static HTML inputs, with
   optional `--chunks jsonl` semantic chunk JSONL publication. Local

@@ -49,4 +49,4 @@ llm-docs discover --url https://example.com/docs --output-dir ./reports/site-doc
 
 ## Reporting Back
 
-Return the selected source, inspected scope, warnings, unsupported capabilities, and relevant report paths. State when evidence is incomplete instead of inventing low-confidence docs.
+Return the selected source, inspected scope, warnings, unsupported capabilities, and relevant report and manifest paths. State when evidence is incomplete instead of inventing low-confidence docs.

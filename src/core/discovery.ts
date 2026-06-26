@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import type { Dirent, Stats } from 'node:fs';
-import { lstat, mkdir, opendir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, opendir } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
+
+import { writeTextFileSafely } from '../utils/safe-write.js';
 
 export const DISCOVERY_REPORT_SCHEMA_VERSION = '0.2.0';
 export const LOCAL_BOUNDED_INSPECTION_MODE = 'local-bounded-inspection';
@@ -182,7 +184,7 @@ export async function discoverLocalSources(
   };
 
   await mkdir(outputDir, { recursive: true });
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+  await writeTextFileSafely(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 
   return { report, reportPath };
 }

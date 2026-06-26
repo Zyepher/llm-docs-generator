@@ -84,9 +84,9 @@ Current implementation:
   SHA-256 hashes, generated output paths, byte sizes, hashes, line counts, and
   deterministic estimated token counts.
 - Can run `discover --source <local-file-or-directory>` for explicit local,
-  bounded inspection and write `discovery-report.json` with candidate file
-  hints, deterministic evidence categories and signals, report order, hashes,
-  traversal settings, and warnings.
+  bounded inspection and write `discovery-report.json` plus a discovery-report
+  `manifest.json` with candidate file hints, deterministic evidence categories
+  and signals, report order, hashes, traversal settings, and warnings.
 - Can run `discover --repo <git-url-or-local-git-repo>` with optional
   `--scope <path>`, `--cache-dir <dir>`, and `--output-dir <dir>` for a bounded
   repo inspection report. Repo mode clones missing repos into a stable cache
@@ -101,7 +101,8 @@ Current implementation:
   candidate links, render JavaScript, or crawl arbitrary website paths. The
   report records inspected resources, response status/content type/byte counts,
   crawl policy, extracted candidate URLs, source resource provenance, and
-  warnings.
+  warnings. Successful repo and URL discovery also write discovery-report
+  manifests beside `discovery-report.json`.
 - Can run `source-truth inspect --source <local-file-or-directory>` for an
   explicit local source path and print a deterministic JSON evidence report to
   stdout. The report uses bounded traversal, does not follow symlinks, skips
@@ -174,11 +175,10 @@ Current implementation:
   code. Semantic chunking exists as a library capability for existing DocNode IR
   and as an opt-in JSONL export for explicit `generate --source` outputs only;
   configured SDK, source-truth docs, and discovery reports do not publish
-  semantic chunk records. Current source docs, configured SDK, and source-truth
-  docs manifests include partial generated-output RAG metadata only
-  (`lineCount` and `estimatedTokenCount`) plus the source-docs opt-in chunk
-  JSONL file when requested. Discovery reports do not yet include this
-  generated-output metadata. Discovery modes are inspection
+  semantic chunk records. Current source docs, configured SDK, source-truth
+  docs, and discovery-report manifests include partial generated-output RAG
+  metadata only (`lineCount` and `estimatedTokenCount`) plus the source-docs
+  opt-in chunk JSONL file when requested. Discovery modes are inspection
   foundations only; they do not generate docs, choose sources, assign trust
   scores, infer authority, or claim source truth.
 - Local and repo discovery order candidates by deterministic evidence category
@@ -214,8 +214,8 @@ The workflows below describe the approved next-generation product direction.
 When using the current CLI, verify that the needed command exists first. If the
 workflow needs discovery, repo caching, refresh, source verification,
 behavior-level source documentation, or manifest data beyond the current
-source docs, configured SDK, and source-truth docs manifests, treat it as
-planned work unless source and tests prove it has been implemented.
+source docs, configured SDK, source-truth docs, and discovery-report manifests,
+treat it as planned work unless source and tests prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -570,16 +570,23 @@ output kind/name metadata, optional `chunks/semantic-chunks.jsonl` metadata when
 configured SDK generation path writes a scoped `manifest.json` with configured
 source details, hashes, parser and formatter metadata, generated file hashes,
 byte sizes, line counts, and deterministic estimated token counts. The current
-`verify` command supports `configured-sdk` and `local-source-docs` manifests.
+discovery commands write a scoped `manifest.json` beside `discovery-report.json`
+with discovery kind, report path, report schema/mode, factual counts, and
+report file hash, byte size, line count, and deterministic estimated token
+count. The current `verify` command supports `configured-sdk`,
+`local-source-docs`, and `discovery-report` manifests.
 For configured SDK manifests, it checks source and generated output hashes and
 byte sizes, and rejects malformed optional generated output line/token metadata
 when present; it does not recompute those optional counts. For source-mode
 manifests, it checks local source path shape and existence, source file hashes
 and byte sizes, generated output paths, hashes, byte sizes, line counts, and
-deterministic estimated token counts. It does not perform refresh, discovery
-report validation, repo freshness verification, or source-code verification.
-Future implementations should extend manifest coverage to the broader
-provenance fields above.
+deterministic estimated token counts. For discovery-report manifests, it checks
+`discovery-report.json` existence, hash, byte size, line count, deterministic
+estimated token count, and basic report schema/mode/kind/count consistency. It
+does not perform refresh, repo freshness verification, source-code
+verification, candidate selection, task-fit judgment, or source-truth
+validation. Future implementations should extend manifest coverage to the
+broader provenance fields above.
 
 ## Clarifying Questions
 
