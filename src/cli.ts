@@ -68,6 +68,7 @@ const SOURCE_GENERATE_FORMATS = [
   'rst',
   'html',
 ] as const;
+const BUILT_IN_SOURCE_GENERATE_FORMATS = new Set<string>(SOURCE_GENERATE_FORMATS);
 const SOURCE_GENERATE_CHUNK_FORMATS = ['jsonl'] as const;
 const SOURCE_GENERATE_PRESETS = ['swift-book'] as const;
 const SWIFT_BOOK_PRESET_FORMATS = ['markdown'] as const;
@@ -552,21 +553,51 @@ const CAPABILITIES_CONTRACT = {
       options: [
         '--source <path>',
         '--format auto|markdown|mdx|openapi|openref|rst|html',
+        '--parser-plugin-manifest <path> with explicit custom --format <plugin-format-id>',
         '--chunks jsonl',
         '--preset swift-book',
       ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic local source parsing through the registered parser and universal formatter, with opt-in semantic chunk JSONL export, compact chunk manifest indexes, and a scoped swift-book preset',
+        'deterministic local source parsing through the registered parser or an explicit single-file local parser plugin and universal formatter, with opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, and a scoped swift-book preset',
       limitations: [
         'local files and directories only',
         'no URL fetching',
         'no discovery report consumption',
         'no candidate auto-selection',
+        'parser plugin generation requires --source <local-file>, --parser-plugin-manifest <path>, and a custom explicit --format id',
+        'parser plugin code is trusted local code executed for generation and is not sandboxed',
+        'no parser plugin discovery, installation, package resolution, or auto-selection',
+        'no parser plugin directory source generation',
         'swift-book preset requires explicit --source and adds deterministic output defaults only',
         'no source selection decision',
         'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
         'semantic chunk manifest indexes are source-docs JSONL metadata only',
+      ],
+    },
+    {
+      id: 'parser-plugin-execution',
+      command: 'generate',
+      mode: 'generate --source <local-file> --parser-plugin-manifest <path> --format <plugin-format-id>',
+      status: 'implemented',
+      inputBoundary:
+        'one explicit local source file, one explicit local parser plugin manifest, and one explicit custom plugin format id',
+      options: ['--source <local-file>', '--parser-plugin-manifest <path>', '--format <id>'],
+      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt'],
+      summary:
+        'explicit single-file parser plugin execution through one declared local module, normalized through the universal formatter with parser plugin provenance in the source-docs manifest',
+      limitations: [
+        'explicit local source files only',
+        'requires a custom plugin format id declared by the manifest',
+        'rejects built-in formats and --format auto',
+        'no directory source generation through parser plugins',
+        'no --chunks support with parser plugins',
+        'no --preset support with parser plugins',
+        'no parser plugin discovery or auto-selection',
+        'no plugin installation or package resolution',
+        'plugin code is trusted local code and is not sandboxed',
+        'verify checks recorded plugin manifest metadata and hashes without importing plugin code',
+        'no network added by the CLI',
       ],
     },
     {
@@ -707,13 +738,15 @@ const CAPABILITIES_CONTRACT = {
       command: 'refresh',
       mode: 'refresh --manifest or refresh --output-dir for local-source-docs',
       status: 'implemented',
-      inputBoundary: 'existing local-source-docs manifest.json with recorded local source path',
+      inputBoundary:
+        'existing built-in-parser local-source-docs manifest.json with recorded local source path',
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic regeneration of local source docs from the manifest-recorded explicit local source path, preserving opt-in chunk JSONL and chunk index metadata when the prior manifest recorded that output, followed by manifest integrity verification of regenerated outputs',
+        'deterministic regeneration of built-in-parser local source docs from the manifest-recorded explicit local source path, preserving opt-in chunk JSONL and chunk index metadata when the prior manifest recorded that output, followed by manifest integrity verification of regenerated outputs',
       limitations: [
-        'local-source-docs manifests only',
+        'built-in-parser local-source-docs manifests only',
+        'parser-plugin local-source-docs manifests are not refreshed; rerun explicit generate --source --parser-plugin-manifest --format',
         'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',
         'no URLs',
         'no repo freshness check',
@@ -805,10 +838,10 @@ const CAPABILITIES_CONTRACT = {
     {
       id: 'refresh-unsupported-manifests',
       command:
-        'refresh for configured SDK, discovery report, URL, repo, website, or freshness workflows',
+        'refresh for parser-plugin source-docs, configured SDK, discovery report, URL, repo, website, or freshness workflows',
       status: 'planned-unsupported',
       reason:
-        'only explicit local-source-docs and source-truth-local-docs manifest refresh is implemented; configured SDK, discovery report, remote URL/repo, freshness, crawling, and source-code verification refresh remain planned',
+        'only explicit built-in-parser local-source-docs and source-truth-local-docs manifest refresh is implemented; parser-plugin source-docs, configured SDK, discovery report, remote URL/repo, freshness, crawling, and source-code verification refresh remain planned',
     },
     {
       id: 'source-code-verification',
@@ -844,11 +877,12 @@ const CAPABILITIES_CONTRACT = {
         'source-truth generation is limited to observed export, signature, package/config, and path context facts',
     },
     {
-      id: 'parser-plugin-execution',
-      command: 'parser plugin execution and custom parser generation',
+      id: 'parser-plugin-broader-workflows',
+      command:
+        'parser plugin discovery, install, package resolution, auto-detection, directory generation, sandboxing, and broad custom parser workflows',
       status: 'planned-unsupported',
       reason:
-        'plugins validate validates explicit local parser plugin manifests only; loading, importing, executing parser plugins and generating docs with custom parsers remain planned/unsupported',
+        'only explicit single-file local parser plugin generation is implemented; discovery, install, package resolution, auto-selection, directory source generation, sandboxing, and broad custom parser workflows remain planned/unsupported',
     },
     {
       id: 'agent-install-codex',
@@ -1158,7 +1192,7 @@ function printGenerateRequestFailure(message: string): void {
   console.error(chalk.red(`Generate failed: ${message}`));
   console.error(
     chalk.yellow(
-      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] [--chunks jsonl] [--preset swift-book] --output-dir <dir>; generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] [--chunks jsonl] [--preset swift-book] --output-dir <dir>; generate --source <local-file> --parser-plugin-manifest <path> --format <plugin-format-id> --output-dir <dir>; generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
     )
   );
   console.error(
@@ -1205,7 +1239,53 @@ function validateGenerateOptions(options: {
   format?: string;
   chunks?: string;
   preset?: string;
+  parserPluginManifest?: string;
 }): GenerateMode {
+  if (
+    options.parserPluginManifest !== undefined &&
+    options.parserPluginManifest.trim().length === 0
+  ) {
+    failGenerateRequest('generate --parser-plugin-manifest requires a non-empty path.');
+  }
+
+  if (options.parserPluginManifest !== undefined && options.sdk !== undefined) {
+    failGenerateRequest(
+      'generate --parser-plugin-manifest is supported only with explicit --source and cannot be used with --sdk.'
+    );
+  }
+
+  if (options.parserPluginManifest !== undefined && options.source === undefined) {
+    failGenerateRequest(
+      'generate --parser-plugin-manifest requires --source <explicit-local-file>.'
+    );
+  }
+
+  if (options.parserPluginManifest !== undefined && options.preset !== undefined) {
+    failGenerateRequest('generate --parser-plugin-manifest cannot be combined with --preset.');
+  }
+
+  if (options.parserPluginManifest !== undefined && options.chunks !== undefined) {
+    failGenerateRequest(
+      'generate --parser-plugin-manifest cannot be combined with --chunks in this release.'
+    );
+  }
+
+  if (options.parserPluginManifest !== undefined) {
+    const normalizedFormat = options.format?.trim().toLowerCase();
+
+    if (normalizedFormat === undefined || normalizedFormat.length === 0) {
+      failGenerateRequest(
+        'generate --parser-plugin-manifest requires explicit --format <plugin-format-id>.'
+      );
+    }
+
+    if (BUILT_IN_SOURCE_GENERATE_FORMATS.has(normalizedFormat)) {
+      failGenerateRequest(
+        `generate --parser-plugin-manifest requires a custom plugin format id; '${normalizedFormat}' is a built-in source format.`
+      );
+    }
+  }
+
   if (options.preset !== undefined && options.preset.trim().length === 0) {
     failGenerateRequest('generate --preset requires a non-empty preset name.');
   }
@@ -1227,7 +1307,7 @@ function validateGenerateOptions(options: {
   }
 
   if (options.source !== undefined) {
-    if (options.format !== undefined) {
+    if (options.format !== undefined && options.parserPluginManifest === undefined) {
       const normalizedFormat = options.format.trim().toLowerCase();
 
       if (
@@ -1395,7 +1475,12 @@ async function resolveSourceGeneratePreset(options: {
 async function cleanupStaleSourceArtifactsForFailedSourceRequest(options: {
   source?: string;
   outputDir: string;
+  parserPluginManifest?: string;
 }): Promise<void> {
+  if (options.parserPluginManifest !== undefined) {
+    return;
+  }
+
   try {
     const { cleanupStaleSourceDocsArtifacts } = await import('./core/source-docs.js');
 
@@ -1590,7 +1675,9 @@ pluginsCommand
         );
       }
 
-      console.log('  Scope: validation only; parser plugin execution is not implemented.');
+      console.log(
+        '  Scope: validation only; plugin execution is available only through explicit generate --source --parser-plugin-manifest --format.'
+      );
       return;
     }
 
@@ -1876,9 +1963,13 @@ program
   .option('--source <path>', 'Explicit local file or directory to parse and format')
   .option(
     '--format <format>',
-    'Source parser hint: auto, markdown, mdx, openapi, openref, rst, html; SDK guard: openref or openref-0.1'
+    'Source parser hint: auto, markdown, mdx, openapi, openref, rst, html; explicit parser plugin format id; SDK guard: openref or openref-0.1'
   )
   .option('--chunks <format>', 'Source-only semantic chunk export: jsonl')
+  .option(
+    '--parser-plugin-manifest <path>',
+    'Explicit local parser plugin manifest for single-file source generation'
+  )
   .option('--preset <name>', 'Source-only deterministic preset: swift-book')
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
   .option('--config-dir <dir>', 'Configuration directory', 'config')
@@ -1891,6 +1982,7 @@ program
       source?: string;
       format?: string;
       chunks?: string;
+      parserPluginManifest?: string;
       preset?: string;
       sdkVersion: string;
       configDir: string;
@@ -1936,16 +2028,23 @@ program
           if (options.chunks !== undefined) {
             sourceDocsOptions.chunks = options.chunks;
           }
+          if (options.parserPluginManifest !== undefined) {
+            sourceDocsOptions.parserPluginManifest = options.parserPluginManifest;
+          }
 
           const result = await generateSourceDocs(sourceDocsOptions);
           const chunkOutput = result.manifest.generatedOutputs.find(
             (output) => output.kind === 'semantic-chunks-jsonl'
           );
+          const parserPlugin = result.manifest.parser.plugin;
 
           console.log(chalk.bold('Local source docs generated'));
           console.log(`  Source: ${result.manifest.source.resolvedPath}`);
           console.log(`  Type: ${result.manifest.source.type}`);
           console.log(`  Format: ${result.manifest.source.resolvedFormat}`);
+          if (parserPlugin !== undefined) {
+            console.log(`  Parser plugin: ${parserPlugin.name} ${parserPlugin.version}`);
+          }
           if (result.manifest.preset !== undefined) {
             console.log(`  Preset: ${result.manifest.preset.name}`);
           }
@@ -2135,7 +2234,7 @@ program
 program
   .command('refresh')
   .description(
-    'Refresh local source docs or source-truth docs from an existing explicit local manifest'
+    'Refresh built-in local source docs or source-truth docs from an existing explicit local manifest'
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')

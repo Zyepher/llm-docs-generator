@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { chunkDocNode, type SemanticChunk, type SemanticChunkWarning } from './chunker.js';
 import { detectFormat, getParserForFormat } from './detector.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
-import { createDocNode, DocNodeType, type DocNode } from './models.js';
+import { createDocNode, DocNodeSchema, DocNodeType, type DocNode } from './models.js';
+import {
+  validateParserPluginManifestFile,
+  type ParserPluginFormatMetadata,
+  type ParserPluginManifestMetadata,
+} from './parser-plugin-manifest.js';
 import {
   buildSemanticChunkJsonlManifestIndex,
   type SemanticChunkManifestIndex,
@@ -46,12 +52,13 @@ const DISCOVERY_REPORT_MODES = new Set([
 
 type SourceDocsSourceType = 'file' | 'directory';
 export type SourceDocsChunksFormat = 'jsonl';
-type SourceDocsResolvedFormat =
+type BuiltInSourceDocsResolvedFormat =
   | FormatType.MARKDOWN
   | FormatType.OPENAPI
   | FormatType.OPENREF
   | FormatType.RST
   | FormatType.HTML;
+type SourceDocsResolvedFormat = BuiltInSourceDocsResolvedFormat | string;
 
 export interface SourceDocsGeneratorMetadata {
   name: string;
@@ -86,6 +93,7 @@ export interface GenerateSourceDocsOptions {
   outputDir: string;
   format?: string;
   chunks?: string;
+  parserPluginManifest?: string;
   output?: SourceDocsOutputDefaults;
   preset?: SourceDocsPresetMetadata;
   generator: SourceDocsGeneratorMetadata;
@@ -100,6 +108,26 @@ interface SourceDocsBaseFileManifestEntry {
 
 export interface SourceDocsFileManifestEntry extends SourceDocsBaseFileManifestEntry {
   format: SourceDocsResolvedFormat;
+}
+
+export interface SourceDocsParserPluginProvenance {
+  manifestPath: string;
+  resolvedManifestPath: string;
+  manifestByteSize: number;
+  manifestHash: string;
+  name: string;
+  version: string;
+  module: {
+    path: string;
+    resolvedPath: string;
+  };
+  format: ParserPluginFormatMetadata;
+  execution: {
+    codeExecuted: true;
+    trust: 'trusted-local-code';
+    sandboxed: false;
+    statement: string;
+  };
 }
 
 export interface SourceDocsGeneratedOutput {
@@ -133,6 +161,7 @@ export interface SourceDocsManifest {
     name: string;
     version: string;
     format: SourceDocsResolvedFormat;
+    plugin?: SourceDocsParserPluginProvenance;
   };
   formatter: {
     name: 'UniversalFormatter';
@@ -178,12 +207,28 @@ interface BoundedSourceFile extends SourceDocsBaseFileManifestEntry {
 
 interface PreparedSourceDocsInput {
   resolvedFormat: SourceDocsResolvedFormat;
-  parser: Parser;
+  parser: SourceDocsParser;
+  parserVersion?: string;
+  parserPlugin?: SourceDocsParserPluginProvenance;
   sourceFiles: BoundedSourceFile[];
   warnings: string[];
 }
 
 type SourceFileFormat = SourceDocsResolvedFormat | 'structured-spec';
+
+interface SourceDocsParser {
+  readonly name: string;
+  readonly format: string;
+  detect?(sourcePath: string): Promise<boolean> | boolean;
+  parse(sourcePath: string): Promise<DocNode> | DocNode;
+}
+
+interface ParserPluginParserCandidate {
+  name: string;
+  format: string;
+  detect?: (sourcePath: string) => unknown;
+  parse: (sourcePath: string) => unknown;
+}
 
 export async function generateSourceDocs(
   options: GenerateSourceDocsOptions
@@ -194,7 +239,6 @@ export async function generateSourceDocs(
   let outputWorkStarted = false;
 
   try {
-    const formatHint = parseSourceDocsFormatHint(options.format);
     const chunksFormat = parseSourceDocsChunksFormat(options.chunks);
     const source = await resolveSourceInput(options.source);
 
@@ -202,7 +246,16 @@ export async function generateSourceDocs(
     await assertOutputDirOutsideSource(source, outputDir);
     await assertNotDiscoveryReport(source);
 
-    const preparedSource = await prepareSourceDocsInput(source, formatHint);
+    const { formatHint, preparedSource } =
+      options.parserPluginManifest === undefined
+        ? await prepareBuiltInSourceDocsInput(source, options.format)
+        : await prepareParserPluginSourceDocsInput(source, {
+            format: options.format,
+            chunks: options.chunks,
+            preset: options.preset,
+            manifestPath: options.parserPluginManifest,
+            outputDir,
+          });
 
     await mkdir(outputDir, { recursive: true });
     await clearSourceDocsArtifacts(outputDir);
@@ -231,9 +284,15 @@ export async function generateSourceDocs(
     }
     const manifest = buildSourceDocsManifest({
       source,
-      formatHint: formatHint.manifestValue,
+      formatHint,
       resolvedFormat: preparedSource.resolvedFormat,
       parser: preparedSource.parser,
+      ...(preparedSource.parserVersion === undefined
+        ? {}
+        : { parserVersion: preparedSource.parserVersion }),
+      ...(preparedSource.parserPlugin === undefined
+        ? {}
+        : { parserPlugin: preparedSource.parserPlugin }),
       generator: options.generator,
       sourceFiles: preparedSource.sourceFiles,
       generatedOutputs,
@@ -253,7 +312,7 @@ export async function generateSourceDocs(
   } catch (error) {
     if (outputWorkStarted) {
       await clearSourceDocsArtifacts(outputDir);
-    } else {
+    } else if (options.parserPluginManifest === undefined) {
       await cleanupStaleSourceDocsArtifacts(outputDir, {
         protectedSourcePath: options.source,
       });
@@ -330,6 +389,326 @@ function parseSourceDocsChunksFormat(
   }
 
   return normalizedChunks;
+}
+
+async function prepareBuiltInSourceDocsInput(
+  source: ResolvedSourceDocsInput,
+  format: string | undefined
+): Promise<{ formatHint: string; preparedSource: PreparedSourceDocsInput }> {
+  const formatHint = parseSourceDocsFormatHint(format);
+
+  return {
+    formatHint: formatHint.manifestValue,
+    preparedSource: await prepareSourceDocsInput(source, formatHint),
+  };
+}
+
+async function prepareParserPluginSourceDocsInput(
+  source: ResolvedSourceDocsInput,
+  options: {
+    format: string | undefined;
+    chunks: string | undefined;
+    preset: SourceDocsPresetMetadata | undefined;
+    manifestPath: string;
+    outputDir: string;
+  }
+): Promise<{ formatHint: string; preparedSource: PreparedSourceDocsInput }> {
+  const requestedFormat = parseParserPluginRequestedFormat(options.format);
+
+  if (options.chunks !== undefined) {
+    throw new Error(
+      'generate --source --parser-plugin-manifest does not support --chunks in this release'
+    );
+  }
+
+  if (options.preset !== undefined) {
+    throw new Error(
+      'generate --source --parser-plugin-manifest does not support --preset in this release'
+    );
+  }
+
+  if (source.type !== 'file') {
+    throw new Error(
+      'generate --source --parser-plugin-manifest supports explicit local source files only; directory inputs are not supported in this release'
+    );
+  }
+
+  const plugin = await loadExplicitParserPlugin({
+    manifestPath: options.manifestPath,
+    requestedFormat,
+    sourcePath: source.resolvedPath,
+    outputDir: options.outputDir,
+  });
+  const sourceFile = await describeSourceFile(
+    source.resolvedPath,
+    basename(source.resolvedPath),
+    requestedFormat
+  );
+
+  return {
+    formatHint: requestedFormat,
+    preparedSource: {
+      resolvedFormat: requestedFormat,
+      parser: plugin.parser,
+      parserVersion: plugin.provenance.version,
+      parserPlugin: plugin.provenance,
+      sourceFiles: [sourceFile],
+      warnings: [],
+    },
+  };
+}
+
+function parseParserPluginRequestedFormat(format: string | undefined): string {
+  if (format === undefined || format.trim().length === 0) {
+    throw new Error(
+      'generate --source --parser-plugin-manifest requires explicit --format <plugin-format-id>'
+    );
+  }
+
+  const normalizedFormat = format.trim().toLowerCase();
+
+  if (SOURCE_DOCS_FORMAT_HINTS.has(normalizedFormat)) {
+    throw new Error(
+      `generate --source --parser-plugin-manifest requires a custom plugin format id; '${normalizedFormat}' is a built-in source format`
+    );
+  }
+
+  return normalizedFormat;
+}
+
+async function loadExplicitParserPlugin(options: {
+  manifestPath: string;
+  requestedFormat: string;
+  sourcePath: string;
+  outputDir: string;
+}): Promise<{ parser: SourceDocsParser; provenance: SourceDocsParserPluginProvenance }> {
+  const validation = await validateParserPluginManifestFile({
+    manifestPath: options.manifestPath,
+  });
+
+  if (!validation.valid || validation.manifest === undefined) {
+    const details = validation.errors.map((error) => `${error.path}: ${error.message}`).join('; ');
+
+    throw new Error(`parser plugin manifest invalid: ${details}`);
+  }
+
+  const selectedFormat = validation.manifest.formats.find(
+    (format) => format.id === options.requestedFormat
+  );
+
+  if (selectedFormat === undefined) {
+    throw new Error(
+      `parser plugin manifest does not declare requested format '${options.requestedFormat}'`
+    );
+  }
+
+  const manifestFile = await describeParserPluginManifestFile(validation.manifestPath);
+  await assertParserPluginInputOutsideSourceDocsArtifacts({
+    kind: 'manifest',
+    path: validation.manifestPath,
+    outputDir: options.outputDir,
+  });
+  const modulePath = await resolveParserPluginModuleFile(
+    validation.manifestPath,
+    validation.manifest
+  );
+  await assertParserPluginInputOutsideSourceDocsArtifacts({
+    kind: 'module',
+    path: modulePath,
+    outputDir: options.outputDir,
+  });
+  const moduleExports = (await import(pathToFileURL(modulePath).href)) as Record<string, unknown>;
+  const parser = buildExecutableParserPluginParser(
+    moduleExports,
+    options.requestedFormat,
+    validation.manifestPath
+  );
+
+  if (parser.detect !== undefined) {
+    const detected = await parser.detect(options.sourcePath);
+
+    if (!detected) {
+      throw new Error(
+        `parser plugin '${parser.name}' detect returned false for source file: ${options.sourcePath}`
+      );
+    }
+  }
+
+  return {
+    parser,
+    provenance: {
+      manifestPath: options.manifestPath,
+      resolvedManifestPath: validation.manifestPath,
+      manifestByteSize: manifestFile.byteSize,
+      manifestHash: manifestFile.hash,
+      name: validation.manifest.name,
+      version: validation.manifest.version,
+      module: {
+        path: validation.manifest.module,
+        resolvedPath: modulePath,
+      },
+      format: cloneParserPluginFormatMetadata(selectedFormat),
+      execution: {
+        codeExecuted: true,
+        trust: 'trusted-local-code',
+        sandboxed: false,
+        statement:
+          'Parser plugin code was executed for generation as trusted local code and was not sandboxed.',
+      },
+    },
+  };
+}
+
+async function describeParserPluginManifestFile(
+  manifestPath: string
+): Promise<{ byteSize: number; hash: string }> {
+  const [fileStats, hash] = await Promise.all([stat(manifestPath), sha256File(manifestPath)]);
+
+  return {
+    byteSize: fileStats.size,
+    hash,
+  };
+}
+
+async function resolveParserPluginModuleFile(
+  manifestPath: string,
+  manifest: ParserPluginManifestMetadata
+): Promise<string> {
+  const manifestDir = dirname(manifestPath);
+  const realManifestDir = await realpath(manifestDir);
+  const modulePath = resolve(manifestDir, manifest.module);
+  let moduleStats: Awaited<ReturnType<typeof lstat>>;
+
+  try {
+    moduleStats = await lstat(modulePath);
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      throw new Error(`parser plugin module file not found: ${modulePath}`);
+    }
+
+    throw error;
+  }
+
+  if (moduleStats.isSymbolicLink()) {
+    throw new Error(`parser plugin module must not be a symbolic link: ${modulePath}`);
+  }
+
+  if (!moduleStats.isFile()) {
+    throw new Error(`parser plugin module must be a regular local file: ${modulePath}`);
+  }
+
+  const realModulePath = await realpath(modulePath);
+
+  if (!isSameOrDescendant(realManifestDir, realModulePath)) {
+    throw new Error(
+      `parser plugin module must resolve inside the real manifest directory: ${manifest.module}`
+    );
+  }
+
+  return realModulePath;
+}
+
+function buildExecutableParserPluginParser(
+  moduleExports: Record<string, unknown>,
+  requestedFormat: string,
+  manifestPath: string
+): SourceDocsParser {
+  const exportedParser = moduleExports.default ?? moduleExports.parser;
+  const parser = validateParserPluginParserExport(exportedParser, requestedFormat, manifestPath);
+
+  return {
+    name: parser.name,
+    format: parser.format,
+    ...(parser.detect === undefined
+      ? {}
+      : {
+          detect: async (sourcePath: string) => {
+            const detected = await parser.detect?.call(parser, sourcePath);
+
+            if (typeof detected !== 'boolean') {
+              throw new Error(
+                `parser plugin '${parser.name}' detect must return a boolean for source file: ${sourcePath}`
+              );
+            }
+
+            return detected;
+          },
+        }),
+    parse: async (sourcePath: string) => {
+      const root = await parser.parse.call(parser, sourcePath);
+
+      return validateParserPluginDocNode(root, parser.name);
+    },
+  };
+}
+
+function validateParserPluginParserExport(
+  value: unknown,
+  requestedFormat: string,
+  manifestPath: string
+): ParserPluginParserCandidate {
+  if (!isRecord(value)) {
+    throw new Error(
+      `parser plugin module for ${manifestPath} must export a parser object as default or named 'parser'`
+    );
+  }
+
+  const name = value.name;
+  const format = value.format;
+  const parse = value.parse;
+  const detect = value.detect;
+
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    throw new Error('parser plugin parser.name must be a non-empty string');
+  }
+
+  if (format !== requestedFormat) {
+    throw new Error(
+      `parser plugin parser.format must exactly match requested --format '${requestedFormat}'`
+    );
+  }
+
+  if (typeof parse !== 'function') {
+    throw new Error('parser plugin parser.parse must be a function');
+  }
+
+  if (detect !== undefined && typeof detect !== 'function') {
+    throw new Error('parser plugin parser.detect must be a function when provided');
+  }
+
+  return {
+    name,
+    format,
+    parse: parse as (sourcePath: string) => unknown,
+    ...(detect === undefined ? {} : { detect: detect as (sourcePath: string) => unknown }),
+  };
+}
+
+function validateParserPluginDocNode(value: unknown, parserName: string): DocNode {
+  const parsed = DocNodeSchema.safeParse(value);
+
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue?.path.length === 0 ? '$' : issue?.path.join('.');
+    const detail =
+      issue === undefined ? 'unknown validation error' : `${path ?? '$'}: ${issue.message}`;
+
+    throw new Error(`parser plugin '${parserName}' parse returned invalid DocNode: ${detail}`);
+  }
+
+  return parsed.data;
+}
+
+function cloneParserPluginFormatMetadata(
+  format: ParserPluginFormatMetadata
+): ParserPluginFormatMetadata {
+  return {
+    id: format.id,
+    displayName: format.displayName,
+    extensions: [...format.extensions],
+    ...(format.mediaTypes === undefined ? {} : { mediaTypes: [...format.mediaTypes] }),
+    ...(format.directorySupport === undefined ? {} : { directorySupport: format.directorySupport }),
+  };
 }
 
 async function resolveSourceInput(sourceInput: string): Promise<ResolvedSourceDocsInput> {
@@ -456,7 +835,7 @@ async function prepareSourceDocsInput(
   const resolvedFormat =
     formatHint.parserHint === FormatType.AUTO
       ? resolveDirectoryAutoFormat(sourceFiles.files, source.resolvedPath)
-      : (formatHint.parserHint as SourceDocsResolvedFormat);
+      : (formatHint.parserHint as BuiltInSourceDocsResolvedFormat);
   const selectedFiles = sourceFiles.files.filter((file) => file.format === resolvedFormat);
 
   if (selectedFiles.length === 0) {
@@ -473,7 +852,7 @@ async function prepareSourceDocsInput(
   };
 }
 
-function getSourceDocsParser(format: SourceDocsResolvedFormat): Parser {
+function getSourceDocsParser(format: BuiltInSourceDocsResolvedFormat): Parser {
   const parser = getParserForFormat(format);
 
   if (parser === undefined) {
@@ -486,14 +865,14 @@ function getSourceDocsParser(format: SourceDocsResolvedFormat): Parser {
 async function resolveSourceDocsFormat(
   sourcePath: string,
   parserHint: FormatType
-): Promise<SourceDocsResolvedFormat> {
+): Promise<BuiltInSourceDocsResolvedFormat> {
   const resolvedFormat = await detectFormat(sourcePath, parserHint);
 
   if (resolvedFormat === FormatType.AUTO) {
     throw new Error(`Unable to resolve source format for: ${sourcePath}`);
   }
 
-  return resolvedFormat as SourceDocsResolvedFormat;
+  return resolvedFormat as BuiltInSourceDocsResolvedFormat;
 }
 
 function formatSupportsDirectory(
@@ -641,7 +1020,7 @@ function formatForDirectorySourceFile(fileName: string): SourceFileFormat | unde
 function resolveDirectoryAutoFormat(
   files: BoundedSourceFile[],
   sourcePath: string
-): SourceDocsResolvedFormat {
+): BuiltInSourceDocsResolvedFormat {
   const formats = [...new Set(files.map((file) => file.format))].sort(compareStringsByCodeUnit);
   const directoryFormats = formats.filter((format) =>
     formatSupportsDirectory(format as FormatType)
@@ -649,7 +1028,7 @@ function resolveDirectoryAutoFormat(
   const structuredSpecOnly = formats.length === 1 && formats[0] === 'structured-spec';
 
   if (directoryFormats.length === 1 && formats.length === 1) {
-    return directoryFormats[0] as SourceDocsResolvedFormat;
+    return directoryFormats[0] as BuiltInSourceDocsResolvedFormat;
   }
 
   if (structuredSpecOnly) {
@@ -820,7 +1199,9 @@ function buildSourceDocsManifest(options: {
   source: ResolvedSourceDocsInput;
   formatHint: string;
   resolvedFormat: SourceDocsResolvedFormat;
-  parser: Parser;
+  parser: SourceDocsParser;
+  parserVersion?: string;
+  parserPlugin?: SourceDocsParserPluginProvenance;
   generator: SourceDocsGeneratorMetadata;
   sourceFiles: BoundedSourceFile[];
   generatedOutputs: SourceDocsGeneratedOutput[];
@@ -861,8 +1242,9 @@ function buildSourceDocsManifest(options: {
     sourceFiles,
     parser: {
       name: options.parser.name,
-      version: options.generator.version,
+      version: options.parserVersion ?? options.generator.version,
       format: options.resolvedFormat,
+      ...(options.parserPlugin === undefined ? {} : { plugin: options.parserPlugin }),
     },
     formatter: {
       name: 'UniversalFormatter',
@@ -1018,6 +1400,47 @@ function assertFileSourceOutsideSourceDocsArtifacts(
   }
 }
 
+async function assertParserPluginInputOutsideSourceDocsArtifacts(options: {
+  kind: 'manifest' | 'module';
+  path: string;
+  outputDir: string;
+}): Promise<void> {
+  const outputRoots = uniquePaths([
+    resolve(options.outputDir),
+    await resolveEffectiveOutputPath(options.outputDir),
+  ]);
+  const inputPaths = uniquePaths([resolve(options.path), await realpath(options.path)]);
+  const label = `parser plugin ${options.kind}`;
+
+  for (const outputRoot of outputRoots) {
+    const manifestPath = join(outputRoot, SOURCE_DOCS_MANIFEST);
+    const llmDocsDir = join(outputRoot, SOURCE_DOCS_OUTPUT_DIR);
+    const chunksDir = join(outputRoot, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
+
+    for (const inputPath of inputPaths) {
+      if (inputPath === manifestPath) {
+        throw new Error(`${label} path must not be the source-docs manifest path for --output-dir`);
+      }
+
+      if (isSameOrDescendant(llmDocsDir, inputPath)) {
+        throw new Error(
+          `${label} path must not be inside the source-docs generated docs directory for --output-dir`
+        );
+      }
+
+      if (isSameOrDescendant(chunksDir, inputPath)) {
+        throw new Error(
+          `${label} path must not be inside the source-docs generated chunks directory for --output-dir`
+        );
+      }
+    }
+  }
+}
+
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths)];
+}
+
 function isSourceDocsArtifactPath(
   sourcePath: string | undefined,
   resolvedOutputDir: string
@@ -1136,7 +1559,11 @@ function normalizeManifestPath(path: string): string {
 function isSameOrDescendant(parentPath: string, candidatePath: string): boolean {
   const relativePath = relative(parentPath, candidatePath);
 
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+  return relativePath === '' || (!isParentRelativePath(relativePath) && !isAbsolute(relativePath));
+}
+
+function isParentRelativePath(path: string): boolean {
+  return path === '..' || path.startsWith(`..${sep}`);
 }
 
 function compareStringsByCodeUnit(a: string, b: string): number {

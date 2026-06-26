@@ -112,6 +112,31 @@ interface GenerationManifest {
     name: string;
     version: string;
     format: string;
+    plugin?: {
+      manifestPath: string;
+      resolvedManifestPath: string;
+      manifestByteSize: number;
+      manifestHash: string;
+      name: string;
+      version: string;
+      module: {
+        path: string;
+        resolvedPath: string;
+      };
+      format: {
+        id: string;
+        displayName: string;
+        extensions: string[];
+        mediaTypes?: string[];
+        directorySupport?: boolean;
+      };
+      execution: {
+        codeExecuted: true;
+        trust: string;
+        sandboxed: false;
+        statement: string;
+      };
+    };
   };
   formatter: {
     name: string;
@@ -153,6 +178,31 @@ interface SourceDocsManifest {
     name: string;
     version: string;
     format: string;
+    plugin?: {
+      manifestPath: string;
+      resolvedManifestPath: string;
+      manifestByteSize: number;
+      manifestHash: string;
+      name: string;
+      version: string;
+      module: {
+        path: string;
+        resolvedPath: string;
+      };
+      format: {
+        id: string;
+        displayName: string;
+        extensions: string[];
+        mediaTypes?: string[];
+        directorySupport?: boolean;
+      };
+      execution: {
+        codeExecuted: true;
+        trust: string;
+        sandboxed: false;
+        statement: string;
+      };
+    };
   };
   formatter: {
     name: string;
@@ -748,6 +798,98 @@ function aggregateSourceFilesHashForTest(files: SourceDocsManifest['sourceFiles'
   return `sha256:${hash.digest('hex')}`;
 }
 
+async function createParserPluginFixture(options: {
+  dir: string;
+  formatId?: string;
+  manifestName?: string;
+  moduleName?: string;
+  moduleSource?: string;
+  manifestOverrides?: Record<string, unknown>;
+}): Promise<{
+  manifestPath: string;
+  modulePath: string;
+  sideEffectPath: string;
+  formatId: string;
+}> {
+  const formatId = options.formatId ?? 'custom-doc';
+  const manifestName = options.manifestName ?? 'parser-plugin.json';
+  const moduleName = options.moduleName ?? 'plugin.mjs';
+  const manifestPath = join(options.dir, manifestName);
+  const modulePath = join(options.dir, moduleName);
+  const sideEffectPath = join(options.dir, 'plugin-side-effects.log');
+  const moduleSource =
+    options.moduleSource ??
+    [
+      "import { appendFileSync, readFileSync } from 'node:fs';",
+      `const sideEffectPath = ${JSON.stringify(sideEffectPath)};`,
+      "appendFileSync(sideEffectPath, 'import\\n');",
+      'export const parser = {',
+      "  name: 'Fixture Custom Parser',",
+      `  format: ${JSON.stringify(formatId)},`,
+      '  async detect(sourcePath) {',
+      "    appendFileSync(sideEffectPath, 'detect\\n');",
+      '    return true;',
+      '  },',
+      '  async parse(sourcePath) {',
+      "    appendFileSync(sideEffectPath, 'parse\\n');",
+      "    const sourceText = readFileSync(sourcePath, 'utf-8').trim();",
+      '    return {',
+      "      type: 'root',",
+      "      id: 'fixture-custom-root',",
+      "      title: 'Fixture Custom Docs',",
+      "      description: '',",
+      '      content: [],',
+      '      children: [',
+      '        {',
+      "          type: 'section',",
+      "          id: 'fixture-custom-section',",
+      "          title: 'Parsed Payload',",
+      "          description: '',",
+      '          content: [{ type: "prose", content: `Plugin parsed: ${sourceText}` }],',
+      '          children: [],',
+      "          metadata: new Map([['format', 'custom-doc'], ['sourcePath', sourcePath]]),",
+      '        },',
+      '      ],',
+      "      metadata: new Map([['format', 'custom-doc'], ['sourcePath', sourcePath]]),",
+      '    };',
+      '  },',
+      '};',
+      'export default parser;',
+      '',
+    ].join('\n');
+
+  await mkdir(dirname(modulePath), { recursive: true });
+  await mkdir(dirname(manifestPath), { recursive: true });
+  await writeFile(modulePath, moduleSource, 'utf-8');
+  await writeFile(
+    manifestPath,
+    `${JSON.stringify(
+      {
+        schemaVersion: '0.1.0',
+        kind: 'parser-plugin',
+        name: 'fixture-parser-plugin',
+        version: '1.2.3',
+        module: moduleName,
+        formats: [
+          {
+            id: formatId,
+            displayName: 'Fixture Custom Format',
+            extensions: ['fixture'],
+            mediaTypes: ['text/x-fixture'],
+            directorySupport: false,
+          },
+        ],
+        ...options.manifestOverrides,
+      },
+      null,
+      2
+    )}\n`,
+    'utf-8'
+  );
+
+  return { manifestPath, modulePath, sideEffectPath, formatId };
+}
+
 function semanticChunkIndexAggregateHashForTest(index: SemanticChunkManifestIndex): string {
   const hash = createHash('sha256');
   hash.update('llm-docs-generator:source-docs-semantic-chunks-jsonl-index:v1\n');
@@ -1324,6 +1466,47 @@ describe('CLI compatibility behavior', () => {
     }
   });
 
+  it('documents explicit parser plugin generation without broad workflow or sandbox claims', async () => {
+    const docs = new Map(
+      await Promise.all(
+        [
+          'README.md',
+          'AGENT_CONTEXT.md',
+          'IMPLEMENTATION.md',
+          'index.md',
+          'skills/llm-docs-generator/SKILL.md',
+        ].map(async (path) => [path, await readFile(join(repoRoot, path), 'utf-8')] as const)
+      )
+    );
+    const combined = [...docs.values()].join('\n');
+
+    expect(docs.get('README.md')).toContain(
+      'generate --source <local-file> --parser-plugin-manifest <path>'
+    );
+    expect(docs.get('AGENT_CONTEXT.md')).toMatch(
+      /Plugin code is trusted\s+local code and is not sandboxed/
+    );
+    expect(docs.get('index.md')).toMatch(
+      /verify` checks recorded plugin metadata\s+against the plugin manifest/
+    );
+    expect(docs.get('README.md')).toMatch(
+      /Parser-plugin `local-source-docs`\s+manifests are not refreshed yet/
+    );
+    expect(docs.get('IMPLEMENTATION.md')).toContain('- [ ] Plugin system for custom parsers');
+    expect(docs.get('IMPLEMENTATION.md')).toContain(
+      '- [x] Explicit single-file parser plugin execution'
+    );
+    expect(docs.get('skills/llm-docs-generator/SKILL.md')).toContain(
+      'one local source file plus one explicit local'
+    );
+    expect(combined).toContain('Plugin discovery');
+    expect(combined.toLowerCase()).toContain('sandboxing');
+    expect(combined).not.toContain(
+      'Parser plugin execution and custom parser generation remain planned/unsupported'
+    );
+    expect(combined).not.toMatch(/\bplugin code is sandboxed\b/i);
+  });
+
   it('ships built-in SDK config without default local spec paths', async () => {
     const config = JSON.parse(await readFile(join(repoRoot, 'config/sdks.json'), 'utf-8')) as {
       sdks: Record<
@@ -1402,7 +1585,7 @@ describe('CLI compatibility behavior', () => {
       'Print the deterministic machine-readable capabilities contract'
     );
     expect(refreshHelp.stdout).toMatch(
-      /Refresh local source docs or source-truth docs from an existing explicit local\s+manifest/
+      /Refresh built-in local source docs or source-truth docs from an existing\s+explicit local manifest/
     );
     expect(refreshHelp.stdout).toContain('--manifest <path>');
     expect(refreshHelp.stdout).toContain('--output-dir <dir>');
@@ -1435,12 +1618,15 @@ describe('CLI compatibility behavior', () => {
     const { stdout } = await runCli(['generate', '--help']);
 
     expect(stdout).toMatch(
-      /--source <path>\s+Explicit local file or directory to parse and\s+format/
+      /--source <path>\s+Explicit local file or directory to parse\s+and format/
     );
     expect(stdout).toMatch(
-      /--format <format>\s+Source parser hint: auto, markdown, mdx, openapi,\s+openref, rst, html; SDK guard: openref or\s+openref-0\.1/
+      /--format <format>[\s\S]*Source parser hint: auto, markdown, mdx,\s+openapi, openref, rst, html; explicit parser\s+plugin format id; SDK guard: openref or\s+openref-0\.1/
     );
     expect(stdout).toMatch(/--chunks <format>\s+Source-only semantic chunk export: jsonl/);
+    expect(stdout).toMatch(
+      /--parser-plugin-manifest <path>\s+Explicit local parser plugin manifest/
+    );
     expect(stdout).toMatch(/--preset <name>\s+Source-only deterministic preset: swift-book/);
     expect(stdout).not.toContain('candidate');
   });
@@ -1792,6 +1978,7 @@ describe('CLI compatibility behavior', () => {
       'agent-doctor',
       'parser-plugin-manifest-validate',
       'generate-source',
+      'parser-plugin-execution',
       'generate-preset-swift-book',
       'generate-sdk',
       'verify-discovery-report',
@@ -1812,7 +1999,7 @@ describe('CLI compatibility behavior', () => {
       'automatic-source-selection',
       'framework-route-understanding',
       'behavior-level-code-docs',
-      'parser-plugin-execution',
+      'parser-plugin-broader-workflows',
       'agent-install-codex',
     ]);
     expect(
@@ -1911,6 +2098,7 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('generate-source')?.options).toEqual([
       '--source <path>',
       '--format auto|markdown|mdx|openapi|openref|rst|html',
+      '--parser-plugin-manifest <path> with explicit custom --format <plugin-format-id>',
       '--chunks jsonl',
       '--preset swift-book',
     ]);
@@ -1920,11 +2108,38 @@ describe('CLI compatibility behavior', () => {
         'no URL fetching',
         'no discovery report consumption',
         'no candidate auto-selection',
+        'parser plugin generation requires --source <local-file>, --parser-plugin-manifest <path>, and a custom explicit --format id',
+        'parser plugin code is trusted local code executed for generation and is not sandboxed',
+        'no parser plugin discovery, installation, package resolution, or auto-selection',
+        'no parser plugin directory source generation',
         'swift-book preset requires explicit --source and adds deterministic output defaults only',
         'no source selection decision',
         'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
       ])
     );
+    expect(implemented.get('parser-plugin-execution')).toMatchObject({
+      command: 'generate',
+      mode: 'generate --source <local-file> --parser-plugin-manifest <path> --format <plugin-format-id>',
+      status: 'implemented',
+      inputBoundary:
+        'one explicit local source file, one explicit local parser plugin manifest, and one explicit custom plugin format id',
+      options: ['--source <local-file>', '--parser-plugin-manifest <path>', '--format <id>'],
+      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt'],
+      summary: expect.stringContaining('explicit single-file parser plugin execution'),
+      limitations: expect.arrayContaining([
+        'explicit local source files only',
+        'requires a custom plugin format id declared by the manifest',
+        'rejects built-in formats and --format auto',
+        'no directory source generation through parser plugins',
+        'no --chunks support with parser plugins',
+        'no --preset support with parser plugins',
+        'no parser plugin discovery or auto-selection',
+        'no plugin installation or package resolution',
+        'plugin code is trusted local code and is not sandboxed',
+        'verify checks recorded plugin manifest metadata and hashes without importing plugin code',
+        'no network added by the CLI',
+      ]),
+    });
     expect(implemented.get('generate-preset-swift-book')).toMatchObject({
       command: 'generate',
       mode: 'generate --source --preset swift-book',
@@ -2031,12 +2246,14 @@ describe('CLI compatibility behavior', () => {
       command: 'refresh',
       mode: 'refresh --manifest or refresh --output-dir for local-source-docs',
       status: 'implemented',
-      inputBoundary: 'existing local-source-docs manifest.json with recorded local source path',
+      inputBoundary:
+        'existing built-in-parser local-source-docs manifest.json with recorded local source path',
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary: expect.stringContaining('manifest integrity verification'),
       limitations: expect.arrayContaining([
-        'local-source-docs manifests only',
+        'built-in-parser local-source-docs manifests only',
+        'parser-plugin local-source-docs manifests are not refreshed; rerun explicit generate --source --parser-plugin-manifest --format',
         'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',
         'no URLs',
         'no repo freshness check',
@@ -2081,7 +2298,10 @@ describe('CLI compatibility behavior', () => {
       'generate --source'
     );
     expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
-      'only explicit local-source-docs and source-truth-local-docs manifest refresh is implemented'
+      'only explicit built-in-parser local-source-docs and source-truth-local-docs manifest refresh is implemented'
+    );
+    expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
+      'parser-plugin source-docs'
     );
     expect(planned.get('source-code-verification')?.reason).toContain(
       'broad official-docs behavior/API claim verification remains planned'
@@ -2089,11 +2309,12 @@ describe('CLI compatibility behavior', () => {
     expect(planned.get('source-code-verification')?.reason).toContain(
       'source-truth verify-docs is explicit-local lexical evidence only'
     );
-    expect(planned.get('parser-plugin-execution')?.reason).toContain(
-      'validates explicit local parser plugin manifests only'
+    expect(planned.has('parser-plugin-execution')).toBe(false);
+    expect(planned.get('parser-plugin-broader-workflows')?.reason).toContain(
+      'only explicit single-file local parser plugin generation is implemented'
     );
-    expect(planned.get('parser-plugin-execution')?.reason).toContain(
-      'loading, importing, executing parser plugins and generating docs with custom parsers remain planned/unsupported'
+    expect(planned.get('parser-plugin-broader-workflows')?.reason).toContain(
+      'discovery, install, package resolution, auto-selection, directory source generation, sandboxing, and broad custom parser workflows remain planned/unsupported'
     );
     expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
       'agent install codex'
@@ -2176,7 +2397,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 21');
+    expect(stdout).toContain('Implemented modes: 22');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
@@ -2226,7 +2447,8 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Version: 1.2.3');
     expect(stdout).toContain('Formats: 1');
     expect(stdout).toContain('fixture-docs: Fixture Docs (.fixture, .fixture-docs)');
-    expect(stdout).toContain('parser plugin execution is not implemented');
+    expect(stdout).toContain('Scope: validation only');
+    expect(stdout).toContain('generate --source --parser-plugin-manifest --format');
     expect(await pathExists(sideEffectPath)).toBe(false);
   }, 15000);
 
@@ -5677,6 +5899,826 @@ describe('CLI compatibility behavior', () => {
     }
   });
 
+  it('generates docs from an explicit single-file parser plugin and verifies without executing plugin code', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-generate-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.fixture');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(sourcePath, 'Custom source payload\n', 'utf-8');
+    const {
+      manifestPath: pluginManifestPath,
+      modulePath,
+      sideEffectPath,
+      formatId,
+    } = await createParserPluginFixture({ dir });
+
+    const { stdout } = await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--parser-plugin-manifest',
+      pluginManifestPath,
+      '--format',
+      formatId,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifestText = await readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(manifestText) as SourceDocsManifest;
+    const fullDocPath = join(outputDir, 'llm-docs', 'source-full-llms.txt');
+    const fullDoc = await readFile(fullDocPath, 'utf-8');
+
+    expect(stdout).toContain('Local source docs generated');
+    expect(stdout).toContain('Format: custom-doc');
+    expect(stdout).toContain('Parser plugin: fixture-parser-plugin 1.2.3');
+    expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
+    expect(fullDoc).toContain('# Fixture Custom Docs');
+    expect(fullDoc).toContain('Plugin parsed: Custom source payload');
+    expect(manifest).toMatchObject({
+      mode: 'local-source-docs',
+      source: {
+        input: sourcePath,
+        resolvedPath: sourcePath,
+        type: 'file',
+        formatHint: 'custom-doc',
+        resolvedFormat: 'custom-doc',
+        byteSize: await byteSize(sourcePath),
+        hash: await sha256File(sourcePath),
+      },
+      parser: {
+        name: 'Fixture Custom Parser',
+        version: '1.2.3',
+        format: 'custom-doc',
+        plugin: {
+          manifestPath: pluginManifestPath,
+          resolvedManifestPath: pluginManifestPath,
+          manifestByteSize: await byteSize(pluginManifestPath),
+          manifestHash: await sha256File(pluginManifestPath),
+          name: 'fixture-parser-plugin',
+          version: '1.2.3',
+          module: {
+            path: 'plugin.mjs',
+            resolvedPath: await realpath(modulePath),
+          },
+          format: {
+            id: 'custom-doc',
+            displayName: 'Fixture Custom Format',
+            extensions: ['fixture'],
+            mediaTypes: ['text/x-fixture'],
+            directorySupport: false,
+          },
+          execution: {
+            codeExecuted: true,
+            trust: 'trusted-local-code',
+            sandboxed: false,
+          },
+        },
+      },
+      formatter: {
+        name: 'UniversalFormatter',
+        version: '1.0.0',
+        format: 'universal-llm-docs',
+      },
+    });
+    expect(manifest.parser.plugin?.execution.statement).toContain('not sandboxed');
+    expect(manifest.sourceFiles).toEqual([
+      {
+        path: 'source.fixture',
+        resolvedPath: sourcePath,
+        byteSize: await byteSize(sourcePath),
+        hash: await sha256File(sourcePath),
+        format: 'custom-doc',
+      },
+    ]);
+    expect(manifest.generatedOutputs).toHaveLength(1);
+    expect(manifest.generatedOutputs[0]).toMatchObject({
+      path: 'llm-docs/source-full-llms.txt',
+      kind: 'llm-docs',
+      name: 'agent-readable docs text',
+      byteSize: await byteSize(fullDocPath),
+      hash: await sha256File(fullDocPath),
+      lineCount: countTextLines(fullDoc),
+      estimatedTokenCount: estimateTextTokens(fullDoc),
+    });
+    expect(manifest.semanticChunkIndexes).toBeUndefined();
+
+    await writeFile(
+      modulePath,
+      [
+        "import { appendFileSync } from 'node:fs';",
+        `appendFileSync(${JSON.stringify(sideEffectPath)}, 'verify-import\\n');`,
+        "throw new Error('verify imported plugin code');",
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const verifyResult = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(verifyResult.stdout).toContain('Manifest verification');
+    expect(verifyResult.stdout).toContain(
+      `Checked files: ${manifest.generatedOutputs.length + manifest.sourceFiles.length + 1}`
+    );
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+    expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
+  });
+
+  it('rejects parser plugin manifest and module paths inside source-doc output artifacts without deleting them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-artifact-inputs-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.fixture');
+
+    await writeFile(sourcePath, 'Custom source payload\n', 'utf-8');
+
+    const cases: Array<{
+      name: string;
+      manifestName?: string;
+      moduleName?: string;
+      expected: string;
+    }> = [
+      {
+        name: 'manifest output path',
+        manifestName: 'output-manifest/manifest.json',
+        expected: 'parser plugin manifest path must not be the source-docs manifest path',
+      },
+      {
+        name: 'manifest generated docs directory',
+        manifestName: 'output-manifest-docs/llm-docs/parser-plugin.json',
+        expected:
+          'parser plugin manifest path must not be inside the source-docs generated docs directory',
+      },
+      {
+        name: 'manifest generated chunks directory',
+        manifestName: 'output-manifest-chunks/chunks/parser-plugin.json',
+        expected:
+          'parser plugin manifest path must not be inside the source-docs generated chunks directory',
+      },
+      {
+        name: 'module generated docs directory',
+        moduleName: 'output-module-docs/llm-docs/plugin.mjs',
+        expected:
+          'parser plugin module path must not be inside the source-docs generated docs directory',
+      },
+      {
+        name: 'module generated chunks directory',
+        moduleName: 'output-module-chunks/chunks/plugin.mjs',
+        expected:
+          'parser plugin module path must not be inside the source-docs generated chunks directory',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const artifactRoot = (testCase.manifestName ?? testCase.moduleName)?.split('/')[0];
+
+      if (artifactRoot === undefined) {
+        throw new Error(`expected artifact root for ${testCase.name}`);
+      }
+
+      const outputDir = join(dir, artifactRoot);
+      const manifestName = testCase.manifestName ?? `${artifactRoot}-parser-plugin.json`;
+      const moduleName = testCase.moduleName ?? `${artifactRoot}-plugin.mjs`;
+      const {
+        manifestPath: pluginManifestPath,
+        modulePath,
+        sideEffectPath,
+        formatId,
+      } = await createParserPluginFixture({
+        dir,
+        manifestName,
+        moduleName,
+      });
+      const manifestBefore = await readFile(pluginManifestPath, 'utf-8');
+      const moduleBefore = await readFile(modulePath, 'utf-8');
+
+      const result = await runCliWithExit([
+        'generate',
+        '--source',
+        sourcePath,
+        '--parser-plugin-manifest',
+        pluginManifestPath,
+        '--format',
+        formatId,
+        '--output-dir',
+        outputDir,
+      ]);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stderr, testCase.name).toContain(testCase.expected);
+      expect(await readFile(pluginManifestPath, 'utf-8')).toBe(manifestBefore);
+      expect(await readFile(modulePath, 'utf-8')).toBe(moduleBefore);
+      await expect(readFile(sideEffectPath, 'utf-8')).rejects.toThrow();
+    }
+  });
+
+  it('accepts parser plugin module filenames that start with two dots without parent traversal', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-dotfile-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.fixture');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(sourcePath, 'Custom source payload\n', 'utf-8');
+    const { manifestPath, formatId } = await createParserPluginFixture({
+      dir,
+      moduleName: '..parser.mjs',
+    });
+
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--parser-plugin-manifest',
+      manifestPath,
+      '--format',
+      formatId,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const verifyResult = await runCli(['verify', '--manifest', join(outputDir, 'manifest.json')]);
+
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('verify fails when generated parser plugin metadata is tampered without executing plugin code', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-tamper-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.fixture');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(sourcePath, 'Custom source payload\n', 'utf-8');
+    const {
+      manifestPath: pluginManifestPath,
+      modulePath,
+      sideEffectPath,
+      formatId,
+    } = await createParserPluginFixture({ dir });
+
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--parser-plugin-manifest',
+      pluginManifestPath,
+      '--format',
+      formatId,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const generatedManifestPath = join(outputDir, 'manifest.json');
+    const generatedManifest = JSON.parse(
+      await readFile(generatedManifestPath, 'utf-8')
+    ) as SourceDocsManifest;
+
+    if (generatedManifest.parser.plugin === undefined) {
+      throw new Error('expected generated parser plugin metadata');
+    }
+
+    generatedManifest.parser.plugin.name = 'tampered-parser-plugin';
+    generatedManifest.parser.plugin.version = '9.9.9';
+    generatedManifest.parser.plugin.module.path = 'tampered.mjs';
+    generatedManifest.parser.plugin.format.displayName = 'Tampered Format';
+    generatedManifest.parser.plugin.format.extensions = ['tampered'];
+    generatedManifest.parser.plugin.format.mediaTypes = ['text/x-tampered'];
+    generatedManifest.parser.plugin.format.directorySupport = true;
+
+    await writeFile(
+      generatedManifestPath,
+      `${JSON.stringify(generatedManifest, null, 2)}\n`,
+      'utf-8'
+    );
+    await writeFile(
+      modulePath,
+      [
+        "import { appendFileSync } from 'node:fs';",
+        `appendFileSync(${JSON.stringify(sideEffectPath)}, 'verify-import\\n');`,
+        "throw new Error('verify imported plugin code');",
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const verifyResult = await runCliWithExit(['verify', '--manifest', generatedManifestPath]);
+
+    expect(verifyResult.exitCode).toBe(1);
+    expect(verifyResult.stdout).toContain('Manifest verification');
+    expect(verifyResult.stdout).toContain('Failures:');
+    expect(verifyResult.stderr).toContain(
+      'parser.plugin.name must match parser plugin manifest name'
+    );
+    expect(verifyResult.stderr).toContain(
+      'parser.plugin.version must match parser plugin manifest version'
+    );
+    expect(verifyResult.stderr).toContain(
+      'parser.plugin.module.path must match parser plugin manifest module'
+    );
+    expect(verifyResult.stderr).toContain(
+      'parser.plugin.format.displayName must match parser plugin manifest selected format'
+    );
+    expect(verifyResult.stderr).toContain(
+      'parser.plugin.format.extensions must match parser plugin manifest selected format'
+    );
+    expect(verifyResult.stderr).toContain(
+      'parser.plugin.format.mediaTypes must match parser plugin manifest selected format'
+    );
+    expect(verifyResult.stderr).toContain(
+      'parser.plugin.format.directorySupport must match parser plugin manifest selected format'
+    );
+    expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
+  });
+
+  it('verify rejects parser plugin manifests that claim semantic chunk outputs', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-chunk-claim-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.fixture');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(sourcePath, 'Custom source payload\n', 'utf-8');
+    const {
+      manifestPath: pluginManifestPath,
+      modulePath,
+      sideEffectPath,
+      formatId,
+    } = await createParserPluginFixture({ dir });
+
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--parser-plugin-manifest',
+      pluginManifestPath,
+      '--format',
+      formatId,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const chunkDir = join(outputDir, 'chunks');
+    const chunkPath = join(chunkDir, 'semantic-chunks.jsonl');
+    const chunkText = '{"id":"fake","content":"plugin chunks are unsupported"}\n';
+    await mkdir(chunkDir, { recursive: true });
+    await writeFile(chunkPath, chunkText, 'utf-8');
+
+    const generatedManifestPath = join(outputDir, 'manifest.json');
+    const generatedManifest = JSON.parse(
+      await readFile(generatedManifestPath, 'utf-8')
+    ) as SourceDocsManifest;
+    generatedManifest.generatedOutputs.push({
+      path: 'chunks/semantic-chunks.jsonl',
+      kind: 'semantic-chunks-jsonl',
+      name: 'semantic chunk records',
+      byteSize: await byteSize(chunkPath),
+      hash: await sha256File(chunkPath),
+      lineCount: countTextLines(chunkText),
+      estimatedTokenCount: estimateTextTokens(chunkText),
+    });
+    await writeFile(
+      generatedManifestPath,
+      `${JSON.stringify(generatedManifest, null, 2)}\n`,
+      'utf-8'
+    );
+    await writeFile(
+      modulePath,
+      [
+        "import { appendFileSync } from 'node:fs';",
+        `appendFileSync(${JSON.stringify(sideEffectPath)}, 'verify-import\\n');`,
+        "throw new Error('verify imported plugin code');",
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const verifyResult = await runCliWithExit(['verify', '--manifest', generatedManifestPath]);
+
+    expect(verifyResult.exitCode).toBe(1);
+    expect(verifyResult.stderr).toContain(
+      'generatedOutputs[1].kind must not be semantic-chunks-jsonl for parser.plugin source manifests'
+    );
+    expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
+  });
+
+  it('refresh rejects parser plugin local-source-docs manifests without executing plugin code', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-refresh-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.fixture');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(sourcePath, 'Custom source payload\n', 'utf-8');
+    const {
+      manifestPath: pluginManifestPath,
+      modulePath,
+      sideEffectPath,
+      formatId,
+    } = await createParserPluginFixture({ dir });
+
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--parser-plugin-manifest',
+      pluginManifestPath,
+      '--format',
+      formatId,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    await writeFile(
+      modulePath,
+      [
+        "import { appendFileSync } from 'node:fs';",
+        `appendFileSync(${JSON.stringify(sideEffectPath)}, 'refresh-import\\n');`,
+        "throw new Error('refresh imported plugin code');",
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const refreshResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      join(outputDir, 'manifest.json'),
+    ]);
+
+    expect(refreshResult.exitCode).toBe(1);
+    expect(refreshResult.stderr).toContain(
+      'refresh does not support parser-plugin local-source-docs manifests'
+    );
+    expect(refreshResult.stderr).toContain('generate --source --parser-plugin-manifest --format');
+    expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
+  });
+
+  it('rejects unsupported explicit parser plugin generate option combinations', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-combos-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.fixture');
+    const sourceDir = join(dir, 'source-dir');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(sourcePath, 'Custom source payload\n', 'utf-8');
+    await mkdir(sourceDir);
+    await writeFile(join(sourceDir, 'source.fixture'), 'Directory payload\n', 'utf-8');
+    const { manifestPath, formatId } = await createParserPluginFixture({ dir });
+
+    const cases: Array<{ name: string; args: string[]; expected: string }> = [
+      {
+        name: 'missing format',
+        args: [
+          'generate',
+          '--source',
+          sourcePath,
+          '--parser-plugin-manifest',
+          manifestPath,
+          '--output-dir',
+          outputDir,
+        ],
+        expected: 'requires explicit --format <plugin-format-id>',
+      },
+      {
+        name: 'auto format',
+        args: [
+          'generate',
+          '--source',
+          sourcePath,
+          '--parser-plugin-manifest',
+          manifestPath,
+          '--format',
+          'auto',
+          '--output-dir',
+          outputDir,
+        ],
+        expected: "'auto' is a built-in source format",
+      },
+      {
+        name: 'built-in format',
+        args: [
+          'generate',
+          '--source',
+          sourcePath,
+          '--parser-plugin-manifest',
+          manifestPath,
+          '--format',
+          'markdown',
+          '--output-dir',
+          outputDir,
+        ],
+        expected: "'markdown' is a built-in source format",
+      },
+      {
+        name: 'sdk',
+        args: [
+          'generate',
+          '--sdk',
+          'swift',
+          '--source',
+          sourcePath,
+          '--parser-plugin-manifest',
+          manifestPath,
+          '--format',
+          formatId,
+          '--output-dir',
+          outputDir,
+        ],
+        expected: 'cannot be used with --sdk',
+      },
+      {
+        name: 'preset',
+        args: [
+          'generate',
+          '--source',
+          sourcePath,
+          '--parser-plugin-manifest',
+          manifestPath,
+          '--format',
+          formatId,
+          '--preset',
+          'swift-book',
+          '--output-dir',
+          outputDir,
+        ],
+        expected: 'cannot be combined with --preset',
+      },
+      {
+        name: 'chunks',
+        args: [
+          'generate',
+          '--source',
+          sourcePath,
+          '--parser-plugin-manifest',
+          manifestPath,
+          '--format',
+          formatId,
+          '--chunks',
+          'jsonl',
+          '--output-dir',
+          outputDir,
+        ],
+        expected: 'cannot be combined with --chunks',
+      },
+      {
+        name: 'directory source',
+        args: [
+          'generate',
+          '--source',
+          sourceDir,
+          '--parser-plugin-manifest',
+          manifestPath,
+          '--format',
+          formatId,
+          '--output-dir',
+          outputDir,
+        ],
+        expected: 'supports explicit local source files only',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await runCliWithExit(testCase.args);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stderr, testCase.name).toContain(testCase.expected);
+      expect(result.stdout, testCase.name).not.toContain('Local source docs generated');
+    }
+  });
+
+  it('rejects invalid parser plugin manifests modules exports detection and DocNode output', async () => {
+    const cases: Array<{
+      name: string;
+      setup: (dir: string) => Promise<{ args: string[]; expected: string }>;
+    }> = [
+      {
+        name: 'format not declared',
+        setup: async (dir) => {
+          const sourcePath = join(dir, 'source.fixture');
+          await writeFile(sourcePath, 'payload\n', 'utf-8');
+          const { manifestPath } = await createParserPluginFixture({ dir });
+
+          return {
+            args: [
+              'generate',
+              '--source',
+              sourcePath,
+              '--parser-plugin-manifest',
+              manifestPath,
+              '--format',
+              'other-doc',
+              '--output-dir',
+              join(dir, 'output'),
+            ],
+            expected: "does not declare requested format 'other-doc'",
+          };
+        },
+      },
+      {
+        name: 'invalid manifest',
+        setup: async (dir) => {
+          const sourcePath = join(dir, 'source.fixture');
+          await writeFile(sourcePath, 'payload\n', 'utf-8');
+          const { manifestPath, formatId } = await createParserPluginFixture({
+            dir,
+            manifestOverrides: { schemaVersion: '9.9.9' },
+          });
+
+          return {
+            args: [
+              'generate',
+              '--source',
+              sourcePath,
+              '--parser-plugin-manifest',
+              manifestPath,
+              '--format',
+              formatId,
+              '--output-dir',
+              join(dir, 'output'),
+            ],
+            expected: 'parser plugin manifest invalid',
+          };
+        },
+      },
+      {
+        name: 'missing module',
+        setup: async (dir) => {
+          const sourcePath = join(dir, 'source.fixture');
+          await writeFile(sourcePath, 'payload\n', 'utf-8');
+          const { manifestPath, modulePath, formatId } = await createParserPluginFixture({ dir });
+          await rm(modulePath);
+
+          return {
+            args: [
+              'generate',
+              '--source',
+              sourcePath,
+              '--parser-plugin-manifest',
+              manifestPath,
+              '--format',
+              formatId,
+              '--output-dir',
+              join(dir, 'output'),
+            ],
+            expected: 'parser plugin module file not found',
+          };
+        },
+      },
+      {
+        name: 'symlink module',
+        setup: async (dir) => {
+          const sourcePath = join(dir, 'source.fixture');
+          const outsideModulePath = join(dir, 'outside-plugin.mjs');
+          await writeFile(sourcePath, 'payload\n', 'utf-8');
+          await writeFile(outsideModulePath, 'export default {};\n', 'utf-8');
+          const { manifestPath, modulePath, formatId } = await createParserPluginFixture({ dir });
+          await rm(modulePath);
+          await symlink(outsideModulePath, modulePath, 'file');
+
+          return {
+            args: [
+              'generate',
+              '--source',
+              sourcePath,
+              '--parser-plugin-manifest',
+              manifestPath,
+              '--format',
+              formatId,
+              '--output-dir',
+              join(dir, 'output'),
+            ],
+            expected: 'parser plugin module must not be a symbolic link',
+          };
+        },
+      },
+      {
+        name: 'bad export',
+        setup: async (dir) => {
+          const sourcePath = join(dir, 'source.fixture');
+          await writeFile(sourcePath, 'payload\n', 'utf-8');
+          const { manifestPath, formatId } = await createParserPluginFixture({
+            dir,
+            moduleSource: 'export const notParser = {};\n',
+          });
+
+          return {
+            args: [
+              'generate',
+              '--source',
+              sourcePath,
+              '--parser-plugin-manifest',
+              manifestPath,
+              '--format',
+              formatId,
+              '--output-dir',
+              join(dir, 'output'),
+            ],
+            expected: "must export a parser object as default or named 'parser'",
+          };
+        },
+      },
+      {
+        name: 'format mismatch',
+        setup: async (dir) => {
+          const sourcePath = join(dir, 'source.fixture');
+          await writeFile(sourcePath, 'payload\n', 'utf-8');
+          const { manifestPath, formatId } = await createParserPluginFixture({
+            dir,
+            moduleSource:
+              "export default { name: 'Mismatch Parser', format: 'wrong-doc', parse() { return {}; } };\n",
+          });
+
+          return {
+            args: [
+              'generate',
+              '--source',
+              sourcePath,
+              '--parser-plugin-manifest',
+              manifestPath,
+              '--format',
+              formatId,
+              '--output-dir',
+              join(dir, 'output'),
+            ],
+            expected: "parser.format must exactly match requested --format 'custom-doc'",
+          };
+        },
+      },
+      {
+        name: 'detect false',
+        setup: async (dir) => {
+          const sourcePath = join(dir, 'source.fixture');
+          await writeFile(sourcePath, 'payload\n', 'utf-8');
+          const { manifestPath, formatId } = await createParserPluginFixture({
+            dir,
+            moduleSource: [
+              'export default {',
+              "  name: 'Detect False Parser',",
+              "  format: 'custom-doc',",
+              '  detect() { return false; },',
+              "  parse() { throw new Error('parse should not run'); },",
+              '};',
+              '',
+            ].join('\n'),
+          });
+
+          return {
+            args: [
+              'generate',
+              '--source',
+              sourcePath,
+              '--parser-plugin-manifest',
+              manifestPath,
+              '--format',
+              formatId,
+              '--output-dir',
+              join(dir, 'output'),
+            ],
+            expected: 'detect returned false',
+          };
+        },
+      },
+      {
+        name: 'invalid DocNode',
+        setup: async (dir) => {
+          const sourcePath = join(dir, 'source.fixture');
+          await writeFile(sourcePath, 'payload\n', 'utf-8');
+          const { manifestPath, formatId } = await createParserPluginFixture({
+            dir,
+            moduleSource:
+              "export default { name: 'Invalid Output Parser', format: 'custom-doc', parse() { return { type: 'not-a-node' }; } };\n",
+          });
+
+          return {
+            args: [
+              'generate',
+              '--source',
+              sourcePath,
+              '--parser-plugin-manifest',
+              manifestPath,
+              '--format',
+              formatId,
+              '--output-dir',
+              join(dir, 'output'),
+            ],
+            expected: 'parse returned invalid DocNode',
+          };
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const dir = await mkdtemp(join(tmpdir(), `llm-docs-parser-plugin-${testCase.name}-`));
+      tempDirs.push(dir);
+      const { args, expected } = await testCase.setup(dir);
+      const result = await runCliWithExit(args);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stderr, testCase.name).toContain(expected);
+      expect(result.stdout, testCase.name).not.toContain('Local source docs generated');
+    }
+  });
+
   it('generates swift-book preset docs from an explicit nested DocC-style Markdown directory', async () => {
     const { sourceDir, outputDir } = await createSwiftBookSourceFixture();
 
@@ -6879,6 +7921,81 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(join(unsupportedFormatOutputDir, 'manifest.json'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'llm-docs'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'chunks'))).toBe(false);
+  });
+
+  it('preserves parser plugin files under output artifacts after CLI validation failures', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-cli-cleanup-'));
+    tempDirs.push(dir);
+
+    const cases: Array<{
+      name: string;
+      args: (fixture: Awaited<ReturnType<typeof createParserPluginFixture>>) => string[];
+      expected: string;
+    }> = [
+      {
+        name: 'missing format',
+        args: ({ manifestPath }) => [
+          'generate',
+          '--source',
+          join(dir, 'missing-format-source.fixture'),
+          '--parser-plugin-manifest',
+          manifestPath,
+        ],
+        expected: 'generate --parser-plugin-manifest requires explicit --format <plugin-format-id>',
+      },
+      {
+        name: 'chunks option',
+        args: ({ manifestPath, formatId }) => [
+          'generate',
+          '--source',
+          join(dir, 'chunks-source.fixture'),
+          '--parser-plugin-manifest',
+          manifestPath,
+          '--format',
+          formatId,
+          '--chunks',
+          'jsonl',
+        ],
+        expected: 'generate --parser-plugin-manifest cannot be combined with --chunks',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const caseDir = join(dir, testCase.name.replaceAll(' ', '-'));
+      const outputDir = join(caseDir, 'output');
+      const builtInSourcePath = join(caseDir, 'docs.md');
+      const pluginSourcePath = join(dir, `${testCase.name.replaceAll(' ', '-')}-source.fixture`);
+
+      await mkdir(caseDir, { recursive: true });
+      await writeFile(builtInSourcePath, '# Stale Docs\n\nGenerated before failure.\n', 'utf-8');
+      await writeFile(pluginSourcePath, 'Custom source payload\n', 'utf-8');
+      await runCli([
+        'generate',
+        '--source',
+        builtInSourcePath,
+        '--format',
+        'markdown',
+        '--output-dir',
+        outputDir,
+      ]);
+
+      const staleManifestPath = join(outputDir, 'manifest.json');
+      const staleManifestText = await readFile(staleManifestPath, 'utf-8');
+      const fixture = await createParserPluginFixture({
+        dir: join(outputDir, 'llm-docs'),
+      });
+      const pluginManifestText = await readFile(fixture.manifestPath, 'utf-8');
+      const pluginModuleText = await readFile(fixture.modulePath, 'utf-8');
+
+      const result = await runCliWithExit([...testCase.args(fixture), '--output-dir', outputDir]);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stderr, testCase.name).toContain(testCase.expected);
+      expect(await readFile(staleManifestPath, 'utf-8')).toBe(staleManifestText);
+      expect(await readFile(fixture.manifestPath, 'utf-8')).toBe(pluginManifestText);
+      expect(await readFile(fixture.modulePath, 'utf-8')).toBe(pluginModuleText);
+      await expect(readFile(fixture.sideEffectPath, 'utf-8')).rejects.toThrow();
+    }
   });
 
   it('does not remove non-source manifests after source-mode validation failures', async () => {
