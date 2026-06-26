@@ -283,9 +283,11 @@ paths, hashes, byte sizes, line counts, deterministic estimated token counts,
 symlink/path containment, and count consistency with `source-truth-report.json`
 when available. Discovery-report verification checks report file integrity and
 basic schema/mode/kind/count consistency, and optional candidate evidence index
-metadata against `discovery-report.json`. Discovery reports do not generate
-docs, choose sources, assign trust or authority labels, infer authority, or
-claim source truth.
+metadata against `discovery-report.json`. Discovery reports are candidate
+evidence reports for agent review. They do not generate docs, choose sources,
+assign trust or authority labels, infer authority, decide task fit, decide
+correctness, decide source intent, decide whether a candidate satisfies the
+task, or claim source truth.
 Source-verification manifest verification checks report file integrity and
 deterministic report-path, source/docs provenance, summary metadata, report
 body count, and `sourceInspection.source` consistency for
