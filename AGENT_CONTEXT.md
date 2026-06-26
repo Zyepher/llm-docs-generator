@@ -33,10 +33,10 @@ honest failures.
 Discovery-like CLI behavior must stay bounded, explicit, inspectable, and
 deterministic. Acceptable examples include listing files under a provided source
 path, inspecting an explicit URL plus fixed same-origin well-known resources,
-extracting links from already fetched content, and producing discovery reports
-for agent review. The CLI must not silently choose authoritative sources, guess
-source-specific documentation rules, crawl arbitrary links, render JavaScript,
-or pretend to understand arbitrary websites.
+extracting links from already fetched content, and producing candidate evidence
+reports for agent review. The CLI must not silently choose authoritative
+sources, guess source-specific documentation rules, crawl arbitrary links,
+render JavaScript, or pretend to understand arbitrary websites.
 
 ## Current Capability Versus Target Capability
 
@@ -278,8 +278,9 @@ Agent workflow:
    - DocC directories
    - GitHub source links from docs pages
 4. If a source repo is discovered, use the repo exploration workflow.
-5. Review candidate reports by first-party evidence, structure, relevance,
-   freshness, and parseability.
+5. Review candidate evidence reports by first-party evidence, structure,
+   explicit scope/version/product matches, freshness, and parseability; treat
+   this as agent judgment, not CLI scoring.
 6. Run this project's parser/formatter on the agent-selected source.
 7. If the user asks for source-truth confidence and a source repo is available,
    verify API signatures, config defaults, routes, exported types, and behavior
@@ -423,15 +424,29 @@ For future worker or reviewer prompts that touch CLI source ingestion,
 discovery-like inspection, manifests, freshness, provenance, or docs contracts,
 include an explicit reminder to align with the Product Boundary above.
 
-Reviewers must flag:
+Reviewers must allow:
+
+- Deterministic CLI listing, grouping, filtering, and ordering of observed
+  candidates when based only on factual evidence signals such as file type,
+  path, metadata, source URL, hash, freshness, parseability, and explicit
+  user-provided scope. This is report readability, not source selection.
+
+Reviewers must reject:
 
 - CLI behavior or docs that imply discovery decides authority, correctness,
-  source truth, or task fit.
-- Candidate reports described as trust scoring, preferred-source selection, or
-  hidden source-specific guessing instead of factual evidence reports.
+  source truth, source-truth confidence, or task fit.
+- Discovery or candidate changes that add or imply source scoring, trust
+  scoring, authority scoring, hidden preferred-source selection, or numeric
+  task-fit ranking.
+- Candidate evidence reports described as ambiguous candidate reports, trust
+  scoring, preferred-source selection, or hidden source-specific guessing
+  instead of factual evidence reports.
 - Generation from a top or first ordered candidate unless the user or agent
   supplies that candidate explicitly, or a documented automation flag requires
   it.
+- Hidden source-specific guesses, such as inferring product-specific docs paths,
+  release lines, package identity, or framework behavior without explicit
+  source evidence.
 - Claims that source-truth codebase docs, source verification, manifests,
   freshness, or discovery are implemented when code, tests, CLI behavior, and
   docs do not all agree.

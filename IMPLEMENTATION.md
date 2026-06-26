@@ -275,31 +275,36 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 Current discovery scope:
 
 - `llm-docs discover --source <path>` accepts an explicit local file or
-  directory, writes `discovery-report.json` plus a discovery-report
-  `manifest.json`, and reports candidate file hints, deterministic evidence
-  categories and signals, report order, byte sizes, hashes, traversal bounds,
-  skipped generated directories, warnings, and a compact content-free
-  `candidateEvidenceIndex` derived from `discovery-report.json`.
+  directory, writes a candidate evidence report at `discovery-report.json` plus
+  a discovery-report `manifest.json`, and reports candidate file hints,
+  deterministic evidence categories and signals, report order, byte sizes,
+  hashes, traversal bounds, skipped generated directories, warnings, and a
+  compact content-free `candidateEvidenceIndex` derived from
+  `discovery-report.json`.
 - `llm-docs discover --repo <git-url-or-local-git-repo>` clones or reuses an
   explicit git repo in a cache, optionally inspects repo-relative
-  `--scope <path>`, and writes `discovery-report.json` plus a discovery-report
-  `manifest.json` with repo input, cache path, commit, dirty state, traversal
-  settings, candidates, warnings, and a compact content-free
-  `candidateEvidenceIndex` derived from `discovery-report.json`.
+  `--scope <path>`, and writes a candidate evidence report at
+  `discovery-report.json` plus a discovery-report `manifest.json` with repo
+  input, cache path, commit, dirty state, traversal settings, candidates,
+  warnings, and a compact content-free `candidateEvidenceIndex` derived from
+  `discovery-report.json`.
 - `llm-docs discover --url <http-or-https-url>` inspects one explicit URL plus
-  same-origin root `/llms.txt` and `/sitemap.xml`. It writes
-  `discovery-report.json` plus a discovery-report `manifest.json` with website
-  input, normalized URL, inspected resources, status/content type/byte counts,
-  truncation flags, crawl policy, candidate URLs, evidence/provenance, and
-  warnings. The manifest includes a compact content-free
-  `candidateEvidenceIndex` derived from `discovery-report.json`. It does not
-  fetch linked candidates or render JavaScript.
+  same-origin root `/llms.txt` and `/sitemap.xml`. It writes a candidate
+  evidence report at `discovery-report.json` plus a discovery-report
+  `manifest.json` with website input, normalized URL, inspected resources,
+  status/content type/byte counts, truncation flags, crawl policy, candidate
+  URLs, evidence/provenance, and warnings. The manifest includes a compact
+  content-free `candidateEvidenceIndex` derived from `discovery-report.json`.
+  It does not fetch linked candidates or render JavaScript.
 
 Discovery does not generate docs, crawl linked website candidates, choose
-candidates, assign trust scores, infer authority, claim source truth, or
-implement source-truth codebase docs generation. It orders candidates
-deterministically for agent review only. Repo cache handling is non-destructive;
-clean matching caches fetch remote refs without pulling into the checkout, and cached
+candidates, assign trust scores, infer authority, claim source truth, decide
+task fit, or implement source-truth codebase docs generation. It lists, groups,
+filters, and orders candidates deterministically for agent review only. There is
+no auto-selection or generation from a top/first ordered candidate unless the
+agent or user explicitly selects that candidate or a future documented
+automation flag requires it. Repo cache handling is non-destructive; clean
+matching caches fetch remote refs without pulling into the checkout, and cached
 checkouts with local changes or ignored files are warned about and inspected as
 present.
 
@@ -322,8 +327,9 @@ Current capabilities contract scope:
 - Planned/unsupported entries include additional `generate --preset` names,
   configured SDK refresh, discovery-report refresh, remote freshness refresh,
   source-code verification for official docs, broad website crawling,
-  automatic source selection, framework/route understanding, behavior-level
-  generation from source code, `agent install codex`, and `agent doctor`.
+  automatic source selection or top-candidate generation, framework/route
+  understanding, behavior-level generation from source code,
+  `agent install codex`, and `agent doctor`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `manifest.json`, `failure.json`, source docs under `llm-docs/`, configured
@@ -408,8 +414,9 @@ Current explicit local source docs generation scope:
   without `--source`, presets with `--sdk`, and preset-incompatible explicit
   formats fail before output work.
 - URL-like sources, missing paths, symlinked source roots, discovery reports,
-  and candidate/discovery report auto-selection are rejected honestly. Source
-  mode never fetches network resources and does not consume discovery reports
+  and candidate evidence/discovery report auto-selection are rejected honestly;
+  there is no generation from a top/first ordered candidate. Source mode never
+  fetches network resources and does not consume discovery reports
   automatically.
 - `--format` is a parser hint. Supported values are `auto`, `markdown`, `mdx`
   as Markdown parser support, `openapi`, `openref`, `rst`, and `html`.

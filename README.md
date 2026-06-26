@@ -57,7 +57,7 @@ Current implemented capabilities include:
   workspace
 - bounded website inspection from provided URLs, the same-origin `/llms.txt`,
   and the same-origin `/sitemap.xml`
-- candidate reports with deterministic evidence, warnings, skipped paths,
+- candidate evidence reports with deterministic evidence, warnings, skipped paths,
   discovery report integrity manifests, and compact content-free candidate
   evidence indexes
 - parsers for OpenRef, OpenAPI/Swagger, Markdown, MDX, RST, DocC, and HTML

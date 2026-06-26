@@ -335,7 +335,7 @@ agent intent/source/scope resolution
   -> CLI input normalizer
   -> bounded source inspection
   -> repo explorer / cache manager
-  -> candidate report writer
+  -> candidate evidence report writer
   -> docs parser
   -> source-truth codebase docs generator, when explicitly requested
   -> LLM formatter
