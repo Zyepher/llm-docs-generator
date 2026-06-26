@@ -87,9 +87,10 @@ Current implementation:
   token counts when present.
 - Verifies current `local-source-docs` manifests by checking source manifest
   shape, recorded generator/parser/formatter metadata, local source path
-  existence, recorded source file byte sizes and SHA-256 hashes, generated
-  output paths, byte sizes, hashes, line counts, deterministic estimated token
-  counts, and optional parser plugin metadata against the recorded plugin
+  existence, recorded source file byte sizes, SHA-256 hashes, line counts,
+  deterministic estimated token counts, generated output paths, byte sizes,
+  hashes, line counts, deterministic estimated token counts, and optional
+  parser plugin metadata against the recorded plugin
   manifest contents plus manifest hash/byte size without importing plugin code.
   When optional source-docs semantic chunk index metadata is present,
   verification rebuilds it from
@@ -180,9 +181,10 @@ Current implementation:
   generation writes `manifest.json` plus generated docs under `llm-docs/`.
   With `--chunks jsonl`, it also writes `chunks/semantic-chunks.jsonl` and a
   compact source-docs `semanticChunkIndexes` manifest entry. The manifest
-  records source file hashes and byte sizes, a deterministic directory
-  aggregate hash when applicable, parser/formatter metadata, generated output
-  hashes, byte sizes, line counts, deterministic estimated token counts,
+  records source file hashes, byte sizes, line counts, deterministic estimated
+  token counts, a deterministic directory aggregate hash when applicable,
+  parser/formatter metadata, generated output hashes, byte sizes, line counts,
+  deterministic estimated token counts,
   output kind/name metadata, per-chunk index facts without chunk content, and
   warnings.
 - Can run `generate --source <explicit-local-docs-path> --preset swift-book
@@ -262,12 +264,13 @@ Current implementation:
   as an opt-in JSONL export for explicit `generate --source` outputs only;
   source-docs refresh preserves that chunk JSONL output only when the existing
   manifest recorded it. Configured SDK, source-truth docs, and discovery
-  reports do not publish semantic chunk records. Current source docs,
-  configured SDK, source-truth docs, and discovery-report manifests include
-  partial generated-output RAG metadata only (`lineCount` and
-  `estimatedTokenCount`) plus source-docs opt-in chunk JSONL file metadata,
-  compact chunk indexes when requested, and compact content-free discovery
-  candidate evidence indexes. Discovery modes are inspection foundations only;
+  reports do not publish semantic chunk records. Current manifests include
+  partial content-free line/token metadata only: generated/report file
+  `lineCount` and `estimatedTokenCount` metadata where documented, plus
+  source-docs `sourceFiles[]` `lineCount` and `estimatedTokenCount` metadata,
+  source-docs opt-in chunk JSONL file metadata, compact chunk indexes when
+  requested, and compact content-free discovery candidate evidence indexes.
+  Discovery modes are inspection foundations only;
   they do not generate docs, choose sources, assign trust or authority labels, infer
   authority, or claim source truth.
 - Local, repo, and website discovery list, group, filter, and deterministically
@@ -741,12 +744,13 @@ Record at minimum:
 
 The current explicit local source generation path writes a source-mode
 `manifest.json` with source path/type, format hint, resolved format,
-parser/formatter metadata, source file paths, source file formats, hashes and
-byte sizes, a deterministic directory aggregate hash when applicable, generated
-file hashes, byte sizes, line counts, deterministic estimated token counts,
-output kind/name metadata, optional `chunks/semantic-chunks.jsonl` metadata when
-`--chunks jsonl` is requested, optional compact semantic chunk manifest indexes
-derived from the JSONL records, and warnings. The current
+parser/formatter metadata, source file paths, source file formats, hashes,
+byte sizes, line counts, deterministic estimated token counts, a deterministic
+directory aggregate hash when applicable, generated file hashes, byte sizes,
+line counts, deterministic estimated token counts, output kind/name metadata,
+optional `chunks/semantic-chunks.jsonl` metadata when `--chunks jsonl` is
+requested, optional compact semantic chunk manifest indexes derived from the
+JSONL records, and warnings. The current
 configured SDK generation path writes a scoped `manifest.json` with configured
 source details, hashes, generator/sdk/parser/formatter metadata, generated file
 hashes, byte sizes, line counts, and deterministic estimated token counts. The
@@ -763,9 +767,10 @@ byte sizes, recorded generator/sdk/parser/formatter metadata, and valid
 generated output line/token metadata when present, and rejects malformed
 metadata before file checks. For source-mode manifests, it checks recorded
 generator/parser/formatter metadata,
-local source path shape and existence, source file hashes and byte sizes,
-generated output paths, hashes, byte sizes, line counts, and deterministic
-estimated token counts; when optional parser plugin metadata is present, it
+local source path shape and existence, source file hashes, byte sizes, line
+counts, deterministic estimated token counts, generated output paths, hashes,
+byte sizes, line counts, and deterministic estimated token counts; when
+optional parser plugin metadata is present, it
 checks that metadata against the recorded plugin manifest contents and manifest
 hash/byte size without importing or executing plugin code; when optional
 semantic chunk manifest indexes are present, it also rebuilds them from

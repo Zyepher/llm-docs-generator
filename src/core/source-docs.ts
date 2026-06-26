@@ -104,6 +104,8 @@ interface SourceDocsBaseFileManifestEntry {
   resolvedPath: string;
   byteSize: number;
   hash: string;
+  lineCount: number;
+  estimatedTokenCount: number;
 }
 
 export interface SourceDocsFileManifestEntry extends SourceDocsBaseFileManifestEntry {
@@ -984,13 +986,18 @@ async function describeSourceFile(
   manifestPath: string,
   format: SourceFileFormat
 ): Promise<BoundedSourceFile> {
-  const [fileStats, hash] = await Promise.all([lstat(resolvedPath), sha256File(resolvedPath)]);
+  const [fileStats, file] = await Promise.all([
+    lstat(resolvedPath),
+    describeGeneratedTextOutput(resolvedPath),
+  ]);
 
   return {
     path: normalizeManifestPath(manifestPath),
     resolvedPath,
     byteSize: fileStats.size,
-    hash,
+    hash: file.hash,
+    lineCount: file.lineCount,
+    estimatedTokenCount: file.estimatedTokenCount,
     format,
   };
 }
@@ -1214,6 +1221,8 @@ function buildSourceDocsManifest(options: {
     resolvedPath: file.resolvedPath,
     byteSize: file.byteSize,
     hash: file.hash,
+    lineCount: file.lineCount,
+    estimatedTokenCount: file.estimatedTokenCount,
     format: options.resolvedFormat,
   }));
   const sourceFile = options.source.type === 'file' ? sourceFiles[0] : undefined;
