@@ -472,7 +472,7 @@ const CAPABILITIES_CONTRACT = {
         'Markdown parser only',
         'no TSPL.docc path inference',
         'no repo clone or cache',
-        'no refresh',
+        'preset generation itself does not refresh existing outputs',
         'no source-code verification',
         'no automatic source selection',
         'preset metadata does not select or verify source truth',
@@ -510,7 +510,7 @@ const CAPABILITIES_CONTRACT = {
         'candidate evidence for agent review only',
         'no task fit decision',
         'no source selection',
-        'no refresh',
+        'verify does not refresh discovery reports',
         'no source-code verification',
       ],
     },
@@ -525,7 +525,7 @@ const CAPABILITIES_CONTRACT = {
       limitations: [
         'configured-sdk manifest mode only',
         'does not recompute optional generated output line or token metadata',
-        'no refresh',
+        'verify does not refresh configured SDK outputs',
         'no repo freshness check',
         'no source-code verification',
       ],
@@ -541,7 +541,7 @@ const CAPABILITIES_CONTRACT = {
         'source path, source file, generated output hash, byte-size, line-count, and estimated-token verification for local source docs manifests',
       limitations: [
         'local-source-docs manifest mode only',
-        'no refresh',
+        'verify does not refresh outputs',
         'no repo freshness check',
         'no source-code verification',
       ],
@@ -558,9 +558,59 @@ const CAPABILITIES_CONTRACT = {
       limitations: [
         'source-truth-local-docs manifest mode only',
         'local generated evidence docs only',
-        'no refresh',
+        'verify does not refresh outputs',
         'no repo freshness check',
         'no source-code verification',
+        'no behavior inference',
+      ],
+    },
+    {
+      id: 'refresh-source-docs',
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for local-source-docs',
+      status: 'implemented',
+      inputBoundary: 'existing local-source-docs manifest.json with recorded local source path',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
+      summary:
+        'deterministic regeneration of local source docs from the manifest-recorded explicit local source path',
+      limitations: [
+        'local-source-docs manifests only',
+        'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',
+        'no URLs',
+        'no repo freshness check',
+        'no crawling',
+        'no source selection',
+        'no discovery report refresh',
+        'no configured SDK refresh',
+        'no source-code verification',
+        'no remote network work',
+        'no source project script execution',
+      ],
+    },
+    {
+      id: 'refresh-source-truth-docs',
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for source-truth-local-docs',
+      status: 'implemented',
+      inputBoundary:
+        'existing source-truth-local-docs manifest.json with recorded local source path',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json'],
+      summary:
+        'deterministic regeneration of source-truth docs from the manifest-recorded explicit local source path',
+      limitations: [
+        'source-truth-local-docs manifests only',
+        'uses only source.resolvedPath from the existing manifest',
+        'no URLs',
+        'no repo freshness check',
+        'no crawling',
+        'no source selection',
+        'no discovery report refresh',
+        'no configured SDK refresh',
+        'no source-code verification',
+        'no remote network work',
+        'no source project script execution',
         'no behavior inference',
       ],
     },
@@ -612,10 +662,11 @@ const CAPABILITIES_CONTRACT = {
         'only --preset swift-book over an explicit local --source path is implemented; additional presets remain planned',
     },
     {
-      id: 'refresh',
-      command: 'refresh',
+      id: 'refresh-unsupported-manifests',
+      command: 'refresh for configured SDK, discovery report, URL, repo, website, or freshness workflows',
       status: 'planned-unsupported',
-      reason: 'no current CLI refresh workflow',
+      reason:
+        'only explicit local-source-docs and source-truth-local-docs manifest refresh is implemented; configured SDK, discovery report, remote URL/repo, freshness, crawling, and source-code verification refresh remain planned',
     },
     {
       id: 'source-code-verification',
@@ -1551,6 +1602,67 @@ program
       }
     }
   );
+
+// ============================================================================
+// REFRESH COMMAND
+// ============================================================================
+
+program
+  .command('refresh')
+  .description(
+    'Refresh local source docs or source-truth docs from an existing explicit local manifest'
+  )
+  .option('--manifest <path>', 'Path to manifest.json')
+  .option('--output-dir <dir>', 'Output directory containing manifest.json')
+  .option('-v, --verbose', 'Enable verbose logging', false)
+  .action(async (options: { manifest?: string; outputDir?: string; verbose: boolean }) => {
+    const manifestOptionCount =
+      (options.manifest === undefined ? 0 : 1) + (options.outputDir === undefined ? 0 : 1);
+
+    if (manifestOptionCount !== 1) {
+      console.error(chalk.red('Error: provide exactly one of --manifest or --output-dir'));
+      process.exit(1);
+    }
+
+    const manifestPath =
+      options.manifest === undefined ? `${options.outputDir}/manifest.json` : options.manifest;
+
+    try {
+      const { refreshGenerationManifest } = await import('./core/refresh.js');
+      const result = await refreshGenerationManifest({
+        manifestPath,
+        generator: {
+          name: GENERATOR_NAME,
+          version: GENERATOR_VERSION,
+          cliName: CLI_NAME,
+        },
+      });
+
+      console.log(chalk.bold('Manifest refresh'));
+      console.log(`  Mode: ${result.mode}`);
+      console.log(`  Source: ${result.sourcePath}`);
+      if (result.presetName !== undefined) {
+        console.log(`  Preset: ${result.presetName}`);
+      }
+      console.log(`  Source files: ${result.sourceFiles}`);
+      console.log(`  Generated files: ${result.generatedOutputs}`);
+      if (result.chunkOutputPath !== undefined) {
+        console.log(`  Chunk export: ${chalk.cyan(result.chunkOutputPath)}`);
+      }
+      console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
+      console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
+      console.log(chalk.green('Refresh complete'));
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`Refresh failed: ${errorMsg}`));
+
+      if (options.verbose && error instanceof Error && error.stack !== undefined) {
+        console.error(chalk.gray(error.stack));
+      }
+
+      process.exit(1);
+    }
+  });
 
 // ============================================================================
 // VERIFY COMMAND

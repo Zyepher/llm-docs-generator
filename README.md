@@ -68,13 +68,16 @@ Current implemented capabilities include:
   hashes, parser/formatter metadata, and warnings
 - configured OpenRef SDK generation plus configured-SDK, source-docs,
   source-truth docs, and discovery-report manifest verification
+- explicit-manifest refresh for local source docs and source-truth docs that
+  already record a local source path
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
 - read-only bundled agent context metadata
 
-Planned capabilities such as refresh, diff, host setup helpers, broad crawling,
-automatic source selection, source-code verification, and additional presets
-are not implemented in the current CLI.
+Planned capabilities such as configured SDK refresh, discovery report refresh,
+remote freshness checks, diff, host setup helpers, broad crawling, automatic
+source selection, source-code verification, and additional presets are not
+implemented in the current CLI.
 
 ## Command Model
 
@@ -97,6 +100,9 @@ llm-docs generate --source ./openapi.yaml --format openapi --output-dir ./api-ag
 
 llm-docs source-truth inspect --source ./src
 llm-docs source-truth generate --source ./src --output-dir ./reports/source-truth
+
+llm-docs refresh --output-dir ./agent-docs
+llm-docs refresh --manifest ./reports/source-truth/manifest.json
 
 llm-docs agent context
 ```
@@ -135,6 +141,8 @@ The CLI is responsible for:
   and source-truth failure reports
 - verifying configured-SDK, source-docs, source-truth docs, and
   discovery-report files against recorded metadata
+- refreshing only existing `local-source-docs` and `source-truth-local-docs`
+  manifests that already record explicit local source paths
 - failing clearly when a requested source, format, parser, permission, or mode
   cannot be used
 
@@ -163,6 +171,8 @@ llm-docs verify --manifest ./output/swift/v2/manifest.json
 llm-docs verify --output-dir ./agent-docs
 llm-docs verify --output-dir ./reports/source-truth
 llm-docs verify --output-dir ./reports/local-docs
+llm-docs refresh --output-dir ./agent-docs
+llm-docs refresh --manifest ./reports/source-truth/manifest.json
 ```
 
 Verification currently supports `configured-sdk`, `local-source-docs`,
@@ -179,8 +189,18 @@ estimated token counts, symlink/path containment, and count consistency with
 `discovery-report.json` existence, hash, byte size, line count, estimated token
 count, and basic report schema/mode/kind/count consistency. It does not judge
 candidate authority, task fit, source truth, freshness, source-code behavior, or
-runtime behavior. Refresh and source-code verification remain planned but are
-not implemented.
+runtime behavior.
+
+Refresh currently supports only existing `local-source-docs` and
+`source-truth-local-docs` manifests. For source docs, it reads the manifest,
+uses the recorded absolute local source path, `source.formatHint`, preset
+metadata if present, and whether the prior manifest recorded
+`semantic-chunks-jsonl`, then regenerates into the same output directory. For
+source-truth docs, it uses only the recorded absolute local source path and
+regenerates into the same output directory. Refresh does not support configured
+SDK manifests, discovery-report manifests, URLs, repo freshness, broad website
+crawling, source selection, source-code verification, behavior validation,
+remote network work, or source project script execution.
 
 When `generate --source` is run with `--chunks jsonl`, it also writes
 `chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a
