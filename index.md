@@ -105,6 +105,8 @@ npx tsx src/cli.ts generate --source ./TSPL.docc --preset swift-book --output-di
 npx tsx src/cli.ts list-sdks
 npx tsx src/cli.ts generate --sdk swift --sdk-version v2 --output-dir ./output
 npx tsx src/cli.ts verify --output-dir ./output/swift/v2
+npx tsx src/cli.ts refresh --output-dir ./agent-docs
+npx tsx src/cli.ts refresh --manifest ./reports/source-truth/manifest.json
 npx tsx src/cli.ts validate --sdk swift --version v2
 ```
 
@@ -197,12 +199,24 @@ explicit local Markdown/DocC-style sources. It sets Markdown generation,
 `swift-book` output naming, the Swift Programming Language title, neutral
 source-derived system prompt, and non-authoritative preset provenance
 in `manifest.json`. It does not infer or append `TSPL.docc`, clone or cache
-repos, select sources, verify source truth, claim completeness, refresh, or
-perform source-code verification. Additional preset names remain
-planned/unsupported.
+repos, select sources, verify source truth, claim completeness, or perform
+source-code verification. Additional preset names remain planned/unsupported.
 
-The current CLI still does not expose refresh or source-code verification. It
-also writes `manifest.json` for successful configured `generate --sdk` tasks and
+The current `refresh --manifest <path>` / `refresh --output-dir <dir>` command
+supports current `local-source-docs` and `source-truth-local-docs` manifests
+only. Source-docs refresh reads the existing manifest, uses only the recorded
+absolute local source path, `source.formatHint`, preset metadata if present,
+and whether `semantic-chunks-jsonl` was previously present, then regenerates
+through the current source docs generator into the manifest directory.
+Source-truth refresh reads the existing manifest, uses only the recorded
+absolute local source path, and regenerates through the current source-truth
+docs generator into the manifest directory. Refresh does not support
+configured-SDK manifests, discovery-report manifests, URLs, repo freshness,
+broad crawling, source selection, source-code verification, behavior
+validation, remote network work, or source project script execution.
+
+The current CLI still does not expose source-code verification. It also writes
+`manifest.json` for successful configured `generate --sdk` tasks and
 successful discovery tasks with generated output or report hashes, byte sizes,
 line counts, and deterministic estimated token counts. Current `verify`
 supports configured-SDK, source-mode, source-truth docs, and discovery-report
@@ -225,8 +239,9 @@ Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable
 semantic chunk records with path-derived IDs, order, source metadata, hashes,
 sizes, token estimates, split metadata, and warnings. Discovery reports,
-configured SDK generation, source-truth docs, refresh, and source-selection
-workflows do not publish semantic chunks.
+configured SDK generation, source-truth docs, and source-selection workflows do
+not publish semantic chunks. Source-docs refresh preserves semantic chunk JSONL
+only when the existing manifest recorded it.
 
 The current CLI is implemented in:
 
@@ -245,6 +260,7 @@ Core model and formatting:
 - [src/core/formatter.ts](src/core/formatter.ts)
 - [src/core/universal-formatter.ts](src/core/universal-formatter.ts)
 - [src/core/manifest.ts](src/core/manifest.ts)
+- [src/core/refresh.ts](src/core/refresh.ts)
 - [src/core/detector.ts](src/core/detector.ts)
 - [src/core/website-discovery.ts](src/core/website-discovery.ts)
 - [src/core/source-truth.ts](src/core/source-truth.ts)
@@ -345,8 +361,12 @@ agent intent/source/scope resolution
   AST signature, package/config, and path-based test/example context evidence
   reports are available through `source-truth inspect --source`, and
   evidence-bound Markdown is available through `source-truth generate --source
-  --output-dir`. Broader crawling, refresh, source-code verification, and
-  behavior-level source documentation remain planned.
+  --output-dir`. Explicit local manifest refresh for current
+  `local-source-docs` and `source-truth-local-docs` manifests is available
+  through `refresh --manifest <path>` or `refresh --output-dir <dir>`. Broader
+  crawling, configured SDK refresh, discovery-report refresh, remote freshness
+  refresh, source-code verification, and behavior-level source documentation
+  remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL

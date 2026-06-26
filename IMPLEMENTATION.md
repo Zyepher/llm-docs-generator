@@ -84,8 +84,9 @@ llm-docs-generator/
    - Handles empty docs, duplicate sibling node IDs, repeated calls, malformed
      child/content shapes, and deep trees deterministically
    - Available as library support and as an opt-in JSONL export for explicit
-     `generate --source` outputs only; discovery reports, configured SDK
-     generation, source-truth docs, refresh, and broad RAG systems do not
+     `generate --source` outputs only; source-docs refresh preserves that JSONL
+     output only when the existing manifest recorded it. Discovery reports,
+     configured SDK generation, source-truth docs, and broad RAG systems do not
      consume semantic chunks
 
 6. **Performance Optimizations**
@@ -259,8 +260,12 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Read-only `agent context` metadata command for packaged context and skill
       artifacts
 - [x] Bundled package skill files for current CLI usage and repo/docs discovery
+- [x] Deterministic local explicit-manifest refresh for current
+      `local-source-docs` and `source-truth-local-docs` manifests only
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
-- [ ] Source-code verification, broad website crawling, and refresh verification
+- [ ] Source-code verification, broad website crawling, configured SDK refresh,
+      discovery-report refresh, remote freshness refresh, and refresh
+      verification
 - [ ] Plugin system for custom parsers
 - [x] OpenRef backward compatibility tests
 
@@ -305,12 +310,13 @@ Current capabilities contract scope:
   `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
   `--format openref-0.1`, configured SDK, source-docs, source-truth docs, and
-  discovery-report `verify`, `list-sdks`, and `validate --sdk`.
+  discovery-report `verify`, local explicit-manifest source-docs/source-truth
+  `refresh`, `list-sdks`, and `validate --sdk`.
 - Planned/unsupported entries include additional `generate --preset` names,
-  `refresh`, source-code verification for official docs, broad website
-  crawling, automatic source selection, framework/route understanding,
-  behavior-level generation from source code, `agent install codex`, and
-  `agent doctor`.
+  configured SDK refresh, discovery-report refresh, remote freshness refresh,
+  source-code verification for official docs, broad website crawling,
+  automatic source selection, framework/route understanding, behavior-level
+  generation from source code, `agent install codex`, and `agent doctor`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `manifest.json`, `failure.json`, source docs under `llm-docs/`, configured
@@ -320,8 +326,10 @@ Current capabilities contract scope:
   `lineCount` and deterministic `estimatedTokenCount` for explicit generated
   or report files. Source docs can additionally publish opt-in
   `chunks/semantic-chunks.jsonl` records for explicit `generate --source`
-  outputs, but capabilities output does not claim full manifest expansion,
-  refresh support, source-code verification, or automatic source selection.
+  outputs, and source-docs refresh preserves that output when the existing
+  manifest recorded it. Capabilities output does not claim full manifest
+  expansion, configured SDK refresh, discovery-report refresh, remote freshness
+  refresh, source-code verification, or automatic source selection.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
@@ -401,8 +409,8 @@ Current explicit local source docs generation scope:
 - `--preset swift-book` sets deterministic Markdown defaults, `swift-book`
   filename prefix, title, neutral source-derived system prompt, and
   non-authoritative preset metadata in the manifest. It does not infer or
-  append `TSPL.docc`, select sources, clone/cache repositories, refresh, verify
-  source code, claim completeness, or claim source truth.
+  append `TSPL.docc`, select sources, clone/cache repositories, verify source
+  code, claim completeness, or claim source truth.
 - `--chunks jsonl` is an opt-in source-mode-only export. When requested, source
   mode chunks the already parsed DocNode tree with `chunkDocNode` and writes
   one semantic chunk JSON object per line to `chunks/semantic-chunks.jsonl`.
@@ -427,6 +435,21 @@ Current explicit local source docs generation scope:
   shape, source/source-file integrity, generated output integrity, symlink/path
   containment, inspection basics, and raw report count consistency; it does not
   infer behavior or perform source-code verification.
+
+- `refresh --manifest <path>` / `refresh --output-dir <dir>` supports only
+  current `local-source-docs` and `source-truth-local-docs` manifests. For
+  source docs it reads the existing manifest and uses only the recorded
+  absolute local source path, `source.formatHint`, preset metadata if present,
+  and whether `semantic-chunks-jsonl` was previously present, then regenerates
+  through the current source docs generator into the manifest directory. For
+  source-truth docs it uses only the recorded absolute local source path and
+  regenerates through the current source-truth docs generator into the manifest
+  directory. It rejects configured-SDK manifests, discovery-report manifests,
+  malformed/missing manifests, URL-like or non-absolute recorded source paths,
+  and unsupported manifest modes. It does not perform URL fetching, repo
+  freshness checks, broad website crawling, source selection, source-code
+  verification, behavior validation, remote network work, or source project
+  script execution.
 
 Current OpenAPI / Swagger parser scope:
 
@@ -510,9 +533,11 @@ Current semantic chunking scope:
 - Handles empty documents, repeated calls, malformed content/children shapes,
   traversal cycles, and deep trees deterministically.
 - The CLI writes JSONL only for explicit source-mode generation when
-  `--chunks jsonl` is requested. It does not write chunk records for discovery,
-  configured SDK generation, source-truth docs, refresh, or any source
-  selection workflow, and it does not select sources or infer authority.
+  `--chunks jsonl` is requested, and source-docs refresh writes it only when
+  the prior manifest already recorded `semantic-chunks-jsonl`. It does not
+  write chunk records for discovery, configured SDK generation, source-truth
+  docs, or any source selection workflow, and it does not select sources or
+  infer authority.
 
 ## Files Modified/Created
 

@@ -722,7 +722,7 @@ async function generateSourceDocsFixture(): Promise<{
   manifestPath: string;
   manifest: SourceDocsManifest;
 }> {
-  const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-verify-'));
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-source-verify-'));
   tempDirs.push(dir);
   const sourceDir = join(dir, 'docs');
   const outputDir = join(dir, 'agent-docs');
@@ -871,7 +871,7 @@ async function createSwiftBookSourceFixture(prefix = 'llm-docs-swift-book-'): Pr
   sourceDir: string;
   outputDir: string;
 }> {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
+  const dir = await mkdtemp(join(await realpath(tmpdir()), prefix));
   tempDirs.push(dir);
   const sourceDir = join(dir, 'TSPL.docc');
   const outputDir = join(dir, 'output');
@@ -1059,10 +1059,12 @@ describe('CLI compatibility behavior', () => {
   it('exposes capabilities help and root help for agents', async () => {
     const rootHelp = await runCli(['--help']);
     const capabilitiesHelp = await runCli(['capabilities', '--help']);
+    const refreshHelp = await runCli(['refresh', '--help']);
     const agentHelp = await runCli(['agent', '--help']);
     const agentContextHelp = await runCli(['agent', 'context', '--help']);
 
     expect(rootHelp.stdout).toContain('capabilities');
+    expect(rootHelp.stdout).toContain('refresh');
     expect(rootHelp.stdout).toContain('agent');
     expect(rootHelp.stdout).toContain('Report implemented and planned CLI capabilities for');
     expect(rootHelp.stdout).toContain('agents');
@@ -1073,6 +1075,11 @@ describe('CLI compatibility behavior', () => {
     expect(capabilitiesHelp.stdout).toContain(
       'Print the deterministic machine-readable capabilities contract'
     );
+    expect(refreshHelp.stdout).toMatch(
+      /Refresh local source docs or source-truth docs from an existing explicit local\s+manifest/
+    );
+    expect(refreshHelp.stdout).toContain('--manifest <path>');
+    expect(refreshHelp.stdout).toContain('--output-dir <dir>');
     expect(agentHelp.stdout).toContain('Report read-only agent metadata packaged with this CLI');
     expect(agentHelp.stdout).toContain('context');
     expect(agentContextHelp.stdout).toContain('Report packaged read-only agent context metadata');
@@ -1232,12 +1239,14 @@ describe('CLI compatibility behavior', () => {
       'verify-configured-sdk',
       'verify-source-docs',
       'verify-source-truth-docs',
+      'refresh-source-docs',
+      'refresh-source-truth-docs',
       'list-sdks',
       'validate-sdk',
     ]);
     expect([...planned.keys()]).toEqual([
       'generate-preset-additional',
-      'refresh',
+      'refresh-unsupported-manifests',
       'source-code-verification',
       'broad-crawling',
       'automatic-source-selection',
@@ -1344,7 +1353,7 @@ describe('CLI compatibility behavior', () => {
         'candidate evidence for agent review only',
         'no task fit decision',
         'no source selection',
-        'no refresh',
+        'verify does not refresh discovery reports',
         'no source-code verification',
       ]),
     });
@@ -1354,7 +1363,7 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('verify-source-docs')?.limitations).toEqual(
       expect.arrayContaining([
         'local-source-docs manifest mode only',
-        'no refresh',
+        'verify does not refresh outputs',
         'no repo freshness check',
         'no source-code verification',
       ])
@@ -1367,9 +1376,53 @@ describe('CLI compatibility behavior', () => {
       outputFiles: ['stdout verification result'],
       limitations: expect.arrayContaining([
         'source-truth-local-docs manifest mode only',
-        'no refresh',
+        'verify does not refresh outputs',
         'no repo freshness check',
         'no source-code verification',
+        'no behavior inference',
+      ]),
+    });
+    expect(implemented.get('refresh-source-docs')).toMatchObject({
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for local-source-docs',
+      status: 'implemented',
+      inputBoundary: 'existing local-source-docs manifest.json with recorded local source path',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
+      limitations: expect.arrayContaining([
+        'local-source-docs manifests only',
+        'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',
+        'no URLs',
+        'no repo freshness check',
+        'no crawling',
+        'no source selection',
+        'no discovery report refresh',
+        'no configured SDK refresh',
+        'no source-code verification',
+        'no remote network work',
+        'no source project script execution',
+      ]),
+    });
+    expect(implemented.get('refresh-source-truth-docs')).toMatchObject({
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for source-truth-local-docs',
+      status: 'implemented',
+      inputBoundary:
+        'existing source-truth-local-docs manifest.json with recorded local source path',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json'],
+      limitations: expect.arrayContaining([
+        'source-truth-local-docs manifests only',
+        'uses only source.resolvedPath from the existing manifest',
+        'no URLs',
+        'no repo freshness check',
+        'no crawling',
+        'no source selection',
+        'no discovery report refresh',
+        'no configured SDK refresh',
+        'no source-code verification',
+        'no remote network work',
+        'no source project script execution',
         'no behavior inference',
       ]),
     });
@@ -1380,8 +1433,8 @@ describe('CLI compatibility behavior', () => {
     expect([...implemented.values()].map((capability) => capability.mode)).toContain(
       'generate --source'
     );
-    expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
-      'refresh'
+    expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
+      'only explicit local-source-docs and source-truth-local-docs manifest refresh is implemented'
     );
     expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
       'agent install codex'
@@ -1459,7 +1512,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 15');
+    expect(stdout).toContain('Implemented modes: 17');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
@@ -5493,6 +5546,518 @@ describe('CLI compatibility behavior', () => {
     );
     expect(fullDoc).toContain('<!-- Generated from: config/supabase_swift_v2.yml -->');
     expect(fullDoc).not.toContain('<!-- Generated from:  -->');
+  });
+
+  it('refreshes a local source docs manifest after output tamper and source edit', async () => {
+    const { manifestPath, sourceDir, outputDir, manifest: firstManifest } =
+      await generateSourceDocsFixture();
+    const sourceFile = firstManifest.sourceFiles.find((file) => file.path === 'index.md');
+    const outputFile = firstManifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
+
+    if (sourceFile === undefined || outputFile === undefined) {
+      throw new Error('expected generated source docs fixture files');
+    }
+
+    await writeFile(
+      join(sourceDir, sourceFile.path),
+      '# Local Docs\n\nWelcome to the refreshed local docs.\n',
+      'utf-8'
+    );
+    await writeFile(join(outputDir, outputFile.path), 'tampered output\n', 'utf-8');
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const refreshedManifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceDocsManifest;
+    const refreshedOutput = refreshedManifest.generatedOutputs.find(
+      (output) => output.kind === 'llm-docs'
+    );
+
+    if (refreshedOutput === undefined) {
+      throw new Error('expected refreshed source docs output');
+    }
+
+    const refreshedText = await readFile(join(outputDir, refreshedOutput.path), 'utf-8');
+    const verifyResult = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(refreshResult.stdout).toContain('Manifest refresh');
+    expect(refreshResult.stdout).toContain('Mode: local-source-docs');
+    expect(refreshResult.stdout).toContain('Refresh complete');
+    expect(refreshedManifest.source.input).toBe(firstManifest.source.resolvedPath);
+    expect(refreshedManifest.source.resolvedPath).toBe(firstManifest.source.resolvedPath);
+    expect(refreshedManifest.source.formatHint).toBe(firstManifest.source.formatHint);
+    expect(refreshedText).toContain('refreshed local docs');
+    expect(refreshedText).not.toContain('tampered output');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('refresh preserves semantic chunk JSONL for local source docs', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-refresh-chunks-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'chunk-docs.md');
+    const outputDir = join(dir, 'output');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await writeFile(
+      sourcePath,
+      ['# Chunk Docs', '', 'Original text.', '', '## First', '', 'One.', ''].join('\n'),
+      'utf-8'
+    );
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    await writeFile(
+      sourcePath,
+      ['# Chunk Docs', '', 'Updated text.', '', '## Added', '', 'Two.', ''].join('\n'),
+      'utf-8'
+    );
+    await writeFile(join(outputDir, 'chunks', 'semantic-chunks.jsonl'), 'tampered\n', 'utf-8');
+
+    const refreshResult = await runCli(['refresh', '--output-dir', outputDir]);
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+    const chunkOutput = manifest.generatedOutputs.find(
+      (output) => output.kind === 'semantic-chunks-jsonl'
+    );
+
+    if (chunkOutput === undefined) {
+      throw new Error('expected refreshed semantic chunk output');
+    }
+
+    const chunkJsonl = await readFile(join(outputDir, chunkOutput.path), 'utf-8');
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(refreshResult.stdout).toContain('Chunk export: chunks/semantic-chunks.jsonl');
+    expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'chunks/semantic-chunks.jsonl',
+      'llm-docs/chunk-docs-full-llms.txt',
+    ]);
+    expect(chunkJsonl).toContain('Updated text');
+    expect(chunkJsonl).toContain('Added');
+    expect(chunkJsonl).not.toContain('tampered');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('refresh preserves swift-book preset output and chunk behavior from the manifest', async () => {
+    const { sourceDir, outputDir } = await createSwiftBookSourceFixture(
+      'llm-docs-refresh-swift-book-'
+    );
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await runCli([
+      'generate',
+      '--source',
+      sourceDir,
+      '--preset',
+      'swift-book',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const firstManifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+
+    if (firstManifest.preset === undefined) {
+      throw new Error('expected swift-book preset metadata');
+    }
+
+    await writeFile(
+      join(sourceDir, 'LanguageGuide', 'BasicOperators.md'),
+      [
+        '# Basic Operators',
+        '',
+        'Operators can be refreshed from the manifest.',
+        '',
+        '## Assignment Operator',
+        '',
+        'Assignment is still present.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    await writeFile(
+      join(outputDir, 'llm-docs', 'swift-book-full-llms.txt'),
+      'tampered swift output\n',
+      'utf-8'
+    );
+    await writeFile(join(outputDir, 'chunks', 'semantic-chunks.jsonl'), 'tampered\n', 'utf-8');
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const refreshedManifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceDocsManifest;
+    const swiftOutput = await readFile(
+      join(outputDir, 'llm-docs', 'swift-book-full-llms.txt'),
+      'utf-8'
+    );
+    const chunkJsonl = await readFile(
+      join(outputDir, 'chunks', 'semantic-chunks.jsonl'),
+      'utf-8'
+    );
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(refreshResult.stdout).toContain('Preset: swift-book');
+    expect(refreshResult.stdout).toContain('Chunk export: chunks/semantic-chunks.jsonl');
+    expect(refreshedManifest.generatedOutputs.map((output) => output.path)).toEqual([
+      'chunks/semantic-chunks.jsonl',
+      'llm-docs/swift-book-full-llms.txt',
+    ]);
+    expect(refreshedManifest.preset?.configPath).toBe(firstManifest.preset.configPath);
+    expect(refreshedManifest.preset?.defaults.filenamePrefix).toBe('swift-book');
+    expect(swiftOutput).toContain('# Swift Programming Language');
+    expect(swiftOutput).toContain('Operators can be refreshed from the manifest.');
+    expect(swiftOutput).not.toContain('tampered swift output');
+    expect(chunkJsonl).toContain('Operators can be refreshed from the manifest.');
+    expect(chunkJsonl).not.toContain('tampered');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('refreshes source-truth docs from the manifest recorded local source path', async () => {
+    const { manifestPath, outputDir, sourceDir } = await generateSourceTruthDocsFixture(
+      'llm-docs-refresh-source-truth-'
+    );
+
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      ['export const value = 2;', 'export function run() {', '  return value;', '}', ''].join(
+        '\n'
+      ),
+      'utf-8'
+    );
+    await writeFile(join(outputDir, 'source-truth.md'), '# Tampered\n', 'utf-8');
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const markdown = await readFile(join(outputDir, 'source-truth.md'), 'utf-8');
+    const report = JSON.parse(
+      await readFile(join(outputDir, 'source-truth-report.json'), 'utf-8')
+    ) as SourceTruthInspectionReport;
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(refreshResult.stdout).toContain('Mode: source-truth-local-docs');
+    expect(refreshResult.stdout).toContain('Refresh complete');
+    expect(report.facts.map((fact) => fact.exportedName)).toEqual(
+      expect.arrayContaining(['value', 'run'])
+    );
+    expect(markdown).toContain('run');
+    expect(markdown).not.toContain('# Tampered');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('refresh rejects local source docs manifests whose source is inside the output directory', async () => {
+    const dir = await mkdtemp(
+      join(await realpath(tmpdir()), 'llm-docs-refresh-source-in-output-')
+    );
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const sourcePath = join(outputDir, 'source.md');
+    const outputPath = join(outputDir, 'llm-docs', 'old.txt');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const preservedOutput = 'preserve source-docs output on refresh failure\n';
+
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(sourcePath, '# Source Inside Output\n', 'utf-8');
+    await writeFile(outputPath, preservedOutput, 'utf-8');
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'local-source-docs',
+          source: {
+            resolvedPath: sourcePath,
+            formatHint: 'markdown',
+          },
+          generatedOutputs: [],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+
+    const result = await runCliWithExit(['refresh', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'manifest source path must not be the same as, or inside, the manifest output directory'
+    );
+    expect(await readFile(outputPath, 'utf-8')).toBe(preservedOutput);
+    expect(await readFile(sourcePath, 'utf-8')).toBe('# Source Inside Output\n');
+  });
+
+  it('refresh rejects source-truth manifests whose source is inside the output directory', async () => {
+    const dir = await mkdtemp(
+      join(await realpath(tmpdir()), 'llm-docs-refresh-source-truth-in-output-')
+    );
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const sourcePath = join(outputDir, 'source.ts');
+    const reportPath = join(outputDir, 'source-truth-report.json');
+    const markdownPath = join(outputDir, 'source-truth.md');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const preservedReport = '{"preserve":true}\n';
+    const preservedMarkdown = '# Preserve Source Truth Output\n';
+
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(sourcePath, 'export const value = 1;\n', 'utf-8');
+    await writeFile(reportPath, preservedReport, 'utf-8');
+    await writeFile(markdownPath, preservedMarkdown, 'utf-8');
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'source-truth-local-docs',
+          source: {
+            resolvedPath: sourcePath,
+          },
+          generatedOutputs: [],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+
+    const result = await runCliWithExit(['refresh', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'manifest source path must not be the same as, or inside, the manifest output directory'
+    );
+    expect(await readFile(reportPath, 'utf-8')).toBe(preservedReport);
+    expect(await readFile(markdownPath, 'utf-8')).toBe(preservedMarkdown);
+    expect(await readFile(sourcePath, 'utf-8')).toBe('export const value = 1;\n');
+  });
+
+  it('refresh rejects local source docs manifests whose source is under a symlinked parent', async () => {
+    const dir = await mkdtemp(
+      join(await realpath(tmpdir()), 'llm-docs-refresh-source-link-parent-')
+    );
+    tempDirs.push(dir);
+    const actualParent = join(dir, 'actual-parent');
+    const linkedParent = join(dir, 'linked-parent');
+    const sourceDir = join(linkedParent, 'docs');
+    const outputDir = join(dir, 'output');
+    const outputPath = join(outputDir, 'llm-docs', 'old.txt');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const preservedOutput = 'preserve source-docs output after symlink-parent failure\n';
+
+    await mkdir(join(actualParent, 'docs'), { recursive: true });
+    await symlink(actualParent, linkedParent, 'dir');
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(join(actualParent, 'docs', 'index.md'), '# Linked Parent Source\n', 'utf-8');
+    await writeFile(outputPath, preservedOutput, 'utf-8');
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'local-source-docs',
+          source: {
+            resolvedPath: sourceDir,
+            formatHint: 'markdown',
+          },
+          generatedOutputs: [],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+
+    const result = await runCliWithExit(['refresh', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'manifest source path must not contain a symbolic link component'
+    );
+    expect(result.stderr).toContain(linkedParent);
+    expect(await readFile(outputPath, 'utf-8')).toBe(preservedOutput);
+  });
+
+  it('refresh rejects source-truth manifests whose source is under a symlinked parent', async () => {
+    const dir = await mkdtemp(
+      join(await realpath(tmpdir()), 'llm-docs-refresh-source-truth-link-parent-')
+    );
+    tempDirs.push(dir);
+    const actualParent = join(dir, 'actual-parent');
+    const linkedParent = join(dir, 'linked-parent');
+    const sourceDir = join(linkedParent, 'source');
+    const outputDir = join(dir, 'output');
+    const reportPath = join(outputDir, 'source-truth-report.json');
+    const markdownPath = join(outputDir, 'source-truth.md');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const preservedReport = '{"preserve":"source-truth-report"}\n';
+    const preservedMarkdown = '# Preserve Source Truth Symlink Parent Output\n';
+
+    await mkdir(join(actualParent, 'source'), { recursive: true });
+    await symlink(actualParent, linkedParent, 'dir');
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(join(actualParent, 'source', 'index.ts'), 'export const value = 1;\n', 'utf-8');
+    await writeFile(reportPath, preservedReport, 'utf-8');
+    await writeFile(markdownPath, preservedMarkdown, 'utf-8');
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'source-truth-local-docs',
+          source: {
+            resolvedPath: sourceDir,
+          },
+          generatedOutputs: [],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+
+    const result = await runCliWithExit(['refresh', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'manifest source path must not contain a symbolic link component'
+    );
+    expect(result.stderr).toContain(linkedParent);
+    expect(await readFile(reportPath, 'utf-8')).toBe(preservedReport);
+    expect(await readFile(markdownPath, 'utf-8')).toBe(preservedMarkdown);
+  });
+
+  it('refresh rejects configured SDK and discovery report manifests', async () => {
+    const configuredSdkFixture = await generateSwiftFixture();
+    const discoveryFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-'
+    );
+
+    const configuredResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      configuredSdkFixture.manifestPath,
+    ]);
+    const discoveryResult = await runCliWithExit([
+      'refresh',
+      '--output-dir',
+      discoveryFixture.outputDir,
+    ]);
+
+    expect(configuredResult.exitCode).toBe(1);
+    expect(configuredResult.stderr).toContain(
+      'refresh does not support configured-sdk manifests'
+    );
+    expect(configuredResult.stderr).toContain('local-source-docs and source-truth-local-docs');
+    expect(discoveryResult.exitCode).toBe(1);
+    expect(discoveryResult.stderr).toContain('refresh does not support discovery-report manifests');
+    expect(discoveryResult.stderr).toContain('candidate evidence');
+  });
+
+  it('refresh requires one manifest location and reports missing or malformed local manifests', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-refresh-invalid-'));
+    tempDirs.push(dir);
+    const malformedManifestPath = join(dir, 'malformed.json');
+    const invalidLocalManifestPath = join(dir, 'invalid-local.json');
+    const missingSourceManifestPath = join(dir, 'missing-source-output', 'manifest.json');
+    const missingSourceOutputPath = join(dir, 'missing-source-output', 'llm-docs', 'old.txt');
+    const missingPath = join(dir, 'missing-manifest.json');
+    const missingSourcePath = join(dir, 'missing-source');
+
+    await writeFile(malformedManifestPath, '{', 'utf-8');
+    await writeFile(
+      invalidLocalManifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'local-source-docs',
+          source: {
+            resolvedPath: 'relative/docs',
+            formatHint: 'markdown',
+          },
+          generatedOutputs: [],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+    await mkdir(dirname(missingSourceManifestPath), { recursive: true });
+    await mkdir(dirname(missingSourceOutputPath), { recursive: true });
+    await writeFile(
+      missingSourceManifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'local-source-docs',
+          source: {
+            resolvedPath: missingSourcePath,
+            formatHint: 'markdown',
+          },
+          generatedOutputs: [],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+    await writeFile(missingSourceOutputPath, 'preserve on refresh failure\n', 'utf-8');
+
+    const missingOptionResult = await runCliWithExit(['refresh']);
+    const duplicateOptionResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      malformedManifestPath,
+      '--output-dir',
+      dir,
+    ]);
+    const missingManifestResult = await runCliWithExit(['refresh', '--manifest', missingPath]);
+    const malformedManifestResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      malformedManifestPath,
+    ]);
+    const invalidLocalManifestResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      invalidLocalManifestPath,
+    ]);
+    const missingSourceResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      missingSourceManifestPath,
+    ]);
+
+    expect(missingOptionResult.exitCode).toBe(1);
+    expect(missingOptionResult.stderr).toContain('provide exactly one of --manifest or --output-dir');
+    expect(duplicateOptionResult.exitCode).toBe(1);
+    expect(duplicateOptionResult.stderr).toContain(
+      'provide exactly one of --manifest or --output-dir'
+    );
+    expect(missingManifestResult.exitCode).toBe(1);
+    expect(missingManifestResult.stderr).toContain('manifest not found');
+    expect(malformedManifestResult.exitCode).toBe(1);
+    expect(malformedManifestResult.stderr).toContain('malformed manifest JSON');
+    expect(invalidLocalManifestResult.exitCode).toBe(1);
+    expect(invalidLocalManifestResult.stderr).toContain(
+      'source.resolvedPath must be absolute'
+    );
+    expect(missingSourceResult.exitCode).toBe(1);
+    expect(missingSourceResult.stderr).toContain('manifest source path not found');
+    expect(await readFile(missingSourceOutputPath, 'utf-8')).toBe(
+      'preserve on refresh failure\n'
+    );
   });
 
   it('verifies a generated configured SDK manifest by output directory', async () => {

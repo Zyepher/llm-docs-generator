@@ -70,7 +70,7 @@ Current implementation:
 - Can opt in to source-docs semantic chunk publication with
   `generate --source ... --chunks jsonl`. This writes
   `chunks/semantic-chunks.jsonl` from the already parsed DocNode tree. It does
-  not select sources, crawl, refresh, or infer authority.
+  not select sources, crawl, or infer authority.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks,
   including generated output hashes, byte sizes, line counts, and deterministic
@@ -153,9 +153,21 @@ Current implementation:
   Markdown format defaults, `swift-book` output naming, title, neutral
   source-derived system prompt, and non-authoritative preset provenance only. It
   does not infer or append `TSPL.docc`, clone or cache repositories, select
-  sources, verify source truth, claim completeness, refresh, or perform
-  source-code verification. `--chunks jsonl` remains compatible with this
-  preset.
+  sources, verify source truth, claim completeness, or perform source-code
+  verification. `--chunks jsonl` remains compatible with this preset.
+- Can run `refresh --manifest <path>` or `refresh --output-dir <dir>` for
+  current `local-source-docs` and `source-truth-local-docs` manifests only.
+  Source-docs refresh reads the existing manifest and uses only the recorded
+  absolute local `source.resolvedPath`, `source.formatHint`, preset metadata if
+  present, and whether the previous manifest contained
+  `semantic-chunks-jsonl`; it regenerates into the manifest directory through
+  the current local source docs generator. Source-truth refresh reads the
+  existing manifest and uses only the recorded absolute local source path, then
+  regenerates through the current source-truth docs generator. Refresh does not
+  support configured SDK manifests, discovery-report manifests, URLs, repo
+  freshness, broad website crawling, source selection, source-code
+  verification, behavior validation, remote network work, or source project
+  script execution.
 - Can run `capabilities --json` to print a deterministic, machine-readable
   contract of implemented commands and planned/unsupported capabilities for
   agents. The contract has schema version `0.1.0`, package name/version
@@ -173,20 +185,23 @@ Current implementation:
   state, or perform network work.
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`, `generate --source`,
-  `generate --source --preset swift-book`, `generate --sdk`, `verify`,
-  `list-sdks`, `validate --sdk`,
+  `generate --source --preset swift-book`, `generate --sdk`, `refresh`,
+  `verify`, `list-sdks`, `validate --sdk`,
   `capabilities --json`, and read-only `agent context`.
-- Does not yet implement broad website crawling, refresh, source verification,
-  full next-generation manifests, or behavior-level source documentation from
-  code. Semantic chunking exists as a library capability for existing DocNode IR
-  and as an opt-in JSONL export for explicit `generate --source` outputs only;
-  configured SDK, source-truth docs, and discovery reports do not publish
-  semantic chunk records. Current source docs, configured SDK, source-truth
-  docs, and discovery-report manifests include partial generated-output RAG
-  metadata only (`lineCount` and `estimatedTokenCount`) plus the source-docs
-  opt-in chunk JSONL file when requested. Discovery modes are inspection
-  foundations only; they do not generate docs, choose sources, assign trust
-  scores, infer authority, or claim source truth.
+- Does not yet implement broad website crawling, configured SDK refresh,
+  discovery-report refresh, remote freshness refresh, source verification, full
+  next-generation manifests, or behavior-level source documentation from code.
+  Semantic chunking exists as a library capability for existing DocNode IR and
+  as an opt-in JSONL export for explicit `generate --source` outputs only;
+  source-docs refresh preserves that chunk JSONL output only when the existing
+  manifest recorded it. Configured SDK, source-truth docs, and discovery
+  reports do not publish semantic chunk records. Current source docs,
+  configured SDK, source-truth docs, and discovery-report manifests include
+  partial generated-output RAG metadata only (`lineCount` and
+  `estimatedTokenCount`) plus the source-docs opt-in chunk JSONL file when
+  requested. Discovery modes are inspection foundations only; they do not
+  generate docs, choose sources, assign trust scores, infer authority, or claim
+  source truth.
 - Local and repo discovery order candidates by deterministic evidence category
   and normalized path for agent review. Website discovery orders extracted
   candidate URLs by deterministic observation order and aggregates evidence from
@@ -218,10 +233,11 @@ Use this router before running commands.
 
 The workflows below describe the approved next-generation product direction.
 When using the current CLI, verify that the needed command exists first. If the
-workflow needs discovery, repo caching, refresh, source verification,
-behavior-level source documentation, or manifest data beyond the current
-source docs, configured SDK, source-truth docs, and discovery-report manifests,
-treat it as planned work unless source and tests prove it has been implemented.
+workflow needs discovery, repo caching, refresh beyond current local
+explicit-manifest source-docs/source-truth modes, source verification,
+behavior-level source documentation, or manifest data beyond the current source
+docs, configured SDK, source-truth docs, and discovery-report manifests, treat
+it as planned work unless source and tests prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -356,12 +372,19 @@ User signals:
 Agent workflow:
 
 1. Read the prior manifest if available.
-2. Re-resolve source URL, repo, path, branch, tag, or commit.
-3. Compare old source identity against current source identity.
-4. If user pinned a version, stay pinned.
-5. If user requested latest, fetch remote metadata and compare.
-6. Regenerate only when source hash, commit, or parser output changes.
-7. Report what changed.
+2. If the manifest mode is `local-source-docs`, the current CLI can run
+   `llm-docs refresh --manifest <path>` or `--output-dir <dir>` and will use
+   only the recorded local source path, format hint, preset metadata if present,
+   and prior chunk-output presence.
+3. If the manifest mode is `source-truth-local-docs`, the current CLI can run
+   `llm-docs refresh --manifest <path>` or `--output-dir <dir>` and will use
+   only the recorded local source path.
+4. If the manifest is `configured-sdk`, `discovery-report`, URL/repo/website,
+   or requires freshness/source-code verification, treat refresh as planned and
+   unsupported in the CLI.
+5. For future remote/freshness workflows, re-resolve source URL, repo, path,
+   branch, tag, or commit as the agent, respect pinned versions, and report
+   what changed before regenerating.
 
 ### Intent 5: Maintain Or Extend This Tool
 
@@ -598,8 +621,17 @@ discovery-report manifests, it checks `discovery-report.json` existence, hash,
 byte size, line count, deterministic estimated token count, and basic report
 schema/mode/kind/count consistency. It does not perform refresh, repo freshness
 verification, source-code verification, candidate selection, task-fit judgment,
-source truth resolution, or behavior validation. Future implementations should
-extend manifest coverage to the broader provenance fields above.
+source truth resolution, or behavior validation. The current `refresh` command
+supports only `local-source-docs` and `source-truth-local-docs` manifests that
+already record an absolute local source path. It regenerates into the existing
+manifest directory, preserves source-docs chunk JSONL output only when the
+previous manifest recorded `semantic-chunks-jsonl`, and preserves source-docs
+preset metadata when present. It does not refresh configured SDK manifests,
+discovery reports, URLs, repos, websites, remote freshness, source-code
+verification, task-fit decisions, source truth resolution, or behavior
+validation. It performs no remote network work and runs no source project
+scripts. Future implementations should extend manifest coverage to the broader
+provenance fields above.
 
 ## Clarifying Questions
 
