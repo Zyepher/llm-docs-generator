@@ -758,6 +758,43 @@ async function generateSourceDocsFixture(): Promise<{
   };
 }
 
+async function generateSourceTruthDocsFixture(prefix = 'llm-docs-source-truth-verify-'): Promise<{
+  sourceDir: string;
+  outputDir: string;
+  manifestPath: string;
+  manifest: SourceTruthDocsManifest;
+}> {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), prefix));
+  tempDirs.push(dir);
+  const sourceDir = join(dir, 'source');
+  const outputDir = join(dir, 'source-truth-docs');
+  const manifestPath = join(outputDir, 'manifest.json');
+
+  await mkdir(sourceDir, { recursive: true });
+  await writeFile(join(sourceDir, 'index.ts'), 'export const value = 1;\n', 'utf-8');
+  await writeFile(
+    join(sourceDir, 'package.json'),
+    ['{', '  "name": "source-truth-fixture",', '  "version": "1.0.0"', '}', ''].join('\n'),
+    'utf-8'
+  );
+
+  await runCli([
+    'source-truth',
+    'generate',
+    '--source',
+    sourceDir,
+    '--output-dir',
+    outputDir,
+  ]);
+
+  return {
+    sourceDir,
+    outputDir,
+    manifestPath,
+    manifest: JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceTruthDocsManifest,
+  };
+}
+
 async function createSourceDiscoveryVerifyFixture(prefix = 'llm-docs-discovery-verify-'): Promise<{
   dir: string;
   sourceDir: string;
@@ -801,6 +838,29 @@ async function refreshDiscoveryManifestReportMetadata(
   output.hash = await sha256File(reportPath);
   output.lineCount = countTextLines(reportText);
   output.estimatedTokenCount = estimateTextTokens(reportText);
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+  return manifest;
+}
+
+async function refreshSourceTruthReportOutputMetadata(
+  manifestPath: string,
+  reportPath: string
+): Promise<SourceTruthDocsManifest> {
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceTruthDocsManifest;
+  const reportText = await readFile(reportPath, 'utf-8');
+  const reportOutput = manifest.generatedOutputs.find(
+    (output) => output.kind === 'source-truth-report-json'
+  );
+
+  if (reportOutput === undefined) {
+    throw new Error('expected source-truth report output metadata');
+  }
+
+  reportOutput.byteSize = await byteSize(reportPath);
+  reportOutput.hash = await sha256File(reportPath);
+  reportOutput.lineCount = countTextLines(reportText);
+  reportOutput.estimatedTokenCount = estimateTextTokens(reportText);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
   return manifest;
@@ -1171,6 +1231,7 @@ describe('CLI compatibility behavior', () => {
       'verify-discovery-report',
       'verify-configured-sdk',
       'verify-source-docs',
+      'verify-source-truth-docs',
       'list-sdks',
       'validate-sdk',
     ]);
@@ -1298,6 +1359,20 @@ describe('CLI compatibility behavior', () => {
         'no source-code verification',
       ])
     );
+    expect(implemented.get('verify-source-truth-docs')).toMatchObject({
+      command: 'verify',
+      mode: 'verify --manifest or verify --output-dir',
+      status: 'implemented',
+      inputBoundary: 'source-truth-local-docs manifest.json',
+      outputFiles: ['stdout verification result'],
+      limitations: expect.arrayContaining([
+        'source-truth-local-docs manifest mode only',
+        'no refresh',
+        'no repo freshness check',
+        'no source-code verification',
+        'no behavior inference',
+      ]),
+    });
     expect(planned.has('generate-source')).toBe(false);
     expect(planned.get('generate-preset-additional')?.reason).toBe(
       'only --preset swift-book over an explicit local --source path is implemented; additional presets remain planned'
@@ -1384,7 +1459,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 14');
+    expect(stdout).toContain('Implemented modes: 15');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
@@ -5444,6 +5519,23 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).toContain('Verification passed');
   });
 
+  it('verifies a generated source-truth docs manifest by output directory and manifest path', async () => {
+    const { outputDir, manifestPath, manifest } = await generateSourceTruthDocsFixture();
+
+    const outputDirResult = await runCli(['verify', '--output-dir', outputDir]);
+    const manifestResult = await runCli(['verify', '--manifest', manifestPath]);
+    const expectedCheckedFiles = manifest.sourceFiles.length + manifest.generatedOutputs.length;
+
+    expect(outputDirResult.stdout).toContain('Manifest verification');
+    expect(outputDirResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
+    expect(outputDirResult.stdout).toContain('Failures: 0');
+    expect(outputDirResult.stdout).toContain('Verification passed');
+    expect(manifestResult.stdout).toContain('Manifest verification');
+    expect(manifestResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
+    expect(manifestResult.stdout).toContain('Failures: 0');
+    expect(manifestResult.stdout).toContain('Verification passed');
+  });
+
   it('verifies a source discovery manifest and rejects a tampered report', async () => {
     const { outputDir, reportPath } = await createSourceDiscoveryVerifyFixture();
 
@@ -5682,6 +5774,200 @@ describe('CLI compatibility behavior', () => {
     );
     expect(result.stderr).toContain('line count mismatch');
     expect(result.stderr).toContain('estimated token count mismatch');
+  });
+
+  it('reports source-truth docs generated output drift', async () => {
+    const { manifestPath, outputDir, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-output-drift-'
+    );
+    const outputFile = manifest.generatedOutputs.find(
+      (output) => output.kind === 'source-truth-markdown'
+    );
+
+    if (outputFile === undefined) {
+      throw new Error('expected source-truth markdown output');
+    }
+
+    await writeFile(join(outputDir, outputFile.path), '# Drifted Source Truth\n', 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain(`output ${outputFile.path}`);
+    expect(result.stderr).toContain('hash mismatch');
+    expect(result.stderr).toContain('line count mismatch');
+    expect(result.stderr).toContain('estimated token count mismatch');
+  });
+
+  it('reports source-truth docs source drift and missing source files', async () => {
+    const { manifestPath, sourceDir, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-source-drift-'
+    );
+    const sourceFile = manifest.sourceFiles.find((file) => file.path === 'index.ts');
+    const missingFile = manifest.sourceFiles.find((file) => file.path === 'package.json');
+
+    if (sourceFile === undefined || missingFile === undefined) {
+      throw new Error('expected generated source-truth fixture source files');
+    }
+
+    await writeFile(join(sourceDir, sourceFile.path), 'export const value = 2;\n', 'utf-8');
+    await rm(join(sourceDir, missingFile.path), { force: true });
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain('sourceFiles[0]');
+    expect(result.stderr).toContain('hash mismatch');
+    expect(result.stderr).toContain('sourceFiles[1]: missing file');
+  });
+
+  it('rejects source-truth report versus manifest count drift', async () => {
+    const { manifestPath, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-report-count-'
+    );
+    const sourceFile = manifest.sourceFiles[0];
+
+    if (sourceFile === undefined) {
+      throw new Error('expected source-truth manifest source file');
+    }
+
+    sourceFile.exportFactCount += 1;
+    sourceFile.factCount += 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain('source-truth report: export fact count mismatch');
+    expect(result.stderr).toContain(
+      'source-truth report: sourceFiles[0].factCount mismatch'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects malformed source-truth inspection schema and traversal shape', async () => {
+    const { manifestPath, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-inspection-shape-'
+    );
+    const inspection = manifest.inspection as unknown as Record<string, unknown>;
+    const traversal = manifest.inspection.traversal as unknown as Record<string, unknown>;
+
+    inspection.schemaVersion = '99.0.0';
+    inspection.mode = 'source-truth-local-docs';
+    traversal.maxFiles = 'many';
+    traversal.skippedDirectoryNames = 'node_modules';
+    traversal.truncated = 'false';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'inspection.schemaVersion must be 0.1.0'
+    );
+    expect(result.stderr).toContain(
+      'inspection.mode must be source-truth-local-evidence'
+    );
+    expect(result.stderr).toContain('inspection.traversal.maxFiles must be a non-negative integer');
+    expect(result.stderr).toContain(
+      'inspection.traversal.skippedDirectoryNames must be an array of strings'
+    );
+    expect(result.stderr).toContain('inspection.traversal.truncated must be a boolean');
+  });
+
+  it('rejects source-truth source and output symlinked ancestor directories', async () => {
+    const sourceAncestorFixture = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-source-ancestor-'
+    );
+    const sourceParentLink = join(dirname(sourceAncestorFixture.sourceDir), 'linked-source-parent');
+    const linkedSourceDir = join(sourceParentLink, basename(sourceAncestorFixture.sourceDir));
+    const sourceAncestorReportPath = join(
+      sourceAncestorFixture.outputDir,
+      'source-truth-report.json'
+    );
+
+    await symlink(dirname(sourceAncestorFixture.sourceDir), sourceParentLink, 'dir');
+
+    sourceAncestorFixture.manifest.source.input = linkedSourceDir;
+    sourceAncestorFixture.manifest.source.resolvedPath = linkedSourceDir;
+
+    for (const sourceFile of sourceAncestorFixture.manifest.sourceFiles) {
+      sourceFile.resolvedPath = join(linkedSourceDir, sourceFile.path);
+    }
+
+    const sourceAncestorReport = JSON.parse(
+      await readFile(sourceAncestorReportPath, 'utf-8')
+    ) as SourceTruthInspectionReport;
+    sourceAncestorReport.source.input = linkedSourceDir;
+    sourceAncestorReport.source.resolvedPath = linkedSourceDir;
+
+    for (const reportFile of sourceAncestorReport.files) {
+      reportFile.resolvedPath = join(linkedSourceDir, reportFile.path);
+    }
+
+    await writeFile(
+      sourceAncestorReportPath,
+      `${JSON.stringify(sourceAncestorReport, null, 2)}\n`,
+      'utf-8'
+    );
+    await writeFile(
+      sourceAncestorFixture.manifestPath,
+      `${JSON.stringify(sourceAncestorFixture.manifest, null, 2)}\n`,
+      'utf-8'
+    );
+    await refreshSourceTruthReportOutputMetadata(
+      sourceAncestorFixture.manifestPath,
+      sourceAncestorReportPath
+    );
+
+    const sourceResult = await runCliWithExit([
+      'verify',
+      '--manifest',
+      sourceAncestorFixture.manifestPath,
+    ]);
+
+    expect(sourceResult.exitCode).toBe(1);
+    expect(sourceResult.stdout).toContain('Checked files: 0');
+    expect(sourceResult.stderr).toContain('source: symbolic links are not allowed in path');
+    expect(sourceResult.stderr).toContain(sourceParentLink);
+    expect(sourceResult.stderr).not.toContain('hash mismatch');
+
+    const outputAncestorFixture = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-output-ancestor-'
+    );
+    const outputParentLink = join(dirname(outputAncestorFixture.outputDir), 'linked-output-parent');
+    const linkedManifestPath = join(
+      outputParentLink,
+      basename(outputAncestorFixture.outputDir),
+      'manifest.json'
+    );
+
+    await symlink(dirname(outputAncestorFixture.outputDir), outputParentLink, 'dir');
+
+    const outputResult = await runCliWithExit(['verify', '--manifest', linkedManifestPath]);
+
+    expect(outputResult.exitCode).toBe(1);
+    expect(outputResult.stdout).toContain(
+      `Checked files: ${
+        outputAncestorFixture.manifest.sourceFiles.length +
+        outputAncestorFixture.manifest.generatedOutputs.length
+      }`
+    );
+    expect(outputResult.stderr).toContain(
+      'output source-truth-report.json: symbolic links are not allowed in path'
+    );
+    expect(outputResult.stderr).toContain(outputParentLink);
+    expect(outputResult.stderr).not.toContain('hash mismatch');
   });
 
   it('verifies a relative source path from the manifest directory across cwd changes', async () => {
@@ -6001,6 +6287,100 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(`output ${outputFile.path}: symbolic links are not allowed`);
     expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects malformed, escaping, and symlinked source-truth manifest paths', async () => {
+    const pathFixture = await generateSourceTruthDocsFixture('llm-docs-source-truth-paths-');
+    const pathSourceFile = pathFixture.manifest.sourceFiles[0];
+    const pathOutputFile = pathFixture.manifest.generatedOutputs[0];
+
+    if (pathSourceFile === undefined || pathOutputFile === undefined) {
+      throw new Error('expected source-truth manifest files');
+    }
+
+    pathSourceFile.path = '../outside.ts';
+    pathOutputFile.path = join(dirname(pathFixture.outputDir), 'absolute-output.json');
+    pathOutputFile.kind = 'llm-docs';
+    await writeFile(
+      pathFixture.manifestPath,
+      `${JSON.stringify(pathFixture.manifest, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const pathResult = await runCliWithExit(['verify', '--manifest', pathFixture.manifestPath]);
+
+    expect(pathResult.exitCode).toBe(1);
+    expect(pathResult.stdout).toContain('Checked files: 0');
+    expect(pathResult.stderr).toContain('sourceFiles[0].path escapes source root');
+    expect(pathResult.stderr).toContain('output[0].path must be relative');
+    expect(pathResult.stderr).toContain(
+      'kind must be source-truth-report-json or source-truth-markdown'
+    );
+
+    const sourceLinkFixture = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-source-link-'
+    );
+    const sourceLinkFile = sourceLinkFixture.manifest.sourceFiles[0];
+    const outsideSourcePath = join(dirname(sourceLinkFixture.sourceDir), 'outside.ts');
+    const sourceLinkPath = join(sourceLinkFixture.sourceDir, 'link.ts');
+
+    if (sourceLinkFile === undefined) {
+      throw new Error('expected source-truth manifest source file');
+    }
+
+    await writeFile(outsideSourcePath, 'export const outside = true;\n', 'utf-8');
+    await symlink(outsideSourcePath, sourceLinkPath, 'file');
+
+    sourceLinkFile.path = 'link.ts';
+    sourceLinkFile.resolvedPath = sourceLinkPath;
+    sourceLinkFile.byteSize = await byteSize(outsideSourcePath);
+    sourceLinkFile.hash = await sha256File(outsideSourcePath);
+    await writeFile(
+      sourceLinkFixture.manifestPath,
+      `${JSON.stringify(sourceLinkFixture.manifest, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const sourceLinkResult = await runCliWithExit([
+      'verify',
+      '--manifest',
+      sourceLinkFixture.manifestPath,
+    ]);
+
+    expect(sourceLinkResult.exitCode).toBe(1);
+    expect(sourceLinkResult.stderr).toContain('sourceFiles[0]: symbolic links are not allowed');
+    expect(sourceLinkResult.stderr).not.toContain('hash mismatch');
+
+    const outputLinkFixture = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-output-link-'
+    );
+    const outputLinkFile = outputLinkFixture.manifest.generatedOutputs.find(
+      (output) => output.kind === 'source-truth-markdown'
+    );
+
+    if (outputLinkFile === undefined) {
+      throw new Error('expected source-truth markdown output');
+    }
+
+    const outputPath = join(outputLinkFixture.outputDir, outputLinkFile.path);
+    const outsideOutputPath = join(dirname(outputLinkFixture.outputDir), 'outside-output.md');
+    const originalOutput = await readFile(outputPath, 'utf-8');
+
+    await writeFile(outsideOutputPath, originalOutput, 'utf-8');
+    await rm(outputPath, { force: true });
+    await symlink(outsideOutputPath, outputPath, 'file');
+
+    const outputLinkResult = await runCliWithExit([
+      'verify',
+      '--manifest',
+      outputLinkFixture.manifestPath,
+    ]);
+
+    expect(outputLinkResult.exitCode).toBe(1);
+    expect(outputLinkResult.stderr).toContain(
+      `output ${outputLinkFile.path}: symbolic links are not allowed`
+    );
+    expect(outputLinkResult.stderr).not.toContain('hash mismatch');
   });
 
   it('rejects invalid generated output kinds before checking files', async () => {

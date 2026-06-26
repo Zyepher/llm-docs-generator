@@ -304,8 +304,8 @@ Current capabilities contract scope:
   explicit local `generate --source` with parser hints and optional
   `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
-  `--format openref-0.1`, configured SDK, source-docs, and discovery-report
-  `verify`, `list-sdks`, and `validate --sdk`.
+  `--format openref-0.1`, configured SDK, source-docs, source-truth docs, and
+  discovery-report `verify`, `list-sdks`, and `validate --sdk`.
 - Planned/unsupported entries include additional `generate --preset` names,
   `refresh`, source-code verification for official docs, broad website
   crawling, automatic source selection, framework/route understanding,
@@ -415,14 +415,18 @@ Current explicit local source docs generation scope:
   byte sizes, line counts, deterministic estimated token counts, output
   kind/name metadata, and warnings. Opt-in chunk JSONL is recorded as a
   generated text output with kind `semantic-chunks-jsonl`.
-- `verify` supports current `configured-sdk`, `local-source-docs`, and
-  `discovery-report` manifests. Discovery-report verification checks
-  `discovery-report.json` existence, hash, byte size, line count,
-  deterministic estimated token count, and basic report schema/mode/kind/count
-  consistency only; it does not choose candidates, validate task fit, claim
-  source truth, refresh repos or websites, or perform source-code verification.
-  Source-docs verification checks source files and all generated text outputs,
-  including opt-in chunk JSONL when present.
+- `verify` supports current `configured-sdk`, `local-source-docs`,
+  `source-truth-local-docs`, and `discovery-report` manifests.
+  Discovery-report verification checks `discovery-report.json` existence, hash,
+  byte size, line count, deterministic estimated token count, and basic report
+  schema/mode/kind/count consistency only; it does not choose candidates,
+  validate task fit, claim source truth, refresh repos or websites, or perform
+  source-code verification. Source-docs verification checks source files and
+  all generated text outputs, including opt-in chunk JSONL when present.
+  Source-truth docs verification checks deterministic source-truth manifest
+  shape, source/source-file integrity, generated output integrity, symlink/path
+  containment, inspection basics, and raw report count consistency; it does not
+  infer behavior or perform source-code verification.
 
 Current OpenAPI / Swagger parser scope:
 
