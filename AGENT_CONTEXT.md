@@ -97,7 +97,8 @@ Current implementation:
 - Can run `discover --source <local-file-or-directory>` for explicit local,
   bounded inspection and write `discovery-report.json` plus a discovery-report
   `manifest.json` with candidate file hints, deterministic evidence categories
-  and signals, report order, hashes, traversal settings, and warnings.
+  and signals, report order, hashes, traversal settings, warnings, and a compact
+  content-free `candidateEvidenceIndex` derived from `discovery-report.json`.
 - Can run `discover --repo <git-url-or-local-git-repo>` with optional
   `--scope <path>`, `--cache-dir <dir>`, and `--output-dir <dir>` for a bounded
   repo inspection report. Repo mode clones missing repos into a stable cache
@@ -113,7 +114,8 @@ Current implementation:
   report records inspected resources, response status/content type/byte counts,
   crawl policy, extracted candidate URLs, source resource provenance, and
   warnings. Successful repo and URL discovery also write discovery-report
-  manifests beside `discovery-report.json`.
+  manifests beside `discovery-report.json` with compact content-free
+  `candidateEvidenceIndex` metadata derived from the report.
 - Can run `source-truth inspect --source <local-file-or-directory>` for an
   explicit local source path and print a deterministic JSON evidence report to
   stdout. The report uses bounded traversal, does not follow symlinks, skips
@@ -205,10 +207,11 @@ Current implementation:
   reports do not publish semantic chunk records. Current source docs,
   configured SDK, source-truth docs, and discovery-report manifests include
   partial generated-output RAG metadata only (`lineCount` and
-  `estimatedTokenCount`) plus source-docs opt-in chunk JSONL file metadata and
-  compact chunk indexes when requested. Discovery modes are inspection
-  foundations only; they do not generate docs, choose sources, assign trust
-  scores, infer authority, or claim source truth.
+  `estimatedTokenCount`) plus source-docs opt-in chunk JSONL file metadata,
+  compact chunk indexes when requested, and compact content-free discovery
+  candidate evidence indexes. Discovery modes are inspection foundations only;
+  they do not generate docs, choose sources, assign trust scores, infer
+  authority, or claim source truth.
 - Local and repo discovery order candidates by deterministic evidence category
   and normalized path for agent review. Website discovery orders extracted
   candidate URLs by deterministic observation order and aggregates evidence from
@@ -609,8 +612,9 @@ source details, hashes, parser and formatter metadata, generated file hashes,
 byte sizes, line counts, and deterministic estimated token counts. The current
 discovery commands write a scoped `manifest.json` beside `discovery-report.json`
 with discovery kind, report path, report schema/mode, factual counts, and
-report file hash, byte size, line count, and deterministic estimated token
-count. The current `verify` command supports `configured-sdk`,
+report file hash, byte size, line count, deterministic estimated token count,
+and compact content-free candidate evidence index metadata derived from the
+report. The current `verify` command supports `configured-sdk`,
 `local-source-docs`, `source-truth-local-docs`, and `discovery-report`
 manifests.
 For configured SDK manifests, it checks source and generated output hashes and
@@ -629,9 +633,12 @@ counts, symlink rejection, inspection schema/mode/traversal shape, and count
 consistency with `source-truth-report.json` when available. For
 discovery-report manifests, it checks `discovery-report.json` existence, hash,
 byte size, line count, deterministic estimated token count, and basic report
-schema/mode/kind/count consistency. It does not perform refresh, repo freshness
-verification, source-code verification, candidate selection, task-fit judgment,
-source truth resolution, or behavior validation. The current `refresh` command
+schema/mode/kind/count consistency. When optional candidate evidence index
+metadata is present, it rebuilds that metadata from `discovery-report.json` and
+fails on malformed or stale index data. It does not perform refresh, repo
+freshness verification, source-code verification, candidate selection, task-fit
+judgment, source truth resolution, or behavior validation. The current
+`refresh` command
 supports only `local-source-docs` and `source-truth-local-docs` manifests that
 already record an absolute local source path. It regenerates into the existing
 manifest directory, preserves source-docs chunk JSONL output only when the

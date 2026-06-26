@@ -57,8 +57,9 @@ Current implemented capabilities include:
   workspace
 - bounded website inspection from provided URLs, the same-origin `/llms.txt`,
   and the same-origin `/sitemap.xml`
-- candidate reports with deterministic evidence, warnings, skipped paths, and
-  discovery report integrity manifests
+- candidate reports with deterministic evidence, warnings, skipped paths,
+  discovery report integrity manifests, and compact content-free candidate
+  evidence indexes
 - parsers for OpenRef, OpenAPI/Swagger, Markdown, MDX, RST, DocC, and HTML
   fallback extraction from explicit local sources
 - agent-optimized Markdown output for explicit local source generation
@@ -189,9 +190,10 @@ hashes and byte sizes, generated output hashes, byte sizes, line counts,
 deterministic estimated token counts, symlink/path containment, and count
 consistency with `source-truth-report.json` when available. Discovery-report
 verification checks `discovery-report.json` existence, hash, byte size, line
-count, estimated token count, and basic report schema/mode/kind/count
-consistency. It does not judge candidate authority, task fit, source truth,
-freshness, source-code behavior, or runtime behavior.
+count, estimated token count, basic report schema/mode/kind/count consistency,
+and optional content-free candidate evidence index metadata against the report.
+It does not judge candidate authority, task fit, source truth, freshness,
+source-code behavior, or runtime behavior.
 
 Refresh currently supports only existing `local-source-docs` and
 `source-truth-local-docs` manifests. For source docs, it reads the manifest,

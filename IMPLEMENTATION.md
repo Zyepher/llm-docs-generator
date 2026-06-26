@@ -278,18 +278,22 @@ Current discovery scope:
   directory, writes `discovery-report.json` plus a discovery-report
   `manifest.json`, and reports candidate file hints, deterministic evidence
   categories and signals, report order, byte sizes, hashes, traversal bounds,
-  skipped generated directories, and warnings.
+  skipped generated directories, warnings, and a compact content-free
+  `candidateEvidenceIndex` derived from `discovery-report.json`.
 - `llm-docs discover --repo <git-url-or-local-git-repo>` clones or reuses an
   explicit git repo in a cache, optionally inspects repo-relative
   `--scope <path>`, and writes `discovery-report.json` plus a discovery-report
   `manifest.json` with repo input, cache path, commit, dirty state, traversal
-  settings, candidates, and warnings.
+  settings, candidates, warnings, and a compact content-free
+  `candidateEvidenceIndex` derived from `discovery-report.json`.
 - `llm-docs discover --url <http-or-https-url>` inspects one explicit URL plus
   same-origin root `/llms.txt` and `/sitemap.xml`. It writes
   `discovery-report.json` plus a discovery-report `manifest.json` with website
   input, normalized URL, inspected resources, status/content type/byte counts,
   truncation flags, crawl policy, candidate URLs, evidence/provenance, and
-  warnings. It does not fetch linked candidates or render JavaScript.
+  warnings. The manifest includes a compact content-free
+  `candidateEvidenceIndex` derived from `discovery-report.json`. It does not
+  fetch linked candidates or render JavaScript.
 
 Discovery does not generate docs, crawl linked website candidates, choose
 candidates, assign trust scores, infer authority, claim source truth, or
@@ -327,7 +331,9 @@ Current capabilities contract scope:
 - Generated-output manifest metadata is currently partial: source docs,
   configured SDK, source-truth docs, and discovery-report manifests record
   `lineCount` and deterministic `estimatedTokenCount` for explicit generated
-  or report files. Source docs can additionally publish opt-in
+  or report files. Discovery-report manifests additionally record compact
+  content-free candidate evidence indexes derived only from
+  `discovery-report.json`. Source docs can additionally publish opt-in
   `chunks/semantic-chunks.jsonl` records for explicit `generate --source`
   outputs plus compact manifest chunk indexes derived only from those JSONL
   records. Source-docs refresh preserves that output and regenerates the index
@@ -435,7 +441,9 @@ Current explicit local source docs generation scope:
   `source-truth-local-docs`, and `discovery-report` manifests.
   Discovery-report verification checks `discovery-report.json` existence, hash,
   byte size, line count, deterministic estimated token count, and basic report
-  schema/mode/kind/count consistency only; it does not choose candidates,
+  schema/mode/kind/count consistency. When optional candidate evidence index
+  metadata is present, verification rebuilds it from `discovery-report.json`
+  and fails on malformed or stale index data; it does not choose candidates,
   validate task fit, claim source truth, refresh repos or websites, or perform
   source-code verification. Source-docs verification checks source files and
   all generated text outputs, including opt-in chunk JSONL when present. When a

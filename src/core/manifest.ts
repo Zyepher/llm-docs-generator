@@ -31,6 +31,53 @@ const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS = new Set<GeneratedOutputKind>([
 const DISCOVERY_REPORT_SCHEMA_VERSION = '0.2.0';
 const DISCOVERY_REPORT_OUTPUT_KIND = 'discovery-report';
 const DISCOVERY_REPORT_GENERATED_OUTPUT_KINDS = new Set([DISCOVERY_REPORT_OUTPUT_KIND]);
+const DISCOVERY_CANDIDATE_EVIDENCE_INDEX_HASH_SEED =
+  'llm-docs-generator:discovery-candidate-evidence-index:v1\n';
+const DISCOVERY_CANDIDATE_EVIDENCE_INDEX_KEYS = new Set([
+  'candidateCount',
+  'aggregateHash',
+  'context',
+  'candidates',
+]);
+const DISCOVERY_CANDIDATE_EVIDENCE_CONTEXT_KEYS_BY_KIND: Record<
+  DiscoveryReportKind,
+  ReadonlySet<string>
+> = {
+  source: new Set(['source']),
+  repo: new Set(['repo', 'scope']),
+  url: new Set(['website', 'crawlPolicy']),
+};
+const DISCOVERY_SOURCE_CONTEXT_KEYS = new Set(['input', 'resolvedPath', 'type']);
+const DISCOVERY_REPO_CONTEXT_KEYS = new Set(['input', 'normalizedInput', 'commit', 'dirty']);
+const DISCOVERY_REPO_SCOPE_CONTEXT_KEYS = new Set(['input', 'path', 'resolvedPath', 'type']);
+const DISCOVERY_WEBSITE_CONTEXT_KEYS = new Set(['input', 'normalizedUrl', 'origin']);
+const DISCOVERY_WEBSITE_CRAWL_POLICY_CONTEXT_KEYS = new Set([
+  'linkedCandidateFetches',
+  'renderedJavaScript',
+  'inspectedResourceCount',
+  'sameOriginWellKnownResourceCount',
+]);
+const DISCOVERY_PATH_CANDIDATE_EVIDENCE_INDEX_CANDIDATE_KEYS = new Set([
+  'path',
+  'order',
+  'kind',
+  'format',
+  'hints',
+  'formatHints',
+  'evidence',
+  'byteSize',
+  'sha256',
+]);
+const DISCOVERY_URL_CANDIDATE_EVIDENCE_INDEX_CANDIDATE_KEYS = new Set([
+  'url',
+  'order',
+  'evidence',
+  'sameOrigin',
+  'external',
+  'sourceResources',
+]);
+const DISCOVERY_CANDIDATE_EVIDENCE_KEYS = new Set(['category', 'signals', 'relations', 'flags']);
+const DISCOVERY_CANDIDATE_SOURCE_RESOURCE_KEYS = new Set(['url', 'sourceRole', 'evidence']);
 const SOURCE_TRUTH_REPORT_SCHEMA_VERSION = '0.1.0';
 const SOURCE_TRUTH_INSPECTION_MODE = 'source-truth-local-evidence';
 const SOURCE_TRUTH_REPORT_OUTPUT_KIND = 'source-truth-report-json';
@@ -166,6 +213,79 @@ export interface WriteDiscoveryReportManifestOptions {
   report: unknown;
 }
 
+interface DiscoveryCandidateEvidenceIndex {
+  candidateCount: number;
+  aggregateHash: string;
+  context: DiscoveryCandidateEvidenceContext;
+  candidates: DiscoveryCandidateEvidenceIndexCandidate[];
+}
+
+type DiscoveryCandidateEvidenceContext =
+  | {
+      source: {
+        input: string;
+        resolvedPath: string;
+        type: string;
+      };
+    }
+  | {
+      repo: {
+        input: string;
+        normalizedInput: string;
+        commit: string | null;
+        dirty: boolean | null;
+      };
+      scope: {
+        input: string;
+        path: string;
+        resolvedPath: string;
+        type: string;
+      };
+    }
+  | {
+      website: {
+        input: string;
+        normalizedUrl: string;
+        origin: string;
+      };
+      crawlPolicy: {
+        linkedCandidateFetches: false;
+        renderedJavaScript: false;
+        inspectedResourceCount: number;
+        sameOriginWellKnownResourceCount: number;
+      };
+    };
+
+interface DiscoveryCandidateEvidenceIndexCandidate {
+  path?: string;
+  url?: string;
+  order: number;
+  kind?: string;
+  format?: string;
+  hints?: string[];
+  formatHints?: string[];
+  evidence: {
+    category?: string;
+    signals?: string[];
+    relations?: string[];
+    flags?: string[];
+  };
+  byteSize?: number;
+  sha256?: string;
+  sameOrigin?: boolean;
+  external?: boolean;
+  sourceResources?: Array<{
+    url: string;
+    sourceRole: string;
+    evidence: string;
+  }>;
+}
+
+type DiscoveryCandidateEvidenceIndexHashData = Omit<
+  DiscoveryCandidateEvidenceIndex,
+  'aggregateHash'
+>;
+
 export async function writeGenerationManifest(
   options: WriteGenerationManifestOptions
 ): Promise<void> {
@@ -216,7 +336,12 @@ export async function writeDiscoveryReportManifest(
   options: WriteDiscoveryReportManifestOptions
 ): Promise<void> {
   const manifestDir = dirname(options.manifestPath);
-  const reportSummary = summarizeDiscoveryReport(options.discoveryKind, options.report);
+  const report = await readDiscoveryReportJson(options.reportPath);
+  const reportSummary = summarizeDiscoveryReport(options.discoveryKind, report);
+  const candidateEvidenceIndex = buildDiscoveryCandidateEvidenceIndex(
+    options.discoveryKind,
+    report
+  );
   const reportFile = await describeGeneratedTextOutput(options.reportPath);
   const reportPath = toManifestRelativePath(manifestDir, options.reportPath);
   const discovery = {
@@ -235,6 +360,7 @@ export async function writeDiscoveryReportManifest(
     generator: options.generator,
     mode: DISCOVERY_REPORT_MODE,
     discovery,
+    candidateEvidenceIndex,
     generatedOutputs: [
       {
         path: reportPath,
@@ -331,6 +457,7 @@ async function verifyDiscoveryReportManifest(
   const manifestDir = dirname(manifestPath);
   const generator = manifest.generator;
   const discovery = manifest.discovery;
+  const candidateEvidenceIndex = manifest.candidateEvidenceIndex;
   const generatedOutputs = manifest.generatedOutputs;
 
   if (!isObjectRecord(generator)) {
@@ -365,6 +492,14 @@ async function verifyDiscoveryReportManifest(
   const candidateCount = discoveryRecord.candidateCount;
   const warningCount = discoveryRecord.warningCount;
   const urlResourceCount = discoveryRecord.urlResourceCount;
+  const candidateEvidenceIndexEntry =
+    candidateEvidenceIndex === undefined || !isDiscoveryReportKind(discoveryKind)
+      ? undefined
+      : validateDiscoveryCandidateEvidenceIndex({
+          index: candidateEvidenceIndex,
+          discoveryKind,
+          failures,
+        });
 
   if (!isDiscoveryReportKind(discoveryKind)) {
     failures.push('malformed manifest: discovery.kind must be source, repo, or url');
@@ -428,7 +563,9 @@ async function verifyDiscoveryReportManifest(
     }
 
     if (outputRecord.kind !== DISCOVERY_REPORT_OUTPUT_KIND) {
-      failures.push(`malformed manifest: generatedOutputs[0].kind must be ${DISCOVERY_REPORT_OUTPUT_KIND}`);
+      failures.push(
+        `malformed manifest: generatedOutputs[0].kind must be ${DISCOVERY_REPORT_OUTPUT_KIND}`
+      );
     }
   }
 
@@ -469,6 +606,7 @@ async function verifyDiscoveryReportManifest(
       manifestDir,
       reportPath: resolve(manifestDir, reportPath),
       expected: expectedReport,
+      candidateEvidenceIndex: candidateEvidenceIndexEntry,
       failures,
     });
   }
@@ -902,6 +1040,16 @@ interface DiscoveryReportSummary {
   urlResourceCount?: number;
 }
 
+async function readDiscoveryReportJson(reportPath: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+  } catch (error) {
+    throw new Error(
+      `discovery report must be readable JSON before writing manifest: ${errorMessage(error)}`
+    );
+  }
+}
+
 function summarizeDiscoveryReport(
   discoveryKind: DiscoveryReportKind,
   report: unknown
@@ -958,6 +1106,435 @@ function summarizeDiscoveryReport(
   };
 }
 
+function buildDiscoveryCandidateEvidenceIndex(
+  discoveryKind: DiscoveryReportKind,
+  report: unknown
+): DiscoveryCandidateEvidenceIndex {
+  if (!isObjectRecord(report)) {
+    throw new Error('discovery report must be an object before writing candidate evidence index');
+  }
+
+  const candidates = report.candidates;
+
+  if (!Array.isArray(candidates)) {
+    throw new Error(
+      'discovery report candidates must be an array before writing candidate evidence index'
+    );
+  }
+
+  const context = buildDiscoveryCandidateEvidenceContext(discoveryKind, report);
+  const candidateEntries = candidates.map((candidate, index) =>
+    buildDiscoveryCandidateEvidenceIndexCandidate(discoveryKind, candidate, index)
+  );
+  const hashData: DiscoveryCandidateEvidenceIndexHashData = {
+    candidateCount: candidateEntries.length,
+    context,
+    candidates: candidateEntries,
+  };
+
+  return {
+    candidateCount: hashData.candidateCount,
+    aggregateHash: hashDiscoveryCandidateEvidenceIndex(hashData),
+    context: hashData.context,
+    candidates: hashData.candidates,
+  };
+}
+
+function buildDiscoveryCandidateEvidenceContext(
+  discoveryKind: DiscoveryReportKind,
+  report: Record<string, unknown>
+): DiscoveryCandidateEvidenceContext {
+  if (discoveryKind === 'source') {
+    const source = requiredObjectField(report, 'source', 'discovery report source');
+
+    return {
+      source: {
+        input: requiredStringField(source, 'input', 'discovery report source'),
+        resolvedPath: requiredStringField(source, 'resolvedPath', 'discovery report source'),
+        type: requiredStringField(source, 'type', 'discovery report source'),
+      },
+    };
+  }
+
+  if (discoveryKind === 'repo') {
+    const repo = requiredObjectField(report, 'repo', 'discovery report repo');
+    const repoGit = requiredObjectField(repo, 'git', 'discovery report repo.git');
+    const scope = requiredObjectField(report, 'scope', 'discovery report scope');
+
+    return {
+      repo: {
+        input: requiredStringField(repo, 'input', 'discovery report repo'),
+        normalizedInput: requiredStringField(repo, 'normalizedInput', 'discovery report repo'),
+        commit: optionalStringOrNullField(repoGit, 'commit', 'discovery report repo.git'),
+        dirty: optionalBooleanOrNullField(repoGit, 'dirty', 'discovery report repo.git'),
+      },
+      scope: {
+        input: requiredStringField(scope, 'input', 'discovery report scope'),
+        path: requiredStringField(scope, 'path', 'discovery report scope'),
+        resolvedPath: requiredStringField(scope, 'resolvedPath', 'discovery report scope'),
+        type: requiredStringField(scope, 'type', 'discovery report scope'),
+      },
+    };
+  }
+
+  const website = requiredObjectField(report, 'website', 'discovery report website');
+  const crawlPolicy = requiredObjectField(report, 'crawlPolicy', 'discovery report crawlPolicy');
+  const inspectedResources = report.inspectedResources;
+  const sameOriginWellKnownResources = crawlPolicy.sameOriginWellKnownResources;
+
+  if (!Array.isArray(inspectedResources)) {
+    throw new Error(
+      'discovery report inspectedResources must be an array before writing candidate evidence index'
+    );
+  }
+
+  if (!Array.isArray(sameOriginWellKnownResources)) {
+    throw new Error(
+      'discovery report crawlPolicy.sameOriginWellKnownResources must be an array before writing candidate evidence index'
+    );
+  }
+
+  return {
+    website: {
+      input: requiredStringField(website, 'input', 'discovery report website'),
+      normalizedUrl: requiredStringField(website, 'normalizedUrl', 'discovery report website'),
+      origin: requiredStringField(website, 'origin', 'discovery report website'),
+    },
+    crawlPolicy: {
+      linkedCandidateFetches: requiredFalseField(
+        crawlPolicy,
+        'linkedCandidateFetches',
+        'discovery report crawlPolicy'
+      ),
+      renderedJavaScript: requiredFalseField(
+        crawlPolicy,
+        'renderedJavaScript',
+        'discovery report crawlPolicy'
+      ),
+      inspectedResourceCount: inspectedResources.length,
+      sameOriginWellKnownResourceCount: sameOriginWellKnownResources.length,
+    },
+  };
+}
+
+function buildDiscoveryCandidateEvidenceIndexCandidate(
+  discoveryKind: DiscoveryReportKind,
+  candidate: unknown,
+  index: number
+): DiscoveryCandidateEvidenceIndexCandidate {
+  if (!isObjectRecord(candidate)) {
+    throw new Error(
+      `discovery report candidates[${index}] must be an object before writing candidate evidence index`
+    );
+  }
+
+  const order = requiredPositiveIntegerField(
+    candidate,
+    'order',
+    `discovery report candidates[${index}]`
+  );
+  const evidence = buildDiscoveryCandidateEvidence(candidate.evidence, index);
+
+  if (discoveryKind === 'url') {
+    const entry: DiscoveryCandidateEvidenceIndexCandidate = {
+      url: requiredStringField(candidate, 'url', `discovery report candidates[${index}]`),
+      order,
+      evidence,
+      sameOrigin: requiredBooleanField(
+        candidate,
+        'sameOrigin',
+        `discovery report candidates[${index}]`
+      ),
+      external: requiredBooleanField(
+        candidate,
+        'external',
+        `discovery report candidates[${index}]`
+      ),
+    };
+
+    if (Array.isArray(candidate.sourceResources) && candidate.sourceResources.length > 0) {
+      entry.sourceResources = candidate.sourceResources.map((sourceResource, sourceIndex) =>
+        buildDiscoveryCandidateSourceResource(sourceResource, index, sourceIndex)
+      );
+    }
+
+    return entry;
+  }
+
+  const hints = optionalStringArrayField(
+    candidate,
+    'hints',
+    `discovery report candidates[${index}]`
+  );
+  const formatHints = optionalStringArrayField(
+    candidate,
+    'formatHints',
+    `discovery report candidates[${index}]`
+  );
+  const entry: DiscoveryCandidateEvidenceIndexCandidate = {
+    path: requiredStringField(candidate, 'path', `discovery report candidates[${index}]`),
+    order,
+    kind: requiredStringField(candidate, 'kind', `discovery report candidates[${index}]`),
+    format: requiredStringField(candidate, 'format', `discovery report candidates[${index}]`),
+    evidence,
+    byteSize: requiredNonNegativeIntegerField(
+      candidate,
+      'byteSize',
+      `discovery report candidates[${index}]`
+    ),
+    sha256: requiredUnprefixedSha256Field(
+      candidate,
+      'sha256',
+      `discovery report candidates[${index}]`
+    ),
+  };
+
+  if (hints.length > 0) {
+    entry.hints = hints;
+  }
+
+  if (formatHints.length > 0) {
+    entry.formatHints = formatHints;
+  }
+
+  return entry;
+}
+
+function buildDiscoveryCandidateEvidence(
+  evidence: unknown,
+  candidateIndex: number
+): DiscoveryCandidateEvidenceIndexCandidate['evidence'] {
+  if (!isObjectRecord(evidence)) {
+    throw new Error(
+      `discovery report candidates[${candidateIndex}].evidence must be an object before writing candidate evidence index`
+    );
+  }
+
+  const entry: DiscoveryCandidateEvidenceIndexCandidate['evidence'] = {};
+  const category = evidence.category;
+  const signals = evidence.signals;
+  const relations = evidence.relations;
+  const flags = evidence.flags;
+
+  if (typeof category === 'string') {
+    entry.category = category;
+  }
+
+  if (Array.isArray(signals)) {
+    entry.signals = requireStringArray(
+      signals,
+      `discovery report candidates[${candidateIndex}].evidence.signals`
+    );
+  }
+
+  if (Array.isArray(relations)) {
+    entry.relations = requireStringArray(
+      relations,
+      `discovery report candidates[${candidateIndex}].evidence.relations`
+    );
+  }
+
+  if (Array.isArray(flags)) {
+    entry.flags = requireStringArray(
+      flags,
+      `discovery report candidates[${candidateIndex}].evidence.flags`
+    );
+  }
+
+  return entry;
+}
+
+function buildDiscoveryCandidateSourceResource(
+  sourceResource: unknown,
+  candidateIndex: number,
+  sourceIndex: number
+): NonNullable<DiscoveryCandidateEvidenceIndexCandidate['sourceResources']>[number] {
+  if (!isObjectRecord(sourceResource)) {
+    throw new Error(
+      `discovery report candidates[${candidateIndex}].sourceResources[${sourceIndex}] must be an object before writing candidate evidence index`
+    );
+  }
+
+  const label = `discovery report candidates[${candidateIndex}].sourceResources[${sourceIndex}]`;
+
+  return {
+    url: requiredStringField(sourceResource, 'url', label),
+    sourceRole: requiredStringField(sourceResource, 'sourceRole', label),
+    evidence: requiredStringField(sourceResource, 'evidence', label),
+  };
+}
+
+function hashDiscoveryCandidateEvidenceIndex(
+  index: DiscoveryCandidateEvidenceIndexHashData
+): string {
+  const hash = createHash('sha256');
+
+  hash.update(DISCOVERY_CANDIDATE_EVIDENCE_INDEX_HASH_SEED);
+  hash.update(JSON.stringify(index));
+  hash.update('\n');
+
+  return `${HASH_PREFIX}${hash.digest('hex')}`;
+}
+
+function discoveryCandidateEvidenceIndexesEqual(
+  expected: DiscoveryCandidateEvidenceIndex,
+  actual: DiscoveryCandidateEvidenceIndex
+): boolean {
+  return JSON.stringify(expected) === JSON.stringify(actual);
+}
+
+function requiredObjectField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): Record<string, unknown> {
+  const fieldValue = value[field];
+
+  if (!isObjectRecord(fieldValue)) {
+    throw new Error(`${label}.${field} must be an object`);
+  }
+
+  return fieldValue;
+}
+
+function requiredStringField(value: Record<string, unknown>, field: string, label: string): string {
+  const fieldValue = value[field];
+
+  if (!isNonEmptyString(fieldValue)) {
+    throw new Error(`${label}.${field} must be a non-empty string`);
+  }
+
+  return fieldValue;
+}
+
+function optionalStringOrNullField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): string | null {
+  const fieldValue = value[field];
+
+  if (fieldValue === undefined || fieldValue === null) {
+    return null;
+  }
+
+  if (!isNonEmptyString(fieldValue)) {
+    throw new Error(`${label}.${field} must be a non-empty string or null`);
+  }
+
+  return fieldValue;
+}
+
+function requiredBooleanField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): boolean {
+  const fieldValue = value[field];
+
+  if (typeof fieldValue !== 'boolean') {
+    throw new Error(`${label}.${field} must be a boolean`);
+  }
+
+  return fieldValue;
+}
+
+function optionalBooleanOrNullField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): boolean | null {
+  const fieldValue = value[field];
+
+  if (fieldValue === undefined || fieldValue === null) {
+    return null;
+  }
+
+  if (typeof fieldValue !== 'boolean') {
+    throw new Error(`${label}.${field} must be a boolean or null`);
+  }
+
+  return fieldValue;
+}
+
+function requiredFalseField(value: Record<string, unknown>, field: string, label: string): false {
+  const fieldValue = value[field];
+
+  if (fieldValue !== false) {
+    throw new Error(`${label}.${field} must be false`);
+  }
+
+  return false;
+}
+
+function requiredPositiveIntegerField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): number {
+  const fieldValue = value[field];
+
+  if (!isPositiveInteger(fieldValue)) {
+    throw new Error(`${label}.${field} must be a positive integer`);
+  }
+
+  return fieldValue;
+}
+
+function requiredNonNegativeIntegerField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): number {
+  const fieldValue = value[field];
+
+  if (!isNonNegativeInteger(fieldValue)) {
+    throw new Error(`${label}.${field} must be a non-negative integer`);
+  }
+
+  return fieldValue;
+}
+
+function requiredUnprefixedSha256Field(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): string {
+  const fieldValue = value[field];
+
+  if (!isUnprefixedSha256Hash(fieldValue)) {
+    throw new Error(`${label}.${field} must be a sha256 hex digest`);
+  }
+
+  return fieldValue;
+}
+
+function optionalStringArrayField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): string[] {
+  const fieldValue = value[field];
+
+  if (fieldValue === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(fieldValue)) {
+    throw new Error(`${label}.${field} must be a string array`);
+  }
+
+  return requireStringArray(fieldValue, `${label}.${field}`);
+}
+
+function requireStringArray(values: unknown[], label: string): string[] {
+  if (!values.every((value) => typeof value === 'string')) {
+    throw new Error(`${label} must contain only strings`);
+  }
+
+  return values;
+}
+
 function validateGeneratorMetadata(generator: Record<string, unknown>, failures: string[]): void {
   if (!isNonEmptyString(generator.name)) {
     failures.push('malformed manifest: generator.name must be a non-empty string');
@@ -983,9 +1560,10 @@ async function verifyDiscoveryReportFile(options: {
     warningCount: number;
     urlResourceCount?: number;
   };
+  candidateEvidenceIndex: DiscoveryCandidateEvidenceIndex | undefined;
   failures: string[];
 }): Promise<void> {
-  const { manifestDir, reportPath, expected, failures } = options;
+  const { manifestDir, reportPath, expected, candidateEvidenceIndex, failures } = options;
   let report: unknown;
 
   try {
@@ -1025,6 +1603,15 @@ async function verifyDiscoveryReportFile(options: {
 
   validateDiscoveryReportKindShape(report, expected.kind, failures);
   validateDiscoveryReportCounts(report, expected, failures);
+
+  if (candidateEvidenceIndex !== undefined) {
+    verifyDiscoveryCandidateEvidenceIndexAgainstReport({
+      discoveryKind: expected.kind,
+      report,
+      manifestIndex: candidateEvidenceIndex,
+      failures,
+    });
+  }
 }
 
 function validateDiscoveryReportKindShape(
@@ -1103,6 +1690,657 @@ function validateDiscoveryReportCounts(
       `discovery report: URL resource count mismatch (expected ${String(
         expected.urlResourceCount
       )}, actual ${inspectedResources.length})`
+    );
+  }
+}
+
+function validateDiscoveryCandidateEvidenceIndex(options: {
+  index: unknown;
+  discoveryKind: DiscoveryReportKind;
+  failures: string[];
+}): DiscoveryCandidateEvidenceIndex | undefined {
+  const { index, discoveryKind, failures } = options;
+  const initialFailureCount = failures.length;
+
+  if (!isObjectRecord(index)) {
+    failures.push('malformed manifest: candidateEvidenceIndex must be an object when present');
+    return undefined;
+  }
+
+  validateAllowedKeys(
+    index,
+    DISCOVERY_CANDIDATE_EVIDENCE_INDEX_KEYS,
+    'candidateEvidenceIndex',
+    failures
+  );
+
+  const candidateCount = index.candidateCount;
+  const aggregateHash = index.aggregateHash;
+  const context = validateDiscoveryCandidateEvidenceIndexContext({
+    context: index.context,
+    discoveryKind,
+    failures,
+  });
+  const candidateEntries: DiscoveryCandidateEvidenceIndexCandidate[] = [];
+
+  if (!isNonNegativeInteger(candidateCount)) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.candidateCount must be a non-negative integer'
+    );
+  }
+
+  if (!isSha256Hash(aggregateHash)) {
+    failures.push('malformed manifest: candidateEvidenceIndex.aggregateHash must be a sha256 hash');
+  }
+
+  if (!Array.isArray(index.candidates)) {
+    failures.push('malformed manifest: candidateEvidenceIndex.candidates must be an array');
+  } else {
+    for (const [candidateIndex, candidate] of index.candidates.entries()) {
+      const entry = validateDiscoveryCandidateEvidenceIndexCandidate({
+        candidate,
+        candidateIndex,
+        discoveryKind,
+        failures,
+      });
+
+      if (entry !== undefined) {
+        candidateEntries.push(entry);
+      }
+    }
+
+    if (isNonNegativeInteger(candidateCount) && candidateCount !== index.candidates.length) {
+      failures.push(
+        'malformed manifest: candidateEvidenceIndex.candidateCount must match candidates length'
+      );
+    }
+  }
+
+  if (
+    context !== undefined &&
+    isNonNegativeInteger(candidateCount) &&
+    isSha256Hash(aggregateHash) &&
+    Array.isArray(index.candidates) &&
+    candidateEntries.length === index.candidates.length
+  ) {
+    const hashData: DiscoveryCandidateEvidenceIndexHashData = {
+      candidateCount,
+      context,
+      candidates: candidateEntries,
+    };
+    const actualAggregateHash = hashDiscoveryCandidateEvidenceIndex(hashData);
+
+    if (aggregateHash !== actualAggregateHash) {
+      failures.push(
+        'malformed manifest: candidateEvidenceIndex.aggregateHash must match candidate evidence index metadata'
+      );
+    }
+  }
+
+  if (failures.length !== initialFailureCount) {
+    return undefined;
+  }
+
+  return {
+    candidateCount: candidateCount as number,
+    aggregateHash: aggregateHash as string,
+    context: context as DiscoveryCandidateEvidenceContext,
+    candidates: candidateEntries,
+  };
+}
+
+function validateDiscoveryCandidateEvidenceIndexContext(options: {
+  context: unknown;
+  discoveryKind: DiscoveryReportKind;
+  failures: string[];
+}): DiscoveryCandidateEvidenceContext | undefined {
+  const { context, discoveryKind, failures } = options;
+
+  if (!isObjectRecord(context)) {
+    failures.push('malformed manifest: candidateEvidenceIndex.context must be an object');
+    return undefined;
+  }
+
+  validateAllowedKeys(
+    context,
+    DISCOVERY_CANDIDATE_EVIDENCE_CONTEXT_KEYS_BY_KIND[discoveryKind],
+    'candidateEvidenceIndex.context',
+    failures
+  );
+
+  if (discoveryKind === 'source') {
+    return validateDiscoverySourceCandidateEvidenceContext(context, failures);
+  }
+
+  if (discoveryKind === 'repo') {
+    return validateDiscoveryRepoCandidateEvidenceContext(context, failures);
+  }
+
+  return validateDiscoveryWebsiteCandidateEvidenceContext(context, failures);
+}
+
+function validateDiscoverySourceCandidateEvidenceContext(
+  context: Record<string, unknown>,
+  failures: string[]
+): DiscoveryCandidateEvidenceContext | undefined {
+  const source = context.source;
+
+  if (!isObjectRecord(source)) {
+    failures.push('malformed manifest: candidateEvidenceIndex.context.source must be an object');
+    return undefined;
+  }
+
+  validateAllowedKeys(
+    source,
+    DISCOVERY_SOURCE_CONTEXT_KEYS,
+    'candidateEvidenceIndex.context.source',
+    failures
+  );
+
+  if (
+    !isNonEmptyString(source.input) ||
+    !isNonEmptyString(source.resolvedPath) ||
+    !isNonEmptyString(source.type)
+  ) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.source must include input, resolvedPath, and type strings'
+    );
+    return undefined;
+  }
+
+  return {
+    source: {
+      input: source.input,
+      resolvedPath: source.resolvedPath,
+      type: source.type,
+    },
+  };
+}
+
+function validateDiscoveryRepoCandidateEvidenceContext(
+  context: Record<string, unknown>,
+  failures: string[]
+): DiscoveryCandidateEvidenceContext | undefined {
+  const repo = context.repo;
+  const scope = context.scope;
+
+  if (!isObjectRecord(repo)) {
+    failures.push('malformed manifest: candidateEvidenceIndex.context.repo must be an object');
+    return undefined;
+  }
+
+  if (!isObjectRecord(scope)) {
+    failures.push('malformed manifest: candidateEvidenceIndex.context.scope must be an object');
+    return undefined;
+  }
+
+  validateAllowedKeys(
+    repo,
+    DISCOVERY_REPO_CONTEXT_KEYS,
+    'candidateEvidenceIndex.context.repo',
+    failures
+  );
+  validateAllowedKeys(
+    scope,
+    DISCOVERY_REPO_SCOPE_CONTEXT_KEYS,
+    'candidateEvidenceIndex.context.scope',
+    failures
+  );
+
+  if (!isNonEmptyString(repo.input) || !isNonEmptyString(repo.normalizedInput)) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.repo must include input and normalizedInput strings'
+    );
+    return undefined;
+  }
+
+  if (repo.commit !== null && !isNonEmptyString(repo.commit)) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.repo.commit must be a string or null'
+    );
+    return undefined;
+  }
+
+  if (repo.dirty !== null && typeof repo.dirty !== 'boolean') {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.repo.dirty must be a boolean or null'
+    );
+    return undefined;
+  }
+
+  if (
+    !isNonEmptyString(scope.input) ||
+    !isNonEmptyString(scope.path) ||
+    !isNonEmptyString(scope.resolvedPath) ||
+    !isNonEmptyString(scope.type)
+  ) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.scope must include input, path, resolvedPath, and type strings'
+    );
+    return undefined;
+  }
+
+  return {
+    repo: {
+      input: repo.input,
+      normalizedInput: repo.normalizedInput,
+      commit: repo.commit,
+      dirty: repo.dirty,
+    },
+    scope: {
+      input: scope.input,
+      path: scope.path,
+      resolvedPath: scope.resolvedPath,
+      type: scope.type,
+    },
+  };
+}
+
+function validateDiscoveryWebsiteCandidateEvidenceContext(
+  context: Record<string, unknown>,
+  failures: string[]
+): DiscoveryCandidateEvidenceContext | undefined {
+  const website = context.website;
+  const crawlPolicy = context.crawlPolicy;
+
+  if (!isObjectRecord(website)) {
+    failures.push('malformed manifest: candidateEvidenceIndex.context.website must be an object');
+    return undefined;
+  }
+
+  if (!isObjectRecord(crawlPolicy)) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.crawlPolicy must be an object'
+    );
+    return undefined;
+  }
+
+  validateAllowedKeys(
+    website,
+    DISCOVERY_WEBSITE_CONTEXT_KEYS,
+    'candidateEvidenceIndex.context.website',
+    failures
+  );
+  validateAllowedKeys(
+    crawlPolicy,
+    DISCOVERY_WEBSITE_CRAWL_POLICY_CONTEXT_KEYS,
+    'candidateEvidenceIndex.context.crawlPolicy',
+    failures
+  );
+
+  if (
+    !isNonEmptyString(website.input) ||
+    !isNonEmptyString(website.normalizedUrl) ||
+    !isNonEmptyString(website.origin)
+  ) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.website must include input, normalizedUrl, and origin strings'
+    );
+    return undefined;
+  }
+
+  if (crawlPolicy.linkedCandidateFetches !== false) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.crawlPolicy.linkedCandidateFetches must be false'
+    );
+    return undefined;
+  }
+
+  if (crawlPolicy.renderedJavaScript !== false) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.crawlPolicy.renderedJavaScript must be false'
+    );
+    return undefined;
+  }
+
+  if (
+    !isNonNegativeInteger(crawlPolicy.inspectedResourceCount) ||
+    !isNonNegativeInteger(crawlPolicy.sameOriginWellKnownResourceCount)
+  ) {
+    failures.push(
+      'malformed manifest: candidateEvidenceIndex.context.crawlPolicy resource counts must be non-negative integers'
+    );
+    return undefined;
+  }
+
+  return {
+    website: {
+      input: website.input,
+      normalizedUrl: website.normalizedUrl,
+      origin: website.origin,
+    },
+    crawlPolicy: {
+      linkedCandidateFetches: false,
+      renderedJavaScript: false,
+      inspectedResourceCount: crawlPolicy.inspectedResourceCount,
+      sameOriginWellKnownResourceCount: crawlPolicy.sameOriginWellKnownResourceCount,
+    },
+  };
+}
+
+function validateDiscoveryCandidateEvidenceIndexCandidate(options: {
+  candidate: unknown;
+  candidateIndex: number;
+  discoveryKind: DiscoveryReportKind;
+  failures: string[];
+}): DiscoveryCandidateEvidenceIndexCandidate | undefined {
+  const { candidate, candidateIndex, discoveryKind, failures } = options;
+  const label = `candidateEvidenceIndex.candidates[${candidateIndex}]`;
+
+  if (!isObjectRecord(candidate)) {
+    failures.push(`malformed manifest: ${label} must be an object`);
+    return undefined;
+  }
+
+  const allowedKeys =
+    discoveryKind === 'url'
+      ? DISCOVERY_URL_CANDIDATE_EVIDENCE_INDEX_CANDIDATE_KEYS
+      : DISCOVERY_PATH_CANDIDATE_EVIDENCE_INDEX_CANDIDATE_KEYS;
+
+  validateAllowedKeys(candidate, allowedKeys, label, failures);
+
+  const order = candidate.order;
+  const evidence = validateDiscoveryCandidateEvidenceIndexEvidence(
+    candidate.evidence,
+    label,
+    failures
+  );
+
+  if (!isPositiveInteger(order)) {
+    failures.push(`malformed manifest: ${label}.order must be a positive integer`);
+  } else if (order !== candidateIndex + 1) {
+    failures.push(`malformed manifest: ${label}.order must match candidate index order`);
+  }
+
+  if (discoveryKind === 'url') {
+    return validateDiscoveryUrlCandidateEvidenceIndexCandidate({
+      candidate,
+      label,
+      order,
+      evidence,
+      failures,
+    });
+  }
+
+  return validateDiscoveryPathCandidateEvidenceIndexCandidate({
+    candidate,
+    label,
+    order,
+    evidence,
+    failures,
+  });
+}
+
+function validateDiscoveryPathCandidateEvidenceIndexCandidate(options: {
+  candidate: Record<string, unknown>;
+  label: string;
+  order: unknown;
+  evidence: DiscoveryCandidateEvidenceIndexCandidate['evidence'] | undefined;
+  failures: string[];
+}): DiscoveryCandidateEvidenceIndexCandidate | undefined {
+  const { candidate, label, order, evidence, failures } = options;
+  const hints = validateOptionalStringArray(candidate.hints, `${label}.hints`, failures);
+  const formatHints = validateOptionalStringArray(
+    candidate.formatHints,
+    `${label}.formatHints`,
+    failures
+  );
+
+  if (!isNonEmptyString(candidate.path)) {
+    failures.push(`malformed manifest: ${label}.path must be a non-empty string`);
+  }
+
+  if (!isNonEmptyString(candidate.kind)) {
+    failures.push(`malformed manifest: ${label}.kind must be a non-empty string`);
+  }
+
+  if (!isNonEmptyString(candidate.format)) {
+    failures.push(`malformed manifest: ${label}.format must be a non-empty string`);
+  }
+
+  if (!isNonNegativeInteger(candidate.byteSize)) {
+    failures.push(`malformed manifest: ${label}.byteSize must be a non-negative integer`);
+  }
+
+  if (!isUnprefixedSha256Hash(candidate.sha256)) {
+    failures.push(`malformed manifest: ${label}.sha256 must be a sha256 hex digest`);
+  }
+
+  if (
+    !isPositiveInteger(order) ||
+    !isNonEmptyString(candidate.path) ||
+    !isNonEmptyString(candidate.kind) ||
+    !isNonEmptyString(candidate.format) ||
+    !isNonNegativeInteger(candidate.byteSize) ||
+    !isUnprefixedSha256Hash(candidate.sha256) ||
+    evidence === undefined ||
+    hints === undefined ||
+    formatHints === undefined
+  ) {
+    return undefined;
+  }
+
+  const entry: DiscoveryCandidateEvidenceIndexCandidate = {
+    path: candidate.path,
+    order,
+    kind: candidate.kind,
+    format: candidate.format,
+    evidence,
+    byteSize: candidate.byteSize,
+    sha256: candidate.sha256,
+  };
+
+  if (hints.length > 0) {
+    entry.hints = hints;
+  }
+
+  if (formatHints.length > 0) {
+    entry.formatHints = formatHints;
+  }
+
+  return entry;
+}
+
+function validateDiscoveryUrlCandidateEvidenceIndexCandidate(options: {
+  candidate: Record<string, unknown>;
+  label: string;
+  order: unknown;
+  evidence: DiscoveryCandidateEvidenceIndexCandidate['evidence'] | undefined;
+  failures: string[];
+}): DiscoveryCandidateEvidenceIndexCandidate | undefined {
+  const { candidate, label, order, evidence, failures } = options;
+  const sourceResources = validateOptionalCandidateSourceResources(
+    candidate.sourceResources,
+    `${label}.sourceResources`,
+    failures
+  );
+
+  if (!isNonEmptyString(candidate.url)) {
+    failures.push(`malformed manifest: ${label}.url must be a non-empty string`);
+  }
+
+  if (typeof candidate.sameOrigin !== 'boolean') {
+    failures.push(`malformed manifest: ${label}.sameOrigin must be a boolean`);
+  }
+
+  if (typeof candidate.external !== 'boolean') {
+    failures.push(`malformed manifest: ${label}.external must be a boolean`);
+  }
+
+  if (
+    !isPositiveInteger(order) ||
+    !isNonEmptyString(candidate.url) ||
+    typeof candidate.sameOrigin !== 'boolean' ||
+    typeof candidate.external !== 'boolean' ||
+    evidence === undefined ||
+    sourceResources === undefined
+  ) {
+    return undefined;
+  }
+
+  const entry: DiscoveryCandidateEvidenceIndexCandidate = {
+    url: candidate.url,
+    order,
+    evidence,
+    sameOrigin: candidate.sameOrigin,
+    external: candidate.external,
+  };
+
+  if (sourceResources.length > 0) {
+    entry.sourceResources = sourceResources;
+  }
+
+  return entry;
+}
+
+function validateDiscoveryCandidateEvidenceIndexEvidence(
+  evidence: unknown,
+  label: string,
+  failures: string[]
+): DiscoveryCandidateEvidenceIndexCandidate['evidence'] | undefined {
+  if (!isObjectRecord(evidence)) {
+    failures.push(`malformed manifest: ${label}.evidence must be an object`);
+    return undefined;
+  }
+
+  validateAllowedKeys(evidence, DISCOVERY_CANDIDATE_EVIDENCE_KEYS, `${label}.evidence`, failures);
+
+  const category = evidence.category;
+  const signals = validateOptionalStringArray(
+    evidence.signals,
+    `${label}.evidence.signals`,
+    failures
+  );
+  const relations = validateOptionalStringArray(
+    evidence.relations,
+    `${label}.evidence.relations`,
+    failures
+  );
+  const flags = validateOptionalStringArray(evidence.flags, `${label}.evidence.flags`, failures);
+
+  if ('category' in evidence && !isNonEmptyString(category)) {
+    failures.push(`malformed manifest: ${label}.evidence.category must be a non-empty string`);
+  }
+
+  if (signals === undefined || relations === undefined || flags === undefined) {
+    return undefined;
+  }
+
+  const entry: DiscoveryCandidateEvidenceIndexCandidate['evidence'] = {};
+
+  if (isNonEmptyString(category)) {
+    entry.category = category;
+  }
+
+  if ('signals' in evidence) {
+    entry.signals = signals;
+  }
+
+  if ('relations' in evidence) {
+    entry.relations = relations;
+  }
+
+  if ('flags' in evidence) {
+    entry.flags = flags;
+  }
+
+  return entry;
+}
+
+function validateOptionalCandidateSourceResources(
+  value: unknown,
+  label: string,
+  failures: string[]
+): NonNullable<DiscoveryCandidateEvidenceIndexCandidate['sourceResources']> | undefined {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    failures.push(`malformed manifest: ${label} must be an array when present`);
+    return undefined;
+  }
+
+  const resources: NonNullable<DiscoveryCandidateEvidenceIndexCandidate['sourceResources']> = [];
+
+  for (const [index, resource] of value.entries()) {
+    const resourceLabel = `${label}[${index}]`;
+
+    if (!isObjectRecord(resource)) {
+      failures.push(`malformed manifest: ${resourceLabel} must be an object`);
+      return undefined;
+    }
+
+    validateAllowedKeys(
+      resource,
+      DISCOVERY_CANDIDATE_SOURCE_RESOURCE_KEYS,
+      resourceLabel,
+      failures
+    );
+
+    if (
+      !isNonEmptyString(resource.url) ||
+      !isNonEmptyString(resource.sourceRole) ||
+      !isNonEmptyString(resource.evidence)
+    ) {
+      failures.push(
+        `malformed manifest: ${resourceLabel} must include url, sourceRole, and evidence strings`
+      );
+      return undefined;
+    }
+
+    resources.push({
+      url: resource.url,
+      sourceRole: resource.sourceRole,
+      evidence: resource.evidence,
+    });
+  }
+
+  return resources;
+}
+
+function validateOptionalStringArray(
+  value: unknown,
+  label: string,
+  failures: string[]
+): string[] | undefined {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    failures.push(`malformed manifest: ${label} must be a string array when present`);
+    return undefined;
+  }
+
+  if (!value.every((entry) => typeof entry === 'string')) {
+    failures.push(`malformed manifest: ${label} must contain only strings`);
+    return undefined;
+  }
+
+  return value;
+}
+
+function verifyDiscoveryCandidateEvidenceIndexAgainstReport(options: {
+  discoveryKind: DiscoveryReportKind;
+  report: Record<string, unknown>;
+  manifestIndex: DiscoveryCandidateEvidenceIndex;
+  failures: string[];
+}): void {
+  let reportIndex: DiscoveryCandidateEvidenceIndex;
+
+  try {
+    reportIndex = buildDiscoveryCandidateEvidenceIndex(options.discoveryKind, options.report);
+  } catch (error) {
+    options.failures.push(
+      `discovery candidate evidence index: could not rebuild from discovery-report.json: ${errorMessage(error)}`
+    );
+    return;
+  }
+
+  if (!discoveryCandidateEvidenceIndexesEqual(options.manifestIndex, reportIndex)) {
+    options.failures.push(
+      'discovery candidate evidence index: manifest metadata does not match discovery-report.json'
     );
   }
 }
@@ -2028,10 +3266,7 @@ function validateSourceTruthSourceFiles(options: {
       failures.push(`malformed manifest: ${label}.exportFactCount must be a non-negative integer`);
     }
 
-    if (
-      signatureFactCount !== undefined &&
-      !isNonNegativeInteger(signatureFactCount)
-    ) {
+    if (signatureFactCount !== undefined && !isNonNegativeInteger(signatureFactCount)) {
       failures.push(
         `malformed manifest: ${label}.signatureFactCount must be a non-negative integer when present`
       );
@@ -2239,11 +3474,7 @@ function validateSourceTruthReportInspection(
   if (!isObjectRecord(reportTraversal)) {
     failures.push('source-truth report: traversal must be an object');
   } else {
-    validateSourceTruthTraversal(
-      reportTraversal,
-      'source-truth report: traversal',
-      failures
-    );
+    validateSourceTruthTraversal(reportTraversal, 'source-truth report: traversal', failures);
 
     if (isObjectRecord(expectedTraversal)) {
       compareSourceTruthTraversal(reportTraversal, expectedTraversal, failures);
@@ -2414,10 +3645,7 @@ function summarizeSourceTruthReportFiles(
       continue;
     }
 
-    if (
-      parseDiagnostics !== undefined &&
-      !Array.isArray(parseDiagnostics)
-    ) {
+    if (parseDiagnostics !== undefined && !Array.isArray(parseDiagnostics)) {
       failures.push(`${label}.parseDiagnostics must be an array when present`);
       continue;
     }
