@@ -651,18 +651,20 @@ Use this skill when the user asks to generate, refresh, verify, or inspect docum
           <article class="feature">
             <h3>Add Agent Setup Commands</h3>
             <p>
-              The CLI should expose commands that print agent context, install bundled skills into a
-              supported host, and diagnose whether the CLI and skills are visible from another workspace.
+              The CLI should expose commands that print agent context and diagnose packaged artifacts
+              without hidden host mutation. Installing bundled skills into a supported host should remain
+              an explicit future setup command.
             </p>
             <pre><code>llm-docs agent context
-llm-docs agent install codex
 llm-docs agent doctor
+# future/planned host mutation:
+llm-docs agent install codex
 
 doctor checks:
-  - llm-docs binary is on PATH
-  - bundled skills are present
-  - host skill directory is writable
-  - installed skill version matches CLI version</code></pre>
+  - packaged context and skill artifacts are readable and hashable
+  - expected binary name is llm-docs
+  - llm-docs binary visibility on PATH is informational
+  - host skill installation is skipped unless explicitly configured and directly checked</code></pre>
           </article>
 
           <article class="feature">
@@ -1201,7 +1203,7 @@ failure:
               <p>Make the tool discoverable when the user is working in a different directory or project.</p>
               <ul>
                 <li>Bundle agent context and skill files in the npm package.</li>
-                <li>Add <code>llm-docs agent context</code>, <code>llm-docs agent install codex</code>, and <code>llm-docs agent doctor</code>.</li>
+                <li>Add <code>llm-docs agent context</code> and read-only <code>llm-docs agent doctor</code>; keep <code>llm-docs agent install codex</code> planned until host mutation is explicit and supported.</li>
                 <li>Document that installing the CLI and registering skills are separate operations.</li>
                 <li>Make <code>llm-docs capabilities --json</code> expose implemented modes.</li>
               </ul>

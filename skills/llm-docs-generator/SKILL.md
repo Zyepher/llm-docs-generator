@@ -12,7 +12,11 @@ Use this skill when the task is about this repository or about calling the insta
 - Treat the AI agent as the planner and the CLI as the deterministic capability layer.
 - Read `index.md` and `AGENT_CONTEXT.md` before promising support.
 - Run `llm-docs capabilities --json` before assuming a command, mode, output file, or verification feature exists.
-- Do not claim `agent install codex`, `agent doctor`, broad crawling, source-code verification, or source-docs chunk export support unless `capabilities --json` reports it as implemented.
+- Do not claim `agent install codex`, broad crawling, source-code verification, or source-docs chunk export support unless `capabilities --json` reports it as implemented.
+- Treat `agent doctor` as read-only diagnostics only when `capabilities --json`
+  reports it as implemented; it must not be described as installing/registering
+  skills, writing user config, mutating host skill directories, or proving
+  source truth/task fit.
 - Do not claim refresh beyond the explicit local-manifest modes reported by
   `capabilities --json`; configured SDK refresh, discovery-report refresh,
   remote freshness refresh, crawling, and source-code verification remain
@@ -29,6 +33,7 @@ Use this skill when the task is about this repository or about calling the insta
 ```bash
 llm-docs capabilities --json
 llm-docs agent context --json
+llm-docs agent doctor --json
 ```
 
 4. Use only implemented deterministic commands for the task.
@@ -46,4 +51,4 @@ When modifying this repository:
 
 ## Current CLI Boundary
 
-Implemented modes may include local/repo/URL discovery evidence reports with integrity manifests, conservative source-truth evidence extraction/generation and source-truth docs manifest verification, local source docs generation with optional source-only chunk JSONL export and manifest verification, configured SDK generation and verification, discovery-report verification, explicit local-manifest refresh for current local source docs and source-truth docs manifests, `capabilities --json`, and read-only `agent context` metadata. Treat any broader lifecycle command as unavailable unless the installed CLI says otherwise.
+Implemented modes may include local/repo/URL discovery evidence reports with integrity manifests, conservative source-truth evidence extraction/generation and source-truth docs manifest verification, local source docs generation with optional source-only chunk JSONL export and manifest verification, configured SDK generation and verification, discovery-report verification, explicit local-manifest refresh for current local source docs and source-truth docs manifests, `capabilities --json`, read-only `agent context` metadata, and read-only `agent doctor` diagnostics. Treat any broader lifecycle command as unavailable unless the installed CLI says otherwise.

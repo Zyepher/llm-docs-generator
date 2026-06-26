@@ -263,6 +263,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       and planned/unsupported capabilities separated
 - [x] Read-only `agent context` metadata command for packaged context and skill
       artifacts
+- [x] Read-only `agent doctor` diagnostics for packaged artifact readability,
+      expected binary metadata, PATH visibility, and skipped host-install checks
 - [x] Bundled package skill files for current CLI usage and repo/docs discovery
 - [x] Deterministic local explicit-manifest refresh for current
       `local-source-docs` and `source-truth-local-docs` manifests only, with
@@ -323,7 +325,7 @@ Current capabilities contract scope:
   `discover --url`, `source-truth inspect --source`,
   `source-truth generate --source --output-dir`,
   `source-truth verify-docs --source --docs --output-dir`, read-only
-  `agent context`,
+  `agent context`, read-only `agent doctor`,
   explicit local `generate --source` with parser hints and optional
   `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
@@ -334,8 +336,8 @@ Current capabilities contract scope:
   configured SDK refresh, discovery-report refresh, remote freshness refresh,
   broad official-docs behavior/API claim verification, broad website crawling,
   automatic source selection or top-candidate generation, framework/route
-  understanding, behavior-level generation from source code,
-  `agent install codex`, and `agent doctor`.
+  understanding, behavior-level generation from source code, and
+  `agent install codex`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `source-verification-report.json`, `manifest.json`, `failure.json`, source
@@ -373,7 +375,27 @@ Current agent context metadata scope:
   `generatedAt`, performs no network access, and does not probe environment
   state.
 - The command does not install or register skills, write user config, or
-  implement `agent install codex` or `agent doctor`.
+  implement `agent install codex`.
+
+Current agent doctor diagnostics scope:
+
+- `llm-docs agent doctor` prints concise human-readable read-only diagnostics
+  and points to `--json`.
+- `llm-docs agent doctor --json` prints deterministic JSON with schema version
+  `0.1.0`, package name/version metadata, the `llm-docs` binary, summary
+  counts, check results, and limitations.
+- Checks are intentionally narrow: packaged context and skill artifacts are
+  read and SHA-256 hashed through the same package-local metadata path used by
+  `agent context`; the expected package binary name is checked as `llm-docs`;
+  `PATH` is inspected only from the explicit process environment and reports
+  found/not-found facts; Codex skill installation is skipped/not-configured.
+- Missing `llm-docs` on PATH is a warning and exits successfully. Hard failures
+  are reserved for packaged artifact read/hash failures or malformed internal
+  package metadata.
+- The command writes only stdout, omits `generatedAt`, performs no network
+  access, does not install/register skills, does not write user config, does
+  not mutate host skill directories, and does not infer source authority, source
+  truth, or task fit.
 - The bundled skill files are current-state instructions for agents. They tell
   agents to inspect `capabilities --json` before assuming support and preserve
   the boundary that the agent chooses explicit source/scope/candidate while the

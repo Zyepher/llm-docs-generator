@@ -5,12 +5,14 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  chmod,
   mkdir,
   mkdtemp,
   lstat,
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
   stat,
   symlink,
@@ -427,6 +429,38 @@ interface AgentContextContract {
   limitations: string[];
 }
 
+interface AgentDoctorContract {
+  schemaVersion: string;
+  mode: string;
+  generator: {
+    packageName: string;
+    packageVersion: string;
+    cliName: string;
+    binary: string;
+  };
+  summary: {
+    overallStatus: string;
+    totalChecks: number;
+    passed: number;
+    warnings: number;
+    failed: number;
+    skipped: number;
+    hardFailureCount: number;
+    packagedArtifactCount: number;
+    contextArtifactCount: number;
+    skillArtifactCount: number;
+    pathBinaryFound: boolean;
+  };
+  checks: Array<{
+    id: string;
+    name: string;
+    status: string;
+    summary: string;
+    facts: Record<string, unknown>;
+  }>;
+  limitations: string[];
+}
+
 interface CliResult {
   stdout: string;
   stderr: string;
@@ -521,6 +555,23 @@ async function runCli(args: string[], cwd = repoRoot): Promise<{ stdout: string;
     env: {
       ...process.env,
       NO_COLOR: '1',
+    },
+  });
+
+  return { stdout, stderr };
+}
+
+async function runCliWithEnv(
+  args: string[],
+  envOverrides: NodeJS.ProcessEnv,
+  cwd = repoRoot
+): Promise<{ stdout: string; stderr: string }> {
+  const { stdout, stderr } = await execFileAsync(process.execPath, [tsxBin, cliPath, ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      NO_COLOR: '1',
+      ...envOverrides,
     },
   });
 
@@ -1237,6 +1288,7 @@ describe('CLI compatibility behavior', () => {
     const refreshHelp = await runCli(['refresh', '--help']);
     const agentHelp = await runCli(['agent', '--help']);
     const agentContextHelp = await runCli(['agent', 'context', '--help']);
+    const agentDoctorHelp = await runCli(['agent', 'doctor', '--help']);
 
     expect(rootHelp.stdout).toContain('capabilities');
     expect(rootHelp.stdout).toContain('refresh');
@@ -1257,13 +1309,19 @@ describe('CLI compatibility behavior', () => {
     expect(refreshHelp.stdout).toContain('--output-dir <dir>');
     expect(agentHelp.stdout).toContain('Report read-only agent metadata packaged with this CLI');
     expect(agentHelp.stdout).toContain('context');
+    expect(agentHelp.stdout).toContain('doctor');
     expect(agentContextHelp.stdout).toContain('Report packaged read-only agent context metadata');
     expect(agentContextHelp.stdout).toContain('--json');
     expect(agentContextHelp.stdout).toContain(
       'Print deterministic machine-readable agent context metadata'
     );
-    expect(`${agentHelp.stdout}\n${agentContextHelp.stdout}`).not.toMatch(
-      /\bagent (install|doctor)\b/i
+    expect(agentDoctorHelp.stdout).toContain('Run read-only agent packaging and PATH diagnostics');
+    expect(agentDoctorHelp.stdout).toContain('--json');
+    expect(agentDoctorHelp.stdout).toContain(
+      'Print deterministic machine-readable agent doctor diagnostics'
+    );
+    expect(`${agentHelp.stdout}\n${agentContextHelp.stdout}\n${agentDoctorHelp.stdout}`).not.toMatch(
+      /\bagent install\b/i
     );
   }, 15000);
 
@@ -1371,6 +1429,217 @@ describe('CLI compatibility behavior', () => {
     expect(output).not.toMatch(/\bhost skill installation is writable\b/i);
   });
 
+  it('prints deterministic agent doctor JSON with warning-only missing PATH diagnostics', async () => {
+    const first = await runCliWithEnv(['agent', 'doctor', '--json'], { PATH: '', Path: '' });
+    const second = await runCliWithEnv(['agent', 'doctor', '--json'], { PATH: '', Path: '' });
+    const doctor = JSON.parse(first.stdout) as AgentDoctorContract;
+    const checks = new Map(doctor.checks.map((check) => [check.id, check]));
+
+    expect(first.stdout).toBe(second.stdout);
+    expect(first.stdout.endsWith('\n')).toBe(true);
+    expect(first.stdout).not.toContain('generatedAt');
+    expect(doctor).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'agent-doctor-read-only-diagnostics',
+      generator: {
+        packageName: 'llm-docs-generator',
+        packageVersion: '1.0.0',
+        cliName: 'supabase-llm-docs',
+        binary: 'llm-docs',
+      },
+      summary: {
+        overallStatus: 'warning',
+        totalChecks: 4,
+        passed: 2,
+        warnings: 1,
+        failed: 0,
+        skipped: 1,
+        hardFailureCount: 0,
+        packagedArtifactCount: 4,
+        contextArtifactCount: 2,
+        skillArtifactCount: 2,
+        pathBinaryFound: false,
+      },
+      limitations: [
+        'Read-only diagnostics only.',
+        'Does not install or register skills.',
+        'Does not write user config.',
+        'Does not mutate host skill directories.',
+        'Does not perform network access.',
+        'Does not infer source authority, source truth, or task fit.',
+        'Missing llm-docs on PATH is reported as a warning for development installs.',
+        'Codex host skill installation is not checked without an explicit supported configuration.',
+      ],
+    });
+    expect([...checks.keys()]).toEqual([
+      'packaged-agent-artifacts',
+      'expected-binary-name',
+      'path-binary',
+      'codex-skill-installation',
+    ]);
+    expect(checks.get('packaged-agent-artifacts')).toMatchObject({
+      status: 'pass',
+      facts: {
+        contextArtifactCount: 2,
+        skillArtifactCount: 2,
+      },
+    });
+    expect(checks.get('expected-binary-name')).toMatchObject({
+      status: 'pass',
+      facts: {
+        expectedBinary: 'llm-docs',
+        packageBinEntry: './dist/cli.js',
+      },
+    });
+    expect(checks.get('path-binary')).toMatchObject({
+      status: 'warning',
+      facts: {
+        expectedBinary: 'llm-docs',
+        pathConfigured: false,
+        pathEntryCount: 0,
+        found: false,
+        matches: [],
+      },
+    });
+    expect(checks.get('codex-skill-installation')).toMatchObject({
+      status: 'skipped',
+      facts: {
+        checked: false,
+        reason: 'not-configured',
+      },
+    });
+
+    const artifactFacts = checks.get('packaged-agent-artifacts')?.facts;
+    const artifacts = (artifactFacts?.artifacts ?? []) as AgentContextContract['contextArtifacts'];
+    expect(artifacts.map((artifact) => artifact.id)).toEqual([
+      'agent-context',
+      'project-index',
+      'llm-docs-generator',
+      'repo-docs-discovery',
+    ]);
+
+    for (const artifact of artifacts) {
+      expect(artifact.byteSize).toBe(await byteSize(join(repoRoot, artifact.path)));
+      expect(artifact.sha256).toBe(await sha256FileHex(join(repoRoot, artifact.path)));
+    }
+  });
+
+  it('reports PATH-found agent doctor diagnostics without requiring host skill checks', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-path-'));
+    tempDirs.push(dir);
+
+    const binaryName = process.platform === 'win32' ? 'llm-docs.cmd' : 'llm-docs';
+    const binaryPath = join(dir, binaryName);
+    await writeFile(binaryPath, '#!/bin/sh\nexit 0\n', 'utf-8');
+
+    if (process.platform !== 'win32') {
+      await chmod(binaryPath, 0o755);
+    }
+
+    const { stdout } = await runCliWithEnv(['agent', 'doctor', '--json'], {
+      PATH: dir,
+      Path: dir,
+      PATHEXT: '.CMD;.EXE;.BAT;.COM',
+    });
+    const doctor = JSON.parse(stdout) as AgentDoctorContract;
+    const pathCheck = doctor.checks.find((check) => check.id === 'path-binary');
+
+    expect(doctor.summary).toMatchObject({
+      overallStatus: 'pass',
+      totalChecks: 4,
+      passed: 3,
+      warnings: 0,
+      failed: 0,
+      skipped: 1,
+      pathBinaryFound: true,
+    });
+    expect(pathCheck).toMatchObject({
+      status: 'pass',
+      facts: {
+        expectedBinary: 'llm-docs',
+        pathConfigured: true,
+        pathEntryCount: 1,
+        found: true,
+        matches: [binaryPath],
+      },
+    });
+    expect(doctor.checks.find((check) => check.id === 'codex-skill-installation')).toMatchObject({
+      status: 'skipped',
+      summary:
+        'No explicit Codex home or skill-installation location was provided; host skill installation was not checked.',
+    });
+  });
+
+  it('prints concise non-JSON agent doctor text without install/write/network claims', async () => {
+    const { stdout, stderr } = await runCliWithEnv(['agent', 'doctor'], {
+      PATH: '',
+      Path: '',
+    });
+    const output = `${stdout}\n${stderr}`;
+
+    expect(stdout).toContain('llm-docs agent doctor');
+    expect(stdout).toContain('Schema: 0.1.0');
+    expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
+    expect(stdout).toContain('Binary: llm-docs');
+    expect(stdout).toContain('Overall: warning');
+    expect(stdout).toContain('Checks: 2 passed, 1 warning, 0 failed, 1 skipped');
+    expect(stdout).toContain('Packaged artifacts: 4 readable/hashable');
+    expect(stdout).toContain('PATH llm-docs: not found (warning only)');
+    expect(stdout).toContain('Codex skill installation: skipped (not configured)');
+    expect(stdout).toContain(
+      'Read-only: no installs, config writes, host mutations, or network access.'
+    );
+    expect(stdout).toContain('Use --json for the stable diagnostics contract.');
+    expect(output).not.toMatch(/\bcopies bundled skills\b/i);
+    expect(output).not.toMatch(/\bwrites user config\b/i);
+    expect(output).not.toMatch(/\bhost skill installation is writable\b/i);
+    expect(output).not.toMatch(/\bperforms network\b/i);
+  });
+
+  it('exits nonzero when agent doctor cannot read a packaged artifact', async () => {
+    const artifactPath = join(repoRoot, 'skills/repo-docs-discovery/SKILL.md');
+    const backupDir = await mkdtemp(join(tmpdir(), 'llm-docs-agent-doctor-artifact-'));
+    tempDirs.push(backupDir);
+    const backupPath = join(backupDir, 'SKILL.md');
+    let result!: CliResult;
+
+    await rename(artifactPath, backupPath);
+
+    try {
+      result = await runCliWithExit(['agent', 'doctor', '--json']);
+    } finally {
+      await rename(backupPath, artifactPath);
+    }
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Agent doctor failed: packaged agent artifact unavailable');
+    expect(result.stderr).toContain('skills/repo-docs-discovery/SKILL.md');
+    expect(result.stderr).toContain('ENOENT');
+  });
+
+  it('exits nonzero when agent doctor package binary metadata is malformed', async () => {
+    const packagePath = join(repoRoot, 'package.json');
+    const originalPackageJson = await readFile(packagePath, 'utf-8');
+    const malformedPackageJson = JSON.parse(originalPackageJson) as Record<string, unknown>;
+    let result!: CliResult;
+
+    malformedPackageJson.bin = {};
+
+    try {
+      await writeFile(packagePath, `${JSON.stringify(malformedPackageJson, null, 2)}\n`, 'utf-8');
+      result = await runCliWithExit(['agent', 'doctor', '--json']);
+    } finally {
+      await writeFile(packagePath, originalPackageJson, 'utf-8');
+    }
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain(
+      'Agent doctor failed: malformed package metadata: expected llm-docs bin entry'
+    );
+  });
+
   it('prints a deterministic capabilities JSON contract without generatedAt', async () => {
     const first = await runCli(['capabilities', '--json']);
     const second = await runCli(['capabilities', '--json']);
@@ -1408,6 +1677,7 @@ describe('CLI compatibility behavior', () => {
       'source-truth-generate',
       'source-truth-verify-docs',
       'agent-context',
+      'agent-doctor',
       'generate-source',
       'generate-preset-swift-book',
       'generate-sdk',
@@ -1430,7 +1700,6 @@ describe('CLI compatibility behavior', () => {
       'framework-route-understanding',
       'behavior-level-code-docs',
       'agent-install-codex',
-      'agent-doctor',
     ]);
     expect(
       capabilities.implemented.every((capability) => capability.status === 'implemented')
@@ -1485,6 +1754,23 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('agent-context')?.inputBoundary).toBe(
       'packaged context and skill files only'
     );
+    expect(implemented.get('agent-doctor')).toMatchObject({
+      command: 'agent doctor',
+      mode: 'agent doctor --json',
+      status: 'implemented',
+      inputBoundary: 'packaged artifacts and explicit process environment PATH only',
+      options: ['--json'],
+      outputFiles: ['stdout diagnostics', 'stdout JSON diagnostics'],
+      limitations: expect.arrayContaining([
+        'does not install/register skills',
+        'does not write user config',
+        'does not mutate host skill directories',
+        'does not perform network access',
+        'PATH check is informational and may warn in development',
+        'host skill installation check is skipped unless a future explicit option is implemented',
+        'no source-selection or task-fit inference',
+      ]),
+    });
     expect(implemented.get('generate-source')?.outputFiles).toEqual([
       'manifest.json',
       'llm-docs/*-llms.txt',
@@ -1655,11 +1941,11 @@ describe('CLI compatibility behavior', () => {
     expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
       'agent install codex'
     );
-    expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
+    expect([...implemented.values()].map((capability) => capability.command)).toContain(
       'agent doctor'
     );
     expect(planned.get('agent-install-codex')?.reason).toContain('no current CLI skill installer');
-    expect(planned.get('agent-doctor')?.reason).toContain('no current CLI host diagnostics');
+    expect(planned.has('agent-doctor')).toBe(false);
   });
 
   it('reports source-truth fact families and explicit limitations', async () => {
@@ -1728,8 +2014,8 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 19');
-    expect(stdout).toContain('Planned or unsupported modes: 9');
+    expect(stdout).toContain('Implemented modes: 20');
+    expect(stdout).toContain('Planned or unsupported modes: 8');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
 
