@@ -283,8 +283,10 @@ Current discovery scope:
 - `llm-docs discover --source <path>` accepts an explicit local file or
   directory, writes a candidate evidence report at `discovery-report.json` plus
   a discovery-report `manifest.json`, and reports candidate file hints,
-  deterministic evidence categories and signals, report order, byte sizes,
-  hashes, traversal bounds, skipped generated directories, warnings, and a
+  deterministic listing/grouping/filtering/report order from factual signals
+  such as file type, path, metadata, source URL when present, hashes, freshness
+  metadata when explicitly observed, parseability, explicit scope, byte sizes,
+  traversal bounds, skipped generated directories, warnings, and a
   compact content-free `candidateEvidenceIndex` derived from
   `discovery-report.json`.
 - `llm-docs discover --repo <git-url-or-local-git-repo>` clones or reuses an
@@ -305,11 +307,15 @@ Current discovery scope:
 
 Discovery does not generate docs, crawl linked website candidates, choose
 candidates, assign trust or authority labels, infer authority, claim source
-truth, decide task fit, or implement source-truth codebase docs generation. It lists, groups,
-filters, and orders candidates deterministically for agent review only. There is
-no automatic selection or generation from a first ordered candidate unless the
-agent or user explicitly selects that candidate or a future documented
-automation flag requires it. Repo cache handling is non-destructive; clean
+truth, decide task fit, decide correctness, decide source intent, decide whether
+a candidate satisfies the task, or implement source-truth codebase docs
+generation. It lists, groups, filters, and orders candidates deterministically
+for agent review only by factual evidence signals: file type, path, metadata,
+source URL, hash, freshness metadata when explicitly observed, parseability, and
+explicit user-provided scope. It does not select a discovery-report candidate or
+generate from one unless the agent or user explicitly selects that candidate or
+a future documented automation flag requires it. Repo cache handling is
+non-destructive; clean
 matching caches fetch remote refs without pulling into the checkout, and cached
 checkouts with local changes or ignored files are warned about and inspected as
 present.
@@ -335,9 +341,8 @@ Current capabilities contract scope:
 - Planned/unsupported entries include additional `generate --preset` names,
   configured SDK refresh, discovery-report refresh, remote freshness refresh,
   broad official-docs behavior/API claim verification, broad website crawling,
-  automatic source selection or automatic generation from first ordered
-  candidates, framework/route understanding, behavior-level generation from
-  source code, and
+  documented automation-flag candidate handling, framework/route
+  understanding, behavior-level generation from source code, and
   `agent install codex`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
@@ -356,7 +361,7 @@ Current capabilities contract scope:
   when the existing manifest recorded it. Capabilities output does not claim
   full RAG systems, configured SDK refresh, discovery-report refresh, remote
   freshness refresh, broad official-docs behavior/API claim verification, broad
-  crawling, or automatic source selection.
+  crawling, or CLI source selection without explicit candidate input.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
@@ -477,10 +482,9 @@ Current explicit local source docs generation scope:
   without `--source`, presets with `--sdk`, and preset-incompatible explicit
   formats fail before output work.
 - URL-like sources, missing paths, symlinked source roots, discovery reports,
-  and candidate evidence/discovery report automatic selection are rejected honestly;
-  there is no generation from a first ordered candidate. Source mode never
-  fetches network resources and does not consume discovery reports
-  automatically.
+  and candidate evidence report inputs are rejected honestly by current source
+  mode. Source mode never fetches network resources and does not consume,
+  select from, or generate from discovery reports automatically.
 - `--format` is a parser hint. Supported values are `auto`, `markdown`, `mdx`
   as Markdown parser support, `openapi`, `openref`, `rst`, and `html`.
   Unsupported source-mode formats fail before output work.

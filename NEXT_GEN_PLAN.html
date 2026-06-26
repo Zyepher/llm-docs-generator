@@ -213,18 +213,20 @@
             <div class="flow-line">
               <span class="label">Bounded Inspection</span>
               <p>
-                Given explicit source and scope, clones or updates repositories in a stable cache, lists
-                candidate docs files, crawls allowed URL paths, extracts links from provided content, checks
-                llms.txt and sitemap.xml, and records what was inspected.
+                Given explicit source and scope, clones or updates repositories in a stable cache, lists and
+                groups candidate docs files, inspects explicit URL resources and fixed same-origin metadata
+                resources, extracts links from fetched content, checks llms.txt and sitemap.xml, and records
+                what was inspected.
               </p>
             </div>
             <div class="flow-line">
               <span class="label">Candidate Evidence Report</span>
               <p>
                 Produces a candidate evidence report for observed candidates. The CLI records factual
-                signals such as file type, path, metadata, source URL, hash, freshness, parseability, and
-                explicit user-provided scope, then deterministically orders the report for agent review
-                without deciding source truth or authority.
+                signals such as file type, path, metadata, source URL, hash, freshness metadata when
+                explicitly observed, parseability, and explicit user-provided scope, then
+                deterministically orders the report for agent review without deciding authority, correctness,
+                source truth, task fit, source intent, or whether a candidate satisfies the user task.
               </p>
             </div>
             <div class="flow-line">
@@ -291,10 +293,11 @@
             <div class="flow-line">
               <span class="label">4. Report Candidates</span>
               <p>
-                Give every observed docs source a factual evidence record based on first-party signals,
-                structure, explicit scope matches, freshness, parseability, and source metadata. Generate only
-                from a user-provided source, an agent-provided candidate, or a documented automation flag;
-                otherwise produce a candidate evidence report for agent inspection.
+                Give every observed docs source a factual evidence record based on observed source/provenance
+                signals, structure, explicit user-provided scope, path, metadata, source URL, hash, freshness
+                metadata when explicitly observed, and parseability. Generate only from a user-provided source,
+                an agent-provided candidate, or a documented automation flag; otherwise produce a candidate
+                evidence report for agent inspection.
               </p>
             </div>
             <div class="flow-line">
@@ -337,7 +340,7 @@ Manifest path   -> verify/refresh exact prior source</code></pre>
             <p>
               The system should avoid acting certain when inspection is weak. The CLI reports factual
               evidence and deterministic ordering; the agent inspects candidates in light of the user task,
-              project context, version constraints, and source intent. If none is the authoritative source
+              project context, version constraints, and source intent. If no candidate is authoritative
               for the task, the agent continues investigation, chooses another explicit source, or asks the
               user.
             </p>
@@ -545,7 +548,7 @@ llm-docs discover supabase/supabase --format openref</code></pre>
               Use an agent-supplied source, candidate, or manifest, then write an agent-readable
               Markdown pack plus manifest. Future discovery-report input must require an explicit
               agent/user-selected candidate or a documented automation flag; the current CLI does not
-              automatically select from discovery reports or generate directly from URLs.
+              select candidates from discovery reports or generate directly from URLs.
             </p>
             <pre><code># future/planned: requires explicit candidate selection or documented automation flag
 llm-docs generate --source ./reports/supabase/discovery-report.json --candidate apps/docs/spec/supabase_swift_v2.yml
@@ -770,7 +773,7 @@ capabilities:
           <div class="metric-grid">
             <div class="metric">
               <b>Source</b>
-              <span>First-party evidence: official repo, official docs domain, canonical source links, package metadata match.</span>
+              <span>Source/provenance metadata: repo URL, docs domain, canonical links, source links, and package metadata.</span>
             </div>
             <div class="metric">
               <b>Shape</b>
@@ -781,8 +784,8 @@ capabilities:
               <span>Scope match: requested SDK, language, version, product, or docs section is explicitly matched.</span>
             </div>
             <div class="metric">
-              <b>Fresh</b>
-              <span>Freshness: recent commits, current version tags, non-archived repo, successful HEAD checks.</span>
+              <b>Observed</b>
+              <span>Freshness metadata when explicitly observed: repo commits, version tags, archive state, and HEAD checks.</span>
             </div>
             <div class="metric">
               <b>Parse</b>
@@ -793,14 +796,14 @@ capabilities:
           <pre><code>candidate evidence:
   - source kind, URL or path, repo commit, content hash
   - explicit scope, requested version, matched product or SDK
-  - file type, metadata, source links, freshness signals
+  - file type, metadata, source links, freshness metadata when explicitly observed
   - parser result, warnings, skipped generated/vendor/build paths
   - deterministic report order and non-authoritative evidence summary</code></pre>
 
           <div class="callout">
             <strong>Important:</strong> registry hints are factual starting points after the hinted path is
-            verified. They are not source truth, and they must not override fresher first-party evidence
-            or the agent's task-specific judgment.
+            verified. They are not source truth, and they must not override newer first-party evidence that the
+            agent has verified or the agent's task-specific judgment.
           </div>
         </div>
       </div>
@@ -847,7 +850,7 @@ capabilities:
             <p>
               Report factual evidence for each candidate in deterministic order. The agent inspects the
               user task, project context, version constraints, and source intent; if no candidate is
-              authoritative, it continues investigation, chooses another explicit source, or asks the user.
+              authoritative for the task, it continues investigation, chooses another explicit source, or asks the user.
             </p>
             <div class="tag-row"><span class="pill">Evidence order</span><span class="pill">Possible prompt</span></div>
           </article>
@@ -1080,7 +1083,7 @@ failure:
               <li>Clone or update GitHub repos in a stable external cache.</li>
               <li>Discover OpenAPI, Swagger, OpenRef, markdown, MDX, DocC, RST, llms.txt, and sitemap candidates.</li>
               <li>List, group, filter, and deterministically order observed candidates using factual evidence signals for agent review.</li>
-              <li>Generate agent-optimized Markdown and write manifest, candidate evidence discovery report, and failure report artifacts.</li>
+              <li>Generate agent-optimized Markdown and write manifest, candidate evidence report, and failure report artifacts.</li>
               <li>Support source-code verification of official docs when the source repo is available and the user asks for source-truth confidence.</li>
               <li>Distinguish repo docs conversion from source-truth codebase docs generation, and fail clearly if the requested mode is not implemented.</li>
               <li>Verify old outputs against source existence, commit hash, content hash, and parser success.</li>
