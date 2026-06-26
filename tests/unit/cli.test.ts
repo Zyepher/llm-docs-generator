@@ -1172,12 +1172,7 @@ function compareStringsByCodeUnit(a: string, b: string): number {
 }
 
 function isErrnoCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === code
-  );
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 async function restoreRepoPath(restoration: {
@@ -1364,9 +1359,9 @@ describe('CLI compatibility behavior', () => {
     expect(agentDoctorHelp.stdout).toContain(
       'Print deterministic machine-readable agent doctor diagnostics'
     );
-    expect(`${agentHelp.stdout}\n${agentContextHelp.stdout}\n${agentDoctorHelp.stdout}`).not.toMatch(
-      /\bagent install\b/i
-    );
+    expect(
+      `${agentHelp.stdout}\n${agentContextHelp.stdout}\n${agentDoctorHelp.stdout}`
+    ).not.toMatch(/\bagent install\b/i);
   }, 15000);
 
   it('describes generate options as local source mode, scoped preset mode, or configured SDK guards', async () => {
@@ -2012,10 +2007,13 @@ describe('CLI compatibility behavior', () => {
       'optional direct-declaration AST signatures',
       'package/config facts',
       'path/filename test/example context facts',
+      'AST-observed test-case label context facts',
     ];
     const expectedLimitations = [
       'no behavior inference',
       'no assertion parsing',
+      'no test body serialization',
+      'test-case labels are not behavior or correctness proof',
       'no test execution',
       'no framework inference',
       'no route inference',
@@ -2049,7 +2047,9 @@ describe('CLI compatibility behavior', () => {
       'The agent owns source authority, task fit, and selected source decisions.'
     );
     expect(implementedText).not.toMatch(/\bauthorit(?:y|ative)\b/i);
-    expect(implementedText).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(implementedText).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(implementedText).not.toMatch(/\bautomatically selects\b/i);
     expect(implementedText).not.toMatch(/\bunderstands routes\b/i);
     expect(implementedText).not.toMatch(/\bbehavior-level\b/i);
@@ -2541,7 +2541,9 @@ describe('CLI compatibility behavior', () => {
     expect(combinedOutput).not.toContain('source-truth export docs');
     expect(combinedOutput).not.toContain('export docs');
     expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
-    expect(combinedOutput).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(combinedOutput).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(combinedOutput).not.toMatch(/\bverified\b/i);
   });
 
@@ -2816,7 +2818,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Source-truth docs generated');
     expect(stdout).toContain('Export facts: 0');
     expect(stdout).toContain('Package/config facts: 0');
-    expect(stdout).toContain('Context facts: 1');
+    expect(stdout).toContain('Context facts: 2');
     expect(stderr).not.toContain('Source-truth generation failed');
     expect(report.facts).toEqual([]);
     expect(report.configFacts).toEqual([]);
@@ -2834,20 +2836,37 @@ describe('CLI compatibility behavior', () => {
         lineRangeGranularity: 'file',
         order: 1,
       },
+      {
+        kind: 'test-case',
+        path: 'tests/path.spec.ts',
+        name: 'keeps evidence path-only',
+        call: 'it',
+        modifiers: [],
+        provenance: {
+          path: 'tests/path.spec.ts',
+          lineRange: { start: 1, end: 1 },
+        },
+        lineRangeGranularity: 'test-label',
+        order: 2,
+      },
     ]);
     expect(markdown).toContain('## Test And Example Context Facts');
     expect(markdown).toContain('### `tests/path.spec.ts`');
     expect(markdown).toContain('- `test-file`');
+    expect(markdown).toContain('- `test-case`');
+    expect(markdown).toContain('  - Name: `keeps evidence path-only`');
+    expect(markdown).toContain('  - Call: `it`');
+    expect(markdown).toContain('  - Modifiers: `none`');
     expect(markdown).toContain(
       '  - Evidence signals: `filename-pattern:*.spec.*`; `path-segment:tests`'
     );
     expect(manifest.sourceFiles).toMatchObject([
       {
         path: 'tests/path.spec.ts',
-        factCount: 1,
+        factCount: 2,
         exportFactCount: 0,
         configFactCount: 0,
-        contextFactCount: 1,
+        contextFactCount: 2,
       },
     ]);
 
@@ -2857,7 +2876,9 @@ describe('CLI compatibility behavior', () => {
     expect(combinedOutput).not.toContain('expect(true)');
     expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(combinedOutput).not.toMatch(/\bofficial\b/i);
-    expect(combinedOutput).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(combinedOutput).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(combinedOutput).not.toMatch(/\bverified\b/i);
   });
 
@@ -2986,7 +3007,9 @@ describe('CLI compatibility behavior', () => {
     expect(verifyResult.stdout).toContain('Verification passed');
     expect(combinedOutput).not.toMatch(/\bofficial\b/i);
     expect(combinedOutput).not.toMatch(/\bauthorit(?:y|ative)\b/i);
-    expect(combinedOutput).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(combinedOutput).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(combinedOutput).not.toMatch(/\bverified\b/i);
     expect(combinedOutput).not.toMatch(/\bbehavior\b/i);
   });

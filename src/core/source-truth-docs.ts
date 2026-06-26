@@ -174,7 +174,7 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
   const lines: string[] = [
     '# Observed Local Source Evidence',
     '',
-    'Generated from one explicit local source inspection. This file contains only observed TypeScript/JavaScript top-level export facts, package/config facts, and path-based test/example context facts reported by the inspector.',
+    'Generated from one explicit local source inspection. This file contains only observed TypeScript/JavaScript top-level export facts, package/config facts, path-based test/example file context facts, and AST-observed test-case label facts reported by the inspector.',
     '',
     '## Source',
     '',
@@ -202,6 +202,7 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
     '- Package/config facts are reported only from explicit `package.json` and `tsconfig*.json` files within the inspection limits.',
     '- Config line ranges are field-level when the inspector can locate a JSON property or array item; otherwise they use the file line range and say so.',
     '- Test/example context facts are path/filename-level evidence only; context line ranges cover the whole file.',
+    '- Test-case facts are observed `describe`, `it`, and `test` labels only; they omit test bodies, assertion text, expected values, closures, and runtime-derived names, and they are not proof of behavior or correctness.',
     '- Only supported TypeScript/JavaScript, package manifest, and tsconfig files within the inspection limits can contribute facts.',
   ];
 
@@ -305,9 +306,17 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
     for (const fact of file.contextFacts) {
       lines.push(`- ${formatMarkdownCodeSpan(fact.kind)}`);
       lines.push(`  - Path: ${formatMarkdownCodeSpan(fact.path)}`);
-      lines.push(`  - Evidence signals: ${formatEvidenceSignals(fact.evidenceSignals)}`);
-      lines.push(`  - Byte size: ${formatMarkdownCodeSpan(String(fact.byteSize))}`);
-      lines.push(`  - SHA-256: ${formatMarkdownCodeSpan(fact.sha256)}`);
+
+      if (fact.kind === 'test-case') {
+        lines.push(`  - Name: ${formatMarkdownCodeSpan(fact.name)}`);
+        lines.push(`  - Call: ${formatMarkdownCodeSpan(fact.call)}`);
+        lines.push(`  - Modifiers: ${formatTestCaseModifiers(fact.modifiers)}`);
+      } else {
+        lines.push(`  - Evidence signals: ${formatEvidenceSignals(fact.evidenceSignals)}`);
+        lines.push(`  - Byte size: ${formatMarkdownCodeSpan(String(fact.byteSize))}`);
+        lines.push(`  - SHA-256: ${formatMarkdownCodeSpan(fact.sha256)}`);
+      }
+
       lines.push(
         `  - Lines: ${formatLineRange(
           fact.provenance.lineRange.start,
@@ -419,6 +428,14 @@ function formatEvidenceSignals(evidenceSignals: string[]): string {
   return evidenceSignals.map((signal) => formatMarkdownCodeSpan(signal)).join('; ');
 }
 
+function formatTestCaseModifiers(modifiers: string[]): string {
+  if (modifiers.length === 0) {
+    return formatMarkdownCodeSpan('none');
+  }
+
+  return modifiers.map((modifier) => formatMarkdownCodeSpan(modifier)).join('; ');
+}
+
 function buildManifest(
   report: SourceTruthInspectionReport,
   generatedOutputs: SourceTruthGeneratedOutput[]
@@ -494,8 +511,7 @@ function filesWithContextFacts(files: SourceTruthFileEvidence[]): SourceTruthFil
 
 function filesWithAnyFacts(files: SourceTruthFileEvidence[]): SourceTruthFileEvidence[] {
   return files.filter(
-    (file) =>
-      file.facts.length > 0 || file.configFacts.length > 0 || file.contextFacts.length > 0
+    (file) => file.facts.length > 0 || file.configFacts.length > 0 || file.contextFacts.length > 0
   );
 }
 

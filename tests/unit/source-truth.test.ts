@@ -181,7 +181,7 @@ describe('source-truth inspection', () => {
       "  mode: 'fast' | 'slow' = 'fast',",
       '  ...flags: string[]',
       '): Promise<Result> {',
-      "  return Promise.resolve({ input, count, mode, flags });",
+      '  return Promise.resolve({ input, count, mode, flags });',
       '}',
       'export const typedValue: number = 123;',
       'export let implicitValue = compute();',
@@ -198,7 +198,7 @@ describe('source-truth inspection', () => {
       '  start(): void {}',
       '  stop(): void {}',
       '}',
-      "export { makeResult as renamedResult };",
+      'export { makeResult as renamedResult };',
       "export * from './other';",
       'export default makeResult;',
       '',
@@ -491,9 +491,7 @@ describe('source-truth inspection', () => {
       type: 'Input<Item>',
     });
     expect(fn?.signature?.returnType).toBe('Output<Item>');
-    expect(fn?.signature?.text).toBe(
-      'export function commented(input: Input<Item>): Output<Item>'
-    );
+    expect(fn?.signature?.text).toBe('export function commented(input: Input<Item>): Output<Item>');
     expect(iface?.signature?.heritage).toEqual({
       extends: ['BaseInterface<Item>'],
     });
@@ -670,28 +668,31 @@ describe('source-truth inspection', () => {
       'docs/examples/usage.ts',
       'samples/widget.ts',
       'tests/widget.test.ts',
+      'tests/widget.test.ts',
     ]);
     expect(
-      report.contextFacts.map(
-        ({
-          kind,
-          path,
-          evidenceSignals,
-          byteSize,
-          sha256,
-          provenance,
-          lineRangeGranularity,
-          order,
-        }) => ({
-          kind,
-          path,
-          evidenceSignals,
-          byteSize,
-          sha256,
-          provenance,
-          lineRangeGranularity,
-          order,
-        })
+      report.contextFacts.map((fact) =>
+        fact.kind === 'test-case'
+          ? {
+              kind: fact.kind,
+              path: fact.path,
+              name: fact.name,
+              call: fact.call,
+              modifiers: fact.modifiers,
+              provenance: fact.provenance,
+              lineRangeGranularity: fact.lineRangeGranularity,
+              order: fact.order,
+            }
+          : {
+              kind: fact.kind,
+              path: fact.path,
+              evidenceSignals: fact.evidenceSignals,
+              byteSize: fact.byteSize,
+              sha256: fact.sha256,
+              provenance: fact.provenance,
+              lineRangeGranularity: fact.lineRangeGranularity,
+              order: fact.order,
+            }
       )
     ).toEqual([
       {
@@ -733,12 +734,25 @@ describe('source-truth inspection', () => {
         lineRangeGranularity: 'file',
         order: 3,
       },
+      {
+        kind: 'test-case',
+        path: 'tests/widget.test.ts',
+        name: 'widget',
+        call: 'describe',
+        modifiers: [],
+        provenance: {
+          path: 'tests/widget.test.ts',
+          lineRange: { start: 1, end: 1 },
+        },
+        lineRangeGranularity: 'test-label',
+        order: 4,
+      },
     ]);
     expect(report.files.find((file) => file.path === 'src/plain.ts')?.contextFacts).toEqual([]);
 
     const serializedContextFacts = JSON.stringify(report.contextFacts);
-    expect(serializedContextFacts).not.toContain('describe');
     expect(serializedContextFacts).not.toContain('expect');
+    expect(serializedContextFacts).not.toContain('toBe');
     expect(serializedContextFacts).not.toMatch(/\bframework\b/i);
     expect(serializedContextFacts).not.toMatch(/\broutes?\b/i);
     expect(serializedContextFacts).not.toMatch(/\bbehavior\b/i);
@@ -761,7 +775,7 @@ describe('source-truth inspection', () => {
 
     expect(report.facts).toEqual([]);
     expect(report.configFacts).toEqual([]);
-    expect(report.contextFacts).toHaveLength(1);
+    expect(report.contextFacts).toHaveLength(2);
     expect(report.contextFacts[0]).toMatchObject({
       kind: 'test-file',
       path: 'examples/widget.test.ts',
@@ -775,6 +789,19 @@ describe('source-truth inspection', () => {
       lineRangeGranularity: 'file',
       order: 1,
     });
+    expect(report.contextFacts[1]).toEqual({
+      kind: 'test-case',
+      path: 'examples/widget.test.ts',
+      name: 'mixed path',
+      call: 'test',
+      modifiers: [],
+      provenance: {
+        path: 'examples/widget.test.ts',
+        lineRange: { start: 1, end: 1 },
+      },
+      lineRangeGranularity: 'test-label',
+      order: 2,
+    });
 
     const serializedContextFacts = JSON.stringify(report.contextFacts);
     expect(serializedContextFacts).not.toContain('expect(true)');
@@ -784,6 +811,331 @@ describe('source-truth inspection', () => {
     expect(serializedContextFacts).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(serializedContextFacts).not.toMatch(/\bcorrect(?:ness)?\b/i);
     expect(serializedContextFacts).not.toMatch(/\bverified\b/i);
+  });
+
+  it('extracts conservative AST test-case labels with stable order and redacted bodies', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-test-cases-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+    await mkdir(join(sourceDir, 'src'), { recursive: true });
+
+    const testSource = [
+      "describe('outer suite', () => {",
+      "  it('runs direct test', () => {",
+      "    expect(readSecret()).toEqual('do not serialize');",
+      '  });',
+      '  test.only(`template literal label`, () => {});',
+      "  describe.skip('skipped suite', () => {",
+      "    it.skip('skipped test', () => {});",
+      '    test(`nested no substitution`, () => {});',
+      '  });',
+      '  it(nameFromFactory(), () => {});',
+      "  test.each([])('parameterized %s', () => {});",
+      "  describe.only('focused suite', () => {});",
+      '  describe.only(dynamicName, () => {});',
+      '});',
+      '',
+    ].join('\n');
+    const plainSource = ["describe('ignored outside test file', () => {});", ''].join('\n');
+
+    await writeFile(join(sourceDir, 'tests/cases.test.ts'), testSource, 'utf-8');
+    await writeFile(join(sourceDir, 'src/plain.ts'), plainSource, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const testFile = report.files.find((file) => file.path === 'tests/cases.test.ts');
+    const plainFile = report.files.find((file) => file.path === 'src/plain.ts');
+    const testCaseFacts = report.contextFacts.filter((fact) => fact.kind === 'test-case');
+
+    expect(plainFile?.contextFacts).toEqual([]);
+    expect(testFile?.contextFacts.map((fact) => fact.kind)).toEqual([
+      'test-file',
+      'test-case',
+      'test-case',
+      'test-case',
+      'test-case',
+      'test-case',
+      'test-case',
+      'test-case',
+    ]);
+    expect(
+      testCaseFacts.map(({ name, call, modifiers, provenance, lineRangeGranularity, order }) => ({
+        name,
+        call,
+        modifiers,
+        provenance,
+        lineRangeGranularity,
+        order,
+      }))
+    ).toEqual([
+      {
+        name: 'outer suite',
+        call: 'describe',
+        modifiers: [],
+        provenance: { path: 'tests/cases.test.ts', lineRange: { start: 1, end: 1 } },
+        lineRangeGranularity: 'test-label',
+        order: 2,
+      },
+      {
+        name: 'runs direct test',
+        call: 'it',
+        modifiers: [],
+        provenance: { path: 'tests/cases.test.ts', lineRange: { start: 2, end: 2 } },
+        lineRangeGranularity: 'test-label',
+        order: 3,
+      },
+      {
+        name: 'template literal label',
+        call: 'test',
+        modifiers: ['only'],
+        provenance: { path: 'tests/cases.test.ts', lineRange: { start: 5, end: 5 } },
+        lineRangeGranularity: 'test-label',
+        order: 4,
+      },
+      {
+        name: 'skipped suite',
+        call: 'describe',
+        modifiers: ['skip'],
+        provenance: { path: 'tests/cases.test.ts', lineRange: { start: 6, end: 6 } },
+        lineRangeGranularity: 'test-label',
+        order: 5,
+      },
+      {
+        name: 'skipped test',
+        call: 'it',
+        modifiers: ['skip'],
+        provenance: { path: 'tests/cases.test.ts', lineRange: { start: 7, end: 7 } },
+        lineRangeGranularity: 'test-label',
+        order: 6,
+      },
+      {
+        name: 'nested no substitution',
+        call: 'test',
+        modifiers: [],
+        provenance: { path: 'tests/cases.test.ts', lineRange: { start: 8, end: 8 } },
+        lineRangeGranularity: 'test-label',
+        order: 7,
+      },
+      {
+        name: 'focused suite',
+        call: 'describe',
+        modifiers: ['only'],
+        provenance: { path: 'tests/cases.test.ts', lineRange: { start: 12, end: 12 } },
+        lineRangeGranularity: 'test-label',
+        order: 8,
+      },
+    ]);
+
+    const serializedContextFacts = JSON.stringify(report.contextFacts);
+    expect(serializedContextFacts).not.toContain('readSecret');
+    expect(serializedContextFacts).not.toContain('do not serialize');
+    expect(serializedContextFacts).not.toContain('parameterized %s');
+    expect(serializedContextFacts).not.toContain('nameFromFactory');
+    expect(serializedContextFacts).not.toContain('dynamicName');
+    expect(serializedContextFacts).not.toContain('ignored outside test file');
+    expect(serializedContextFacts).not.toContain('expect(');
+    expect(serializedContextFacts).not.toMatch(/\bruntime\b/i);
+    expect(serializedContextFacts).not.toMatch(/\bverified\b/i);
+  });
+
+  it('ignores describe it and test call text inside comments and string literals', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-test-case-noise-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+
+    const source = [
+      "// describe('commented suite', () => {})",
+      '/*',
+      "it('block comment test', () => {})",
+      '*/',
+      'const stringText = "test(\'inside string\', () => {})";',
+      "const templateText = `describe('inside template literal', () => {})`;",
+      'const arrayText = ["it.only(\'inside array\', () => {})"];',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'tests/noise.test.ts'), source, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(report.contextFacts.filter((fact) => fact.kind === 'test-case')).toEqual([]);
+    expect(report.contextFacts).toEqual([
+      {
+        kind: 'test-file',
+        path: 'tests/noise.test.ts',
+        evidenceSignals: ['filename-pattern:*.test.*', 'path-segment:tests'],
+        byteSize: Buffer.byteLength(source),
+        sha256: sha256(source),
+        provenance: {
+          path: 'tests/noise.test.ts',
+          lineRange: { start: 1, end: 7 },
+        },
+        lineRangeGranularity: 'file',
+        order: 1,
+      },
+    ]);
+  });
+
+  it('keeps file-level test context for empty test files without bogus test cases', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-empty-test-file-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+
+    const source = '';
+    await writeFile(join(sourceDir, 'tests/empty.test.ts'), source, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+
+    expect(report.files).toHaveLength(1);
+    expect(report.files[0]).toMatchObject({
+      path: 'tests/empty.test.ts',
+      status: 'inspected',
+      supported: true,
+      byteSize: 0,
+      sha256: sha256(source),
+      facts: [],
+      configFacts: [],
+    });
+    expect(report.files[0]?.parseDiagnostics).toBeUndefined();
+    expect(report.contextFacts).toEqual([
+      {
+        kind: 'test-file',
+        path: 'tests/empty.test.ts',
+        evidenceSignals: ['filename-pattern:*.test.*', 'path-segment:tests'],
+        byteSize: 0,
+        sha256: sha256(source),
+        provenance: {
+          path: 'tests/empty.test.ts',
+          lineRange: { start: 1, end: 1 },
+        },
+        lineRangeGranularity: 'file',
+        order: 1,
+      },
+    ]);
+  });
+
+  it('reports syntax diagnostics while exposing recoverable literal test labels', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-malformed-test-labels-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+
+    const source = [
+      "describe('recoverable suite', () => {",
+      "  it('recoverable test', () => {",
+      '    expect(secret).toBe(true);',
+      '  }',
+      "  test('after missing punctuation', () => {});",
+      '});',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'tests/recoverable.test.ts'), source, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const file = report.files.find((candidate) => candidate.path === 'tests/recoverable.test.ts');
+    const testCaseFacts = report.contextFacts.filter((fact) => fact.kind === 'test-case');
+
+    expect(file?.parseDiagnostics).toEqual([
+      {
+        code: 1005,
+        category: 'error',
+        message: "',' expected.",
+        lineRange: { start: 5, end: 5 },
+      },
+      {
+        code: 1005,
+        category: 'error',
+        message: "')' expected.",
+        lineRange: { start: 5, end: 5 },
+      },
+    ]);
+    expect(report.warnings).toEqual(['Syntax diagnostics in file: tests/recoverable.test.ts (2)']);
+    expect(
+      testCaseFacts.map(({ name, call, modifiers, provenance, lineRangeGranularity, order }) => ({
+        name,
+        call,
+        modifiers,
+        provenance,
+        lineRangeGranularity,
+        order,
+      }))
+    ).toEqual([
+      {
+        name: 'recoverable suite',
+        call: 'describe',
+        modifiers: [],
+        provenance: { path: 'tests/recoverable.test.ts', lineRange: { start: 1, end: 1 } },
+        lineRangeGranularity: 'test-label',
+        order: 2,
+      },
+      {
+        name: 'recoverable test',
+        call: 'it',
+        modifiers: [],
+        provenance: { path: 'tests/recoverable.test.ts', lineRange: { start: 2, end: 2 } },
+        lineRangeGranularity: 'test-label',
+        order: 3,
+      },
+      {
+        name: 'after missing punctuation',
+        call: 'test',
+        modifiers: [],
+        provenance: { path: 'tests/recoverable.test.ts', lineRange: { start: 5, end: 5 } },
+        lineRangeGranularity: 'test-label',
+        order: 4,
+      },
+    ]);
+
+    const serializedContextFacts = JSON.stringify(report.contextFacts);
+    expect(serializedContextFacts).not.toContain('secret');
+    expect(serializedContextFacts).not.toContain('toBe');
+  });
+
+  it('keeps many literal test labels deterministic without serializing bodies', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-many-test-labels-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+
+    const labelCount = 75;
+    const source = [
+      "describe('stress suite', () => {",
+      ...Array.from({ length: labelCount }, (_, index) => {
+        const label = `case ${String(index).padStart(3, '0')}`;
+
+        return `  it('${label}', () => { expect('body-${index}').toBe('hidden'); });`;
+      }),
+      '});',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'tests/many.test.ts'), source, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const secondReport = await inspectSourceTruth({ source: sourceDir });
+    const testCaseFacts = report.contextFacts.filter((fact) => fact.kind === 'test-case');
+
+    expect(report.contextFacts).toEqual(secondReport.contextFacts);
+    expect(testCaseFacts).toHaveLength(labelCount + 1);
+    expect(testCaseFacts[0]).toMatchObject({
+      name: 'stress suite',
+      call: 'describe',
+      order: 2,
+      provenance: { path: 'tests/many.test.ts', lineRange: { start: 1, end: 1 } },
+    });
+    expect(testCaseFacts[1]).toMatchObject({
+      name: 'case 000',
+      call: 'it',
+      order: 3,
+      provenance: { path: 'tests/many.test.ts', lineRange: { start: 2, end: 2 } },
+    });
+    expect(testCaseFacts[testCaseFacts.length - 1]).toMatchObject({
+      name: 'case 074',
+      call: 'it',
+      order: 77,
+      provenance: { path: 'tests/many.test.ts', lineRange: { start: 76, end: 76 } },
+    });
+    expect(JSON.stringify(report.contextFacts).length).toBeLessThan(40000);
+
+    const serializedContextFacts = JSON.stringify(report.contextFacts);
+    expect(serializedContextFacts).not.toContain('body-');
+    expect(serializedContextFacts).not.toContain('hidden');
+    expect(serializedContextFacts).not.toContain('expect(');
   });
 
   it('extracts conservative package manifest evidence with field provenance', async () => {
