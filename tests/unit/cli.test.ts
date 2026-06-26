@@ -2270,6 +2270,12 @@ describe('CLI compatibility behavior', () => {
       'manifest.json',
       'failure.json',
     ]);
+    expect(implemented.get('source-truth-generate')?.summary).toEqual(
+      expect.stringContaining('content-free source-file line/token metadata')
+    );
+    expect(implemented.get('source-truth-generate')?.limitations).toContain(
+      'manifest source-file line/token metadata is content-free text metadata, not behavior verification'
+    );
     expect(implemented.get('source-truth-verify-docs')).toMatchObject({
       command: 'source-truth verify-docs',
       mode: 'source-truth verify-docs --source --docs --output-dir',
@@ -2452,8 +2458,10 @@ describe('CLI compatibility behavior', () => {
       status: 'implemented',
       inputBoundary: 'source-truth-local-docs manifest.json',
       outputFiles: ['stdout verification result'],
+      summary: expect.stringContaining('optional content-free source-file line/token metadata'),
       limitations: expect.arrayContaining([
         'source-truth-local-docs manifest mode only',
+        'source-file line/token metadata is content-free text metadata only',
         'verify does not refresh outputs',
         'no repo freshness check',
         'no source-code verification',
@@ -2521,7 +2529,7 @@ describe('CLI compatibility behavior', () => {
         'existing source-truth-local-docs manifest.json with recorded local source path',
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json'],
-      summary: expect.stringContaining('manifest integrity verification'),
+      summary: expect.stringContaining('content-free source-file line/token manifest metadata'),
       limitations: expect.arrayContaining([
         'source-truth-local-docs manifests only',
         'uses only source.resolvedPath from the existing manifest',
@@ -2625,13 +2633,17 @@ describe('CLI compatibility behavior', () => {
       'no re-export resolution',
       'local explicit sources only',
     ];
+    const expectedGenerateLimitations = [
+      'manifest source-file line/token metadata is content-free text metadata, not behavior verification',
+      ...expectedLimitations,
+    ];
 
     expect(capabilities.sourceTruth.supportedFactFamilies).toEqual(expectedFactFamilies);
     expect(capabilities.sourceTruth.limitations).toEqual(expectedLimitations);
     expect(sourceTruthInspect?.factFamilies).toEqual(expectedFactFamilies);
     expect(sourceTruthInspect?.limitations).toEqual(expectedLimitations);
     expect(sourceTruthGenerate?.factFamilies).toEqual(expectedFactFamilies);
-    expect(sourceTruthGenerate?.limitations).toEqual(expectedLimitations);
+    expect(sourceTruthGenerate?.limitations).toEqual(expectedGenerateLimitations);
   });
 
   it('states the product boundary without promoting unsupported behavior', async () => {
@@ -3896,6 +3908,8 @@ describe('CLI compatibility behavior', () => {
           resolvedPath: join(sourceDir, 'index.ts'),
           byteSize: Buffer.byteLength(source),
           hash: `sha256:${createHash('sha256').update(source).digest('hex')}`,
+          lineCount: countTextLines(source),
+          estimatedTokenCount: estimateTextTokens(source),
           factCount: 2,
           exportFactCount: 2,
           configFactCount: 0,
@@ -8977,11 +8991,15 @@ describe('CLI compatibility behavior', () => {
       'llm-docs-refresh-source-truth-'
     );
 
-    await writeFile(
-      join(sourceDir, 'index.ts'),
-      ['export const value = 2;', 'export function run() {', '  return value;', '}', ''].join('\n'),
-      'utf-8'
-    );
+    const refreshedSource = [
+      'export const value = 2;',
+      'export function run() {',
+      '  return value;',
+      '}',
+      '',
+    ].join('\n');
+
+    await writeFile(join(sourceDir, 'index.ts'), refreshedSource, 'utf-8');
     await writeFile(join(outputDir, 'source-truth.md'), '# Tampered\n', 'utf-8');
 
     const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
@@ -9002,6 +9020,17 @@ describe('CLI compatibility behavior', () => {
     expect(refreshResult.stdout).toContain('Refresh complete');
     expect(report.facts.map((fact) => fact.exportedName)).toEqual(
       expect.arrayContaining(['value', 'run'])
+    );
+    expect(refreshedManifest.sourceFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'index.ts',
+          byteSize: Buffer.byteLength(refreshedSource),
+          hash: `sha256:${createHash('sha256').update(refreshedSource).digest('hex')}`,
+          lineCount: countTextLines(refreshedSource),
+          estimatedTokenCount: estimateTextTokens(refreshedSource),
+        }),
+      ])
     );
     expect(markdown).toContain('run');
     expect(markdown).not.toContain('# Tampered');
@@ -9737,6 +9766,28 @@ describe('CLI compatibility behavior', () => {
     expect(manifestResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
     expect(manifestResult.stdout).toContain('Failures: 0');
     expect(manifestResult.stdout).toContain('Verification passed');
+  });
+
+  it('verifies older source-truth docs manifests without source-file text metadata', async () => {
+    const { manifestPath, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-old-source-metadata-'
+    );
+
+    for (const sourceFile of manifest.sourceFiles as Array<Record<string, unknown>>) {
+      delete sourceFile.lineCount;
+      delete sourceFile.estimatedTokenCount;
+    }
+
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
   });
 
   it('verifies a source discovery manifest and rejects a tampered report', async () => {
@@ -11127,6 +11178,61 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('sourceFiles[0]');
     expect(result.stderr).toContain('hash mismatch');
     expect(result.stderr).toContain('sourceFiles[1]: missing file');
+  });
+
+  it('reports stale source-truth docs source-file line and token metadata without hash drift', async () => {
+    const { manifestPath, sourceDir, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-source-text-drift-'
+    );
+    const sourceFile = manifest.sourceFiles.find((file) => file.path === 'index.ts');
+
+    if (sourceFile === undefined) {
+      throw new Error('expected source-truth index source file');
+    }
+
+    const refreshedSource = [
+      'export const value = 2000;',
+      'export const otherValue = value;',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, sourceFile.path), refreshedSource, 'utf-8');
+    sourceFile.byteSize = Buffer.byteLength(refreshedSource);
+    sourceFile.hash = `sha256:${createHash('sha256').update(refreshedSource).digest('hex')}`;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain('sourceFiles[0]: line count mismatch');
+    expect(result.stderr).toContain('sourceFiles[0]: estimated token count mismatch');
+    expect(result.stderr).not.toContain('hash mismatch');
+    expect(result.stderr).not.toContain('byte size mismatch');
+  });
+
+  it('rejects malformed source-truth docs source-file text metadata when present', async () => {
+    const { manifestPath, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-source-text-shape-'
+    );
+    const sourceFile = manifest.sourceFiles[0] as unknown as Record<string, unknown>;
+
+    sourceFile.lineCount = -1;
+    sourceFile.estimatedTokenCount = 1.5;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'sourceFiles[0].lineCount must be a non-negative integer when present'
+    );
+    expect(result.stderr).toContain(
+      'sourceFiles[0].estimatedTokenCount must be a non-negative integer when present'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it('rejects source-truth report versus manifest count drift', async () => {

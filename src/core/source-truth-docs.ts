@@ -38,6 +38,8 @@ export interface SourceTruthManifestSourceFile {
   resolvedPath: string;
   byteSize: number;
   hash: string;
+  lineCount: number;
+  estimatedTokenCount: number;
   factCount: number;
   exportFactCount: number;
   signatureFactCount?: number;
@@ -157,7 +159,7 @@ export async function generateSourceTruthDocs(
     { path: reportPath, kind: 'source-truth-report-json' },
     { path: markdownPath, kind: 'source-truth-markdown' },
   ]);
-  const manifest = buildManifest(report, generatedOutputs);
+  const manifest = await buildManifest(report, generatedOutputs);
   await writeJsonFile(manifestPath, manifest);
 
   return {
@@ -436,10 +438,12 @@ function formatTestCaseModifiers(modifiers: string[]): string {
   return modifiers.map((modifier) => formatMarkdownCodeSpan(modifier)).join('; ');
 }
 
-function buildManifest(
+async function buildManifest(
   report: SourceTruthInspectionReport,
   generatedOutputs: SourceTruthGeneratedOutput[]
-): SourceTruthDocsManifest {
+): Promise<SourceTruthDocsManifest> {
+  const sourceFiles = await describeSourceTruthManifestSourceFiles(report.files);
+
   return {
     schemaVersion: SOURCE_TRUTH_DOCS_SCHEMA_VERSION,
     mode: SOURCE_TRUTH_DOCS_MODE,
@@ -454,20 +458,41 @@ function buildManifest(
       traversal: report.traversal,
       warnings: report.warnings,
     },
-    sourceFiles: filesWithAnyFacts(report.files).map((file) => ({
-      path: file.path,
-      resolvedPath: file.resolvedPath,
-      byteSize: file.byteSize,
-      hash: formatHash(file.sha256 ?? ''),
-      factCount: file.facts.length + file.configFacts.length + file.contextFacts.length,
-      exportFactCount: file.facts.length,
-      signatureFactCount: file.facts.filter((fact) => fact.signature !== undefined).length,
-      configFactCount: file.configFacts.length,
-      contextFactCount: file.contextFacts.length,
-      parseDiagnosticCount: file.parseDiagnostics?.length ?? 0,
-    })),
+    sourceFiles,
     generatedOutputs,
   };
+}
+
+async function describeSourceTruthManifestSourceFiles(
+  files: SourceTruthFileEvidence[]
+): Promise<SourceTruthManifestSourceFile[]> {
+  return Promise.all(
+    filesWithAnyFacts(files).map(async (file) => {
+      const metadata = await describeGeneratedTextOutput(file.resolvedPath);
+      const hash = formatHash(file.sha256 ?? '');
+
+      if (metadata.byteSize !== file.byteSize || metadata.hash !== hash) {
+        throw new Error(
+          `Source file changed during source-truth manifest generation: ${file.path}`
+        );
+      }
+
+      return {
+        path: file.path,
+        resolvedPath: file.resolvedPath,
+        byteSize: file.byteSize,
+        hash,
+        lineCount: metadata.lineCount,
+        estimatedTokenCount: metadata.estimatedTokenCount,
+        factCount: file.facts.length + file.configFacts.length + file.contextFacts.length,
+        exportFactCount: file.facts.length,
+        signatureFactCount: file.facts.filter((fact) => fact.signature !== undefined).length,
+        configFactCount: file.configFacts.length,
+        contextFactCount: file.contextFacts.length,
+        parseDiagnosticCount: file.parseDiagnostics?.length ?? 0,
+      };
+    })
+  );
 }
 
 function buildFailure(

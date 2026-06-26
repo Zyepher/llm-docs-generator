@@ -3841,6 +3841,8 @@ interface SourceTruthSourceFileEntry {
   resolvedPath: string;
   byteSize: number;
   hash: string;
+  lineCount?: number;
+  estimatedTokenCount?: number;
   factCount: number;
   exportFactCount: number;
   signatureFactCount?: number;
@@ -4142,12 +4144,16 @@ function validateSourceTruthSourceFiles(options: {
     const sourceFileResolvedPath = sourceFile.resolvedPath;
     const sourceFileByteSize = sourceFile.byteSize;
     const sourceFileHash = sourceFile.hash;
+    const sourceFileLineCount = sourceFile.lineCount;
+    const sourceFileEstimatedTokenCount = sourceFile.estimatedTokenCount;
     const factCount = sourceFile.factCount;
     const exportFactCount = sourceFile.exportFactCount;
     const signatureFactCount = sourceFile.signatureFactCount;
     const configFactCount = sourceFile.configFactCount;
     const contextFactCount = sourceFile.contextFactCount;
     const parseDiagnosticCount = sourceFile.parseDiagnosticCount;
+    const hasValidLineCount = isNonNegativeInteger(sourceFileLineCount);
+    const hasValidEstimatedTokenCount = isNonNegativeInteger(sourceFileEstimatedTokenCount);
 
     if (!isNonEmptyString(sourceFilePath)) {
       failures.push(`malformed manifest: ${label}.path must be a non-empty string`);
@@ -4207,6 +4213,18 @@ function validateSourceTruthSourceFiles(options: {
 
     if (!isSha256Hash(sourceFileHash)) {
       failures.push(`malformed manifest: ${label}.hash must be a sha256 hash`);
+    }
+
+    if ('lineCount' in sourceFile && !hasValidLineCount) {
+      failures.push(
+        `malformed manifest: ${label}.lineCount must be a non-negative integer when present`
+      );
+    }
+
+    if ('estimatedTokenCount' in sourceFile && !hasValidEstimatedTokenCount) {
+      failures.push(
+        `malformed manifest: ${label}.estimatedTokenCount must be a non-negative integer when present`
+      );
     }
 
     if (!isNonNegativeInteger(factCount)) {
@@ -4278,6 +4296,12 @@ function validateSourceTruthSourceFiles(options: {
         resolvedPath: sourceFileResolvedPath,
         byteSize: sourceFileByteSize,
         hash: sourceFileHash,
+        ...('lineCount' in sourceFile && hasValidLineCount
+          ? { lineCount: sourceFileLineCount }
+          : {}),
+        ...('estimatedTokenCount' in sourceFile && hasValidEstimatedTokenCount
+          ? { estimatedTokenCount: sourceFileEstimatedTokenCount }
+          : {}),
         factCount,
         exportFactCount,
         ...(signatureFactCount === undefined ? {} : { signatureFactCount }),
@@ -4293,6 +4317,14 @@ function validateSourceTruthSourceFiles(options: {
         rejectSymlink: true,
         rejectSymlinkAncestors: true,
       };
+
+      if (hasValidLineCount) {
+        fileCheck.expectedLineCount = sourceFileLineCount;
+      }
+
+      if (hasValidEstimatedTokenCount) {
+        fileCheck.expectedEstimatedTokenCount = sourceFileEstimatedTokenCount;
+      }
 
       if (trustedRoot !== undefined) {
         fileCheck.trustedRoot = trustedRoot;

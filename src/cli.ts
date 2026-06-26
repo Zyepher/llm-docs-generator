@@ -444,8 +444,10 @@ const CAPABILITIES_CONTRACT = {
         'path/filename test/example context facts',
         'AST-observed test-case label context facts',
       ],
-      summary: 'evidence-bound Markdown and provenance files from source-truth inspection',
+      summary:
+        'evidence-bound Markdown and provenance files from source-truth inspection, with deterministic content-free source-file line/token metadata in the manifest',
       limitations: [
+        'manifest source-file line/token metadata is content-free text metadata, not behavior verification',
         'no behavior inference',
         'no assertion parsing',
         'no test body serialization',
@@ -707,9 +709,10 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'source-truth-local-docs manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'deterministic integrity and schema consistency checks for source-truth docs manifests',
+        'deterministic integrity and schema consistency checks for source-truth docs manifests, including optional content-free source-file line/token metadata when present',
       limitations: [
         'source-truth-local-docs manifest mode only',
+        'source-file line/token metadata is content-free text metadata only',
         'local generated evidence docs only',
         'verify does not refresh outputs',
         'no repo freshness check',
@@ -772,7 +775,7 @@ const CAPABILITIES_CONTRACT = {
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json'],
       summary:
-        'deterministic regeneration of source-truth docs from the manifest-recorded explicit local source path followed by manifest integrity verification of regenerated outputs',
+        'deterministic regeneration of source-truth docs and content-free source-file line/token manifest metadata from the manifest-recorded explicit local source path followed by manifest integrity verification of regenerated outputs',
       limitations: [
         'source-truth-local-docs manifests only',
         'uses only source.resolvedPath from the existing manifest',

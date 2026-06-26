@@ -183,6 +183,8 @@ describe('source-truth docs generation', () => {
         resolvedPath: join(sourceDir, 'alpha.ts'),
         byteSize: Buffer.byteLength(alphaSource),
         hash: `sha256:${sha256(alphaSource)}`,
+        lineCount: countTextLines(alphaSource),
+        estimatedTokenCount: estimateTextTokens(alphaSource),
         factCount: 4,
         exportFactCount: 4,
         signatureFactCount: 2,
@@ -195,6 +197,8 @@ describe('source-truth docs generation', () => {
         resolvedPath: join(sourceDir, 'zeta.ts'),
         byteSize: Buffer.byteLength(zetaSource),
         hash: `sha256:${sha256(zetaSource)}`,
+        lineCount: countTextLines(zetaSource),
+        estimatedTokenCount: estimateTextTokens(zetaSource),
         factCount: 2,
         exportFactCount: 2,
         signatureFactCount: 1,
@@ -414,6 +418,8 @@ describe('source-truth docs generation', () => {
         configFactCount: file.configFactCount,
         contextFactCount: file.contextFactCount,
         hash: file.hash,
+        lineCount: file.lineCount,
+        estimatedTokenCount: file.estimatedTokenCount,
       }))
     ).toEqual([
       {
@@ -424,6 +430,8 @@ describe('source-truth docs generation', () => {
         configFactCount: 4,
         contextFactCount: 0,
         hash: `sha256:${sha256(packageJson)}`,
+        lineCount: countTextLines(packageJson),
+        estimatedTokenCount: estimateTextTokens(packageJson),
       },
       {
         path: 'tsconfig.json',
@@ -433,6 +441,8 @@ describe('source-truth docs generation', () => {
         configFactCount: 4,
         contextFactCount: 0,
         hash: `sha256:${sha256(tsconfigJson)}`,
+        lineCount: countTextLines(tsconfigJson),
+        estimatedTokenCount: estimateTextTokens(tsconfigJson),
       },
     ]);
   });
@@ -491,6 +501,8 @@ describe('source-truth docs generation', () => {
         resolvedPath: join(sourceDir, 'examples/usage.ts'),
         byteSize: Buffer.byteLength(exampleSource),
         hash: `sha256:${sha256(exampleSource)}`,
+        lineCount: countTextLines(exampleSource),
+        estimatedTokenCount: estimateTextTokens(exampleSource),
         factCount: 1,
         exportFactCount: 0,
         signatureFactCount: 0,
@@ -569,6 +581,8 @@ describe('source-truth docs generation', () => {
         resolvedPath: join(sourceDir, 'tests/cases.test.ts'),
         byteSize: Buffer.byteLength(testSource),
         hash: `sha256:${sha256(testSource)}`,
+        lineCount: countTextLines(testSource),
+        estimatedTokenCount: estimateTextTokens(testSource),
         factCount: 4,
         exportFactCount: 0,
         signatureFactCount: 0,

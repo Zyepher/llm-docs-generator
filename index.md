@@ -230,8 +230,10 @@ correctness, and test bodies are omitted. If no export, package/config, or
 context facts are extractable, the command exits non-zero and writes
 `failure.json` referencing the raw evidence report instead of Markdown. It
 rejects output directories that are the source path or inside the source path.
-The source-truth docs manifest records generated output hashes, byte sizes, line
-counts, and deterministic estimated token counts.
+The source-truth docs manifest records source file hashes, byte sizes,
+content-free line counts, deterministic estimated token counts, and fact counts,
+plus generated output hashes, byte sizes, line counts, and deterministic
+estimated token counts.
 
 The current `source-truth verify-docs --source --docs --output-dir` command
 accepts explicit local source and docs file/directory paths only, reuses
@@ -286,7 +288,8 @@ current source docs generator into the manifest directory, including refreshed
 chunk index metadata.
 Source-truth refresh reads the existing manifest, uses only the recorded
 absolute local source path, and regenerates through the current source-truth
-docs generator into the manifest directory. Configured SDK refresh requires the
+docs generator into the manifest directory, including current source-file
+content-free line/token manifest metadata. Configured SDK refresh requires the
 recorded spec path to be an absolute local, existing, non-symlink OpenRef spec
 file outside the output directory; it reparses that exact path, rewrites
 `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs, and
@@ -318,10 +321,11 @@ counts, and deterministic estimated token counts. When
 optional source-docs semantic chunk index metadata is present, it is rebuilt
 from `chunks/semantic-chunks.jsonl` and compared with the manifest.
 Source-truth docs verification checks conservative source-truth manifest shape,
-source path existence/type, source file hashes and byte sizes, generated output
-paths, hashes, byte sizes, line counts, deterministic estimated token counts,
-symlink/path containment, and count consistency with `source-truth-report.json`
-when available. Discovery-report verification checks report file integrity and
+source path existence/type, source file hashes, byte sizes, and optional
+content-free line/token metadata when present, generated output paths, hashes,
+byte sizes, line counts, deterministic estimated token counts, symlink/path
+containment, and count consistency with `source-truth-report.json` when
+available. Discovery-report verification checks report file integrity and
 basic schema/mode/kind/count consistency, and optional candidate evidence index
 metadata against `discovery-report.json`, including URL resource observed HTTP
 freshness evidence when present. Discovery reports are candidate evidence
