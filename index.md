@@ -215,7 +215,11 @@ through the current source docs generator into the manifest directory,
 including refreshed chunk index metadata.
 Source-truth refresh reads the existing manifest, uses only the recorded
 absolute local source path, and regenerates through the current source-truth
-docs generator into the manifest directory. Refresh does not support
+docs generator into the manifest directory. After successful regeneration,
+refresh runs the existing manifest verifier over the newly written manifest
+outputs and reports the checked-file count. This is deterministic
+manifest/output integrity verification only; it does not claim freshness, source
+truth, source-code behavior, or runtime behavior. Refresh does not support
 configured-SDK manifests, discovery-report manifests, URLs, repo freshness,
 broad crawling, source selection, source-code verification, behavior
 validation, remote network work, or source project script execution.
@@ -374,7 +378,8 @@ agent intent/source/scope resolution
   evidence-bound Markdown is available through `source-truth generate --source
   --output-dir`. Explicit local manifest refresh for current
   `local-source-docs` and `source-truth-local-docs` manifests is available
-  through `refresh --manifest <path>` or `refresh --output-dir <dir>`. Broader
+  through `refresh --manifest <path>` or `refresh --output-dir <dir>`, with
+  deterministic post-refresh manifest/output integrity verification. Broader
   crawling, configured SDK refresh, discovery-report refresh, remote freshness
   refresh, source-code verification, and behavior-level source documentation
   remain planned.

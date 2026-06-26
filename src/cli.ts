@@ -579,7 +579,7 @@ const CAPABILITIES_CONTRACT = {
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic regeneration of local source docs from the manifest-recorded explicit local source path, preserving opt-in chunk JSONL and chunk index metadata when the prior manifest recorded that output',
+        'deterministic regeneration of local source docs from the manifest-recorded explicit local source path, preserving opt-in chunk JSONL and chunk index metadata when the prior manifest recorded that output, followed by manifest integrity verification of regenerated outputs',
       limitations: [
         'local-source-docs manifests only',
         'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',
@@ -604,7 +604,7 @@ const CAPABILITIES_CONTRACT = {
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json'],
       summary:
-        'deterministic regeneration of source-truth docs from the manifest-recorded explicit local source path',
+        'deterministic regeneration of source-truth docs from the manifest-recorded explicit local source path followed by manifest integrity verification of regenerated outputs',
       limitations: [
         'source-truth-local-docs manifests only',
         'uses only source.resolvedPath from the existing manifest',
@@ -826,6 +826,20 @@ function printGenerateRequestFailure(message: string): void {
     chalk.yellow(
       'Discovery reports are candidate evidence for agent review; pass an explicit local source path to generate.'
     )
+  );
+}
+
+function isRefreshManifestVerificationError(
+  error: unknown
+): error is Error & { checkedFiles: number; failures: string[] } {
+  const candidate = error as Error & { checkedFiles?: unknown; failures?: unknown };
+
+  return (
+    error instanceof Error &&
+    error.name === 'RefreshManifestVerificationError' &&
+    typeof candidate.checkedFiles === 'number' &&
+    Array.isArray(candidate.failures) &&
+    candidate.failures.every((failure) => typeof failure === 'string')
   );
 }
 
@@ -1657,10 +1671,19 @@ program
       }
       console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
       console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
+      console.log(`  Post-refresh verification: ${result.postRefreshVerification.status}`);
+      console.log(`  Checked files: ${result.postRefreshVerification.checkedFiles}`);
       console.log(chalk.green('Refresh complete'));
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Refresh failed: ${errorMsg}`));
+
+      if (isRefreshManifestVerificationError(error)) {
+        console.error(chalk.red(`  Checked files: ${error.checkedFiles}`));
+        for (const failure of error.failures) {
+          console.error(chalk.red(`  - ${failure}`));
+        }
+      }
 
       if (options.verbose && error instanceof Error && error.stack !== undefined) {
         console.error(chalk.gray(error.stack));

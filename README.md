@@ -71,7 +71,8 @@ Current implemented capabilities include:
 - configured OpenRef SDK generation plus configured-SDK, source-docs,
   source-truth docs, and discovery-report manifest verification
 - explicit-manifest refresh for local source docs and source-truth docs that
-  already record a local source path
+  already record a local source path, with post-refresh manifest integrity
+  verification
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
 - read-only bundled agent context metadata
@@ -144,7 +145,8 @@ The CLI is responsible for:
 - verifying configured-SDK, source-docs, source-truth docs, and
   discovery-report files against recorded metadata
 - refreshing only existing `local-source-docs` and `source-truth-local-docs`
-  manifests that already record explicit local source paths
+  manifests that already record explicit local source paths, then verifying the
+  regenerated manifest outputs
 - failing clearly when a requested source, format, parser, permission, or mode
   cannot be used
 
@@ -201,10 +203,14 @@ uses the recorded absolute local source path, `source.formatHint`, preset
 metadata if present, and whether the prior manifest recorded
 `semantic-chunks-jsonl`, then regenerates into the same output directory. For
 source-truth docs, it uses only the recorded absolute local source path and
-regenerates into the same output directory. Refresh does not support configured
-SDK manifests, discovery-report manifests, URLs, repo freshness, broad website
-crawling, source selection, source-code verification, behavior validation,
-remote network work, or source project script execution.
+regenerates into the same output directory. After successful regeneration,
+refresh runs the existing manifest verifier over the newly written manifest and
+reports the checked-file count. This post-refresh check is deterministic
+manifest/output integrity verification only; it does not claim freshness,
+source truth, source-code behavior, or runtime behavior. Refresh does not
+support configured SDK manifests, discovery-report manifests, URLs, repo
+freshness, broad website crawling, source selection, source-code verification,
+behavior validation, remote network work, or source project script execution.
 
 When `generate --source` is run with `--chunks jsonl`, it also writes
 `chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a

@@ -7,6 +7,8 @@ import {
   CONFIGURED_SDK_MODE,
   MANIFEST_SCHEMA_VERSION,
   validateSourceDocsPresetContract,
+  verifyGenerationManifest,
+  type VerifyGenerationManifestResult,
 } from './manifest.js';
 import {
   generateSourceDocs,
@@ -34,6 +36,20 @@ export class RefreshManifestError extends Error {
   }
 }
 
+export class RefreshManifestVerificationError extends RefreshManifestError {
+  checkedFiles: number;
+  failures: string[];
+
+  constructor(result: VerifyGenerationManifestResult) {
+    super(
+      `post-refresh manifest verification failed with ${result.failures.length} failure(s)`
+    );
+    this.name = 'RefreshManifestVerificationError';
+    this.checkedFiles = result.checkedFiles;
+    this.failures = result.failures;
+  }
+}
+
 export interface RefreshManifestOptions {
   manifestPath: string;
   generator: SourceDocsGeneratorMetadata;
@@ -46,6 +62,10 @@ export interface RefreshManifestResult {
   sourcePath: string;
   sourceFiles: number;
   generatedOutputs: number;
+  postRefreshVerification: {
+    status: 'passed';
+    checkedFiles: number;
+  };
   chunkOutputPath?: string;
   presetName?: string;
 }
@@ -160,7 +180,7 @@ async function refreshSourceDocsManifest(options: {
     (output) => output.kind === SOURCE_DOCS_CHUNKS_JSONL_KIND
   );
 
-  return {
+  return withPostRefreshVerification({
     mode: SOURCE_DOCS_MODE,
     manifestPath: result.manifestPath,
     outputDir: result.outputDir,
@@ -169,7 +189,7 @@ async function refreshSourceDocsManifest(options: {
     generatedOutputs: result.manifest.generatedOutputs.length,
     ...(chunkOutput === undefined ? {} : { chunkOutputPath: chunkOutput.path }),
     ...(result.manifest.preset === undefined ? {} : { presetName: result.manifest.preset.name }),
-  };
+  });
 }
 
 async function refreshSourceTruthDocsManifest(options: {
@@ -187,13 +207,31 @@ async function refreshSourceTruthDocsManifest(options: {
     outputDir,
   });
 
-  return {
+  return withPostRefreshVerification({
     mode: SOURCE_TRUTH_DOCS_MODE,
     manifestPath: result.manifestPath,
     outputDir: result.outputDir,
     sourcePath: result.manifest.source.resolvedPath,
     sourceFiles: result.manifest.sourceFiles.length,
     generatedOutputs: result.manifest.generatedOutputs.length,
+  });
+}
+
+async function withPostRefreshVerification(
+  result: Omit<RefreshManifestResult, 'postRefreshVerification'>
+): Promise<RefreshManifestResult> {
+  const verification = await verifyGenerationManifest({ manifestPath: result.manifestPath });
+
+  if (verification.failures.length > 0) {
+    throw new RefreshManifestVerificationError(verification);
+  }
+
+  return {
+    ...result,
+    postRefreshVerification: {
+      status: 'passed',
+      checkedFiles: verification.checkedFiles,
+    },
   };
 }
 

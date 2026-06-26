@@ -262,13 +262,13 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       artifacts
 - [x] Bundled package skill files for current CLI usage and repo/docs discovery
 - [x] Deterministic local explicit-manifest refresh for current
-      `local-source-docs` and `source-truth-local-docs` manifests only
+      `local-source-docs` and `source-truth-local-docs` manifests only, with
+      post-refresh manifest integrity verification for regenerated outputs
 - [x] Deterministic semantic chunk manifest-index metadata for opt-in
       source-docs `chunks/semantic-chunks.jsonl` exports
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, configured SDK refresh,
-      discovery-report refresh, remote freshness refresh, and refresh
-      verification
+      discovery-report refresh, and remote freshness refresh
 - [ ] Plugin system for custom parsers
 - [x] OpenRef backward compatibility tests
 
@@ -462,12 +462,16 @@ Current explicit local source docs generation scope:
   through the current source docs generator into the manifest directory. For
   source-truth docs it uses only the recorded absolute local source path and
   regenerates through the current source-truth docs generator into the manifest
-  directory. It rejects configured-SDK manifests, discovery-report manifests,
-  malformed/missing manifests, URL-like or non-absolute recorded source paths,
-  and unsupported manifest modes. It does not perform URL fetching, repo
-  freshness checks, broad website crawling, source selection, source-code
-  verification, behavior validation, remote network work, or source project
-  script execution.
+  directory. After successful regeneration, it runs the existing manifest
+  verifier over the newly written manifest outputs and reports the checked-file
+  count. This post-refresh check is deterministic manifest/output integrity
+  verification only; it does not claim freshness, source truth, source-code
+  behavior, or runtime behavior. It rejects configured-SDK manifests,
+  discovery-report manifests, malformed/missing manifests, URL-like or
+  non-absolute recorded source paths, and unsupported manifest modes. It does
+  not perform URL fetching, repo freshness checks, broad website crawling,
+  source selection, source-code verification, behavior validation, remote
+  network work, or source project script execution.
 
 Current OpenAPI / Swagger parser scope:
 
