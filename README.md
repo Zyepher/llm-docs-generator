@@ -209,7 +209,8 @@ Verification currently supports `configured-sdk`, `local-source-docs`,
 `source-truth-local-docs`, `discovery-report`, and
 `source-verification-local-evidence` manifests. Configured SDK verification
 checks manifest shape, source path existence, source content hash and byte
-size, and generated file hashes and byte sizes. Source-docs
+size, generated file hashes, byte sizes, and valid generated output line counts
+and deterministic estimated token counts when present. Source-docs
 verification checks local source path shape and existence, recorded source file
 hashes and byte sizes, generated output paths, hashes, byte sizes, line counts,
 deterministic estimated token counts, and optional semantic chunk indexes

@@ -2582,6 +2582,9 @@ function validateGeneratedOutputs(options: {
       );
     }
 
+    const hasValidLineCount = isNonNegativeInteger(outputLineCount);
+    const hasValidEstimatedTokenCount = isNonNegativeInteger(outputEstimatedTokenCount);
+
     if (
       isNonEmptyString(outputPath) &&
       !isAbsolute(outputPath) &&
@@ -2589,11 +2592,10 @@ function validateGeneratedOutputs(options: {
       isAllowedOutputKind(outputKind, allowedKinds) &&
       isNonNegativeInteger(outputByteSize) &&
       isSha256Hash(outputHash) &&
-      (!requireTextMetadata ||
-        (isNonNegativeInteger(outputLineCount) && isNonNegativeInteger(outputEstimatedTokenCount)))
+      (!requireTextMetadata || (hasValidLineCount && hasValidEstimatedTokenCount))
     ) {
-      const expectedLineCount = requireTextMetadata ? (outputLineCount as number) : undefined;
-      const expectedEstimatedTokenCount = requireTextMetadata
+      const expectedLineCount = hasValidLineCount ? (outputLineCount as number) : undefined;
+      const expectedEstimatedTokenCount = hasValidEstimatedTokenCount
         ? (outputEstimatedTokenCount as number)
         : undefined;
 

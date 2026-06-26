@@ -81,9 +81,8 @@ Current implementation:
   including generated output hashes, byte sizes, line counts, and deterministic
   estimated token counts.
 - Verifies current `configured-sdk` manifests by checking the recorded
-  configured source and generated output file hashes and byte sizes. Optional
-  generated output line counts and estimated token counts are shape-validated
-  when present, but are not recomputed by verification yet.
+  configured source and generated output file hashes, byte sizes, and valid
+  generated output line counts and estimated token counts when present.
 - Verifies current `local-source-docs` manifests by checking source manifest
   shape, local source path existence, recorded source file byte sizes and
   SHA-256 hashes, generated output paths, byte sizes, hashes, line counts, and
@@ -703,20 +702,20 @@ and compact content-free candidate evidence index metadata derived from the
 report. The current `verify` command supports `configured-sdk`,
 `local-source-docs`, `source-truth-local-docs`, `discovery-report`, and
 `source-verification-local-evidence` manifests.
-For configured SDK manifests, it checks source and generated output hashes and
-byte sizes, and rejects malformed optional generated output line/token metadata
-when present; it does not recompute those optional counts. For source-mode
-manifests, it checks local source path shape and existence, source file hashes
-and byte sizes, generated output paths, hashes, byte sizes, line counts, and
-deterministic estimated token counts; when optional semantic chunk manifest
-indexes are present, it also rebuilds them from source-docs JSONL records and
-checks for malformed or stale index data. For source-truth docs manifests, it
-checks source input/resolved path/type shape, local source path existence/type,
-source file path containment for directory sources, source file hashes and byte
-sizes, generated output path containment, allowed source-truth output kinds,
-generated output hashes, byte sizes, line counts, deterministic estimated token
-counts, symlink rejection, inspection schema/mode/traversal shape, and count
-consistency with `source-truth-report.json` when available. For
+For configured SDK manifests, it checks source and generated output hashes,
+byte sizes, and valid generated output line/token metadata when present, and
+rejects malformed optional line/token metadata before file checks. For
+source-mode manifests, it checks local source path shape and existence, source
+file hashes and byte sizes, generated output paths, hashes, byte sizes, line
+counts, and deterministic estimated token counts; when optional semantic chunk
+manifest indexes are present, it also rebuilds them from source-docs JSONL
+records and checks for malformed or stale index data. For source-truth docs
+manifests, it checks source input/resolved path/type shape, local source path
+existence/type, source file path containment for directory sources, source file
+hashes and byte sizes, generated output path containment, allowed source-truth
+output kinds, generated output hashes, byte sizes, line counts, deterministic
+estimated token counts, symlink rejection, inspection schema/mode/traversal
+shape, and count consistency with `source-truth-report.json` when available. For
 discovery-report manifests, it checks `discovery-report.json` existence, hash,
 byte size, line count, deterministic estimated token count, and basic report
 schema/mode/kind/count consistency. When optional candidate evidence index

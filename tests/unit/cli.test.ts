@@ -1868,6 +1868,7 @@ describe('CLI compatibility behavior', () => {
       '--format openref|openref-0.1',
     ]);
     expect(implemented.get('generate-sdk')?.limitations).toContain('no preset generation');
+    expect(implemented.get('verify-configured-sdk')?.summary).toContain('when present');
     expect(implemented.get('verify-discovery-report')).toMatchObject({
       command: 'verify',
       mode: 'verify --manifest or verify --output-dir',
@@ -7493,6 +7494,142 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain(manifest.generatedOutputs[0]?.path);
   });
 
+  it('reports configured SDK generated output line metadata drift', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const outputFile = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
+
+    if (outputFile === undefined || outputFile.lineCount === undefined) {
+      throw new Error('expected configured SDK generated output line metadata');
+    }
+
+    outputFile.lineCount += 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
+    expect(result.stderr).toContain(`output ${outputFile.path}: line count mismatch`);
+    expect(result.stderr).not.toContain('hash mismatch');
+    expect(result.stderr).not.toContain('estimated token count mismatch');
+  });
+
+  it('reports configured SDK generated output estimated token metadata drift', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const outputFile = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
+
+    if (outputFile === undefined || outputFile.estimatedTokenCount === undefined) {
+      throw new Error('expected configured SDK generated output token metadata');
+    }
+
+    outputFile.estimatedTokenCount += 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
+    expect(result.stderr).toContain(`output ${outputFile.path}: estimated token count mismatch`);
+    expect(result.stderr).not.toContain('hash mismatch');
+    expect(result.stderr).not.toContain('line count mismatch');
+  });
+
+  it.each([
+    {
+      label: 'only lineCount',
+      mutate(output: ManifestFileEntry): void {
+        delete output.estimatedTokenCount;
+      },
+    },
+    {
+      label: 'only estimatedTokenCount',
+      mutate(output: ManifestFileEntry): void {
+        delete output.lineCount;
+      },
+    },
+    {
+      label: 'neither optional text metadata field',
+      mutate(output: ManifestFileEntry): void {
+        delete output.lineCount;
+        delete output.estimatedTokenCount;
+      },
+    },
+  ])(
+    'accepts configured SDK generated outputs with $label present',
+    async ({ mutate }) => {
+      const { manifestPath } = await generateSwiftFixture();
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+
+      for (const output of manifest.generatedOutputs) {
+        mutate(output);
+      }
+
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCli(['verify', '--manifest', manifestPath]);
+
+      expect(result.stdout).toContain('Manifest verification');
+      expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
+      expect(result.stdout).toContain('Failures: 0');
+      expect(result.stdout).toContain('Verification passed');
+    }
+  );
+
+  it('rejects mixed valid and invalid optional generated output metadata before file checks', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const outputFile = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs') as
+      | (ManifestFileEntry & { estimatedTokenCount: unknown })
+      | undefined;
+
+    if (outputFile === undefined || outputFile.lineCount === undefined) {
+      throw new Error('expected configured SDK generated output line metadata');
+    }
+
+    outputFile.estimatedTokenCount = -1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'estimatedTokenCount must be a non-negative integer when present'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+    expect(result.stderr).not.toContain('line count mismatch');
+  });
+
+  it('continues to follow configured SDK generated output symlinks during verification', async () => {
+    const { outputDir, manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const outputFile = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
+
+    if (outputFile === undefined) {
+      throw new Error('expected configured SDK generated output');
+    }
+
+    const outputPath = join(outputDir, outputFile.path);
+    const linkedTargetPath = join(dirname(outputDir), 'configured-sdk-output-target.txt');
+    const originalOutput = await readFile(outputPath, 'utf-8');
+
+    await writeFile(linkedTargetPath, originalOutput, 'utf-8');
+    await rm(outputPath, { force: true });
+    await symlink(linkedTargetPath, outputPath, 'file');
+
+    const result = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
+  });
+
   it('reports local source docs source drift', async () => {
     const { manifestPath, sourceDir, manifest } = await generateSourceDocsFixture();
     const sourceFile = manifest.sourceFiles[0];
@@ -7555,6 +7692,30 @@ describe('CLI compatibility behavior', () => {
     );
     expect(result.stderr).toContain('line count mismatch');
     expect(result.stderr).toContain('estimated token count mismatch');
+  });
+
+  it('requires source docs generated output line and token metadata before file checks', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const outputFile = manifest.generatedOutputs[0];
+
+    if (outputFile === undefined) {
+      throw new Error('expected generated source docs fixture output file');
+    }
+
+    delete outputFile.lineCount;
+    delete outputFile.estimatedTokenCount;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('output[0].lineCount must be a non-negative integer');
+    expect(result.stderr).toContain(
+      'output[0].estimatedTokenCount must be a non-negative integer'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it('reports source-truth docs generated output drift', async () => {
