@@ -39,13 +39,27 @@ Generate agent-optimized docs for Tailwind CSS. Stay on Tailwind 3.
 The agent resolves the source and scope, then calls deterministic CLI commands:
 
 ```bash
-llm-docs discover --source ./docs --output-dir ./reports/local-docs
-llm-docs generate --source ./docs --format markdown --output-dir ./agent-docs
+llm-docs discover --source <explicit-tailwind-v3-docs-path> --output-dir ./reports/tailwind-v3
+llm-docs generate --source <explicit-tailwind-v3-docs-path> --format markdown --output-dir ./agent-docs/tailwind-v3
 ```
 
 The CLI never silently decides that a source is authoritative. Discovery
 produces candidate evidence reports for the agent to review. Generation uses an
 explicit local file or directory selected by the agent.
+
+Common input patterns:
+
+- Repo URL: the agent chooses repo-docs versus source-truth intent, version/ref,
+  and repo-relative scope, then calls `llm-docs discover --repo <url> --scope
+  <scope>` before generating from a selected explicit local path.
+- Docs URL: the agent calls `llm-docs discover --url <url>` for bounded
+  evidence. Current generation still needs an explicit local source path; the
+  CLI does not generate directly from a remote URL or discovery report.
+- Package or product name: the agent resolves official package/product
+  identity, docs/repo URL, version, and scope before the CLI is called. The CLI
+  does not decide package authority, source truth, or task fit.
+- Local path: the agent verifies the path, optionally runs `discover --source`,
+  then runs `generate --source <path>` when that path remains selected.
 
 ## Capabilities
 

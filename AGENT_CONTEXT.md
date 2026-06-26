@@ -241,7 +241,7 @@ Current implementation:
   `estimatedTokenCount`) plus source-docs opt-in chunk JSONL file metadata,
   compact chunk indexes when requested, and compact content-free discovery
   candidate evidence indexes. Discovery modes are inspection foundations only;
-  they do not generate docs, choose sources, assign trust scores, infer
+  they do not generate docs, choose sources, assign trust or authority labels, infer
   authority, or claim source truth.
 - Local and repo discovery order candidates by deterministic evidence category
   and normalized path for agent review. Website discovery orders extracted
@@ -309,7 +309,7 @@ Agent workflow:
 4. If a source repo is discovered, use the repo exploration workflow.
 5. Review candidate evidence reports by first-party evidence, structure,
    explicit scope/version/product matches, freshness, and parseability; treat
-   this as agent judgment, not CLI scoring.
+   this as agent judgment, not a CLI judgment.
 6. Run this project's parser/formatter on the agent-selected source.
 7. If the user asks for source-truth confidence and a source repo is available,
    verify API signatures, config defaults, routes, exported types, and behavior
@@ -473,13 +473,13 @@ Reviewers must reject:
 
 - CLI behavior or docs that imply discovery decides authority, correctness,
   source truth, source-truth confidence, or task fit.
-- Discovery or candidate changes that add or imply source scoring, trust
-  scoring, authority scoring, hidden preferred-source selection, or numeric
-  task-fit ranking.
+- Discovery or candidate changes that add or imply source rating, trust
+  rating, authority rating, hidden preferred-source selection, or numeric
+  task-fit ordering.
 - Candidate evidence reports described as ambiguous candidate reports, trust
-  scoring, preferred-source selection, or hidden source-specific guessing
+  ratings, preferred-source selection, or hidden source-specific guessing
   instead of factual evidence reports.
-- Generation from a top or first ordered candidate unless the user or agent
+- Generation from a first ordered candidate unless the user or agent
   supplies that candidate explicitly, or a documented automation flag requires
   it.
 - Hidden source-specific guesses, such as inferring product-specific docs paths,
@@ -759,7 +759,7 @@ Do not ask when:
 - Do not silently upgrade pinned versions.
 - Do not let CLI discovery make hidden authority decisions; it must produce
   inspectable deterministic evidence and ordering for agent review.
-- Do not generate from a top or first ordered candidate unless the user or
+- Do not generate from a first ordered candidate unless the user or
   agent has explicitly selected that candidate or a documented automation flag
   requires it.
 - Do not claim source-truth codebase docs go beyond observed export/signature,
@@ -782,9 +782,42 @@ Official docs:
 
 ```text
 User: Generate LLM docs for Tailwind CSS.
-Agent: Resolve official docs/repo, decide latest or requested version, review a
-bounded inspection report when needed, convert the selected source, and write
-provenance.
+Agent: Resolve the product name to the official docs/repo, decide latest or
+requested version, choose explicit source/scope, review a bounded inspection
+report when needed, convert the selected local source, and write provenance.
+The CLI does not decide that Tailwind maps to a package, repo, release line, or
+source path.
+```
+
+Repo URL input:
+
+```text
+User: Generate LLM docs from https://github.com/owner/project using the docs folder.
+Agent: Resolve intent as repo docs, choose explicit scope `docs`, then run
+`llm-docs discover --repo https://github.com/owner/project --scope docs
+--output-dir <report-dir>`. Review `discovery-report.json` as candidate
+evidence. If the selected source is an explicit local docs path in the repo
+cache, run `llm-docs generate --source <cache-path>/docs --output-dir <dir>`.
+```
+
+Docs URL input:
+
+```text
+User: Inspect https://example.com/docs and generate docs if the source is usable.
+Agent: Run bounded URL discovery for that explicit URL. Review the report and
+warnings. Do not pass the URL or discovery report to `generate --source`; either
+select an explicit local source obtained through an approved workflow or report
+that current generation cannot proceed from the remote candidate alone.
+```
+
+Package name input:
+
+```text
+User: Generate docs for @scope/widget on v2.
+Agent: Resolve package identity, official repo/docs, version/ref, and source
+scope as agent work. Then call discovery with the explicit repo/docs URL or
+local path. The CLI reports evidence only; it does not resolve package
+authority, source truth, or task fit.
 ```
 
 Verified official docs:
@@ -792,8 +825,10 @@ Verified official docs:
 ```text
 User: Generate docs from the official Supabase docs and verify facts against
 the source code.
-Agent: Convert the official docs, inspect the matching implementation version,
-verify API and behavior claims, and flag conflicts in the manifest.
+Agent: Convert the selected official docs source. Run source-code verification
+only when `capabilities --json` reports the requested mode and explicit source
+and docs paths are available; otherwise report that broad official-docs
+behavior/API claim verification remains planned.
 ```
 
 Local docs:
@@ -823,8 +858,9 @@ Pinned version:
 
 ```text
 User: Generate Tailwind docs but stay on Tailwind 3.
-Agent: Resolve latest v3 tag/branch, avoid Tailwind 4, record pinned version in
-manifest.
+Agent: Resolve latest v3 tag/branch or docs source as agent work, avoid
+Tailwind 4, choose the explicit source/scope before calling the CLI, and record
+pinned version in provenance.
 ```
 
 Ambiguous repo request:

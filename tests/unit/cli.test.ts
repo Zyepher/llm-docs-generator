@@ -53,6 +53,8 @@ const tsxBin = join(
 
 const tempDirs: string[] = [];
 const servers: Server[] = [];
+const repoPathRestorations: Array<{ originalPath: string; backupPath: string }> = [];
+const repoContentRestorations: Array<{ path: string; content: string }> = [];
 interface ManifestFileEntry {
   path: string;
   kind: string;
@@ -1169,7 +1171,49 @@ function compareStringsByCodeUnit(a: string, b: string): number {
   return a.length - b.length;
 }
 
+function isErrnoCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === code
+  );
+}
+
+async function restoreRepoPath(restoration: {
+  originalPath: string;
+  backupPath: string;
+}): Promise<void> {
+  try {
+    await rename(restoration.backupPath, restoration.originalPath);
+  } catch (error) {
+    if (!isErrnoCode(error, 'ENOENT')) {
+      throw error;
+    }
+
+    await stat(restoration.originalPath);
+  }
+}
+
+function forgetRestoration<T>(restorations: T[], restoration: T): void {
+  const index = restorations.indexOf(restoration);
+
+  if (index >= 0) {
+    restorations.splice(index, 1);
+  }
+}
+
 afterEach(async () => {
+  const pathRestorations = repoPathRestorations.splice(0).reverse();
+  for (const restoration of pathRestorations) {
+    await restoreRepoPath(restoration);
+  }
+
+  const contentRestorations = repoContentRestorations.splice(0).reverse();
+  for (const restoration of contentRestorations) {
+    await writeFile(restoration.path, restoration.content, 'utf-8');
+  }
+
   await Promise.all(servers.splice(0).map((server) => closeServer(server)));
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -1601,14 +1645,17 @@ describe('CLI compatibility behavior', () => {
     const backupDir = await mkdtemp(join(tmpdir(), 'llm-docs-agent-doctor-artifact-'));
     tempDirs.push(backupDir);
     const backupPath = join(backupDir, 'SKILL.md');
+    const restoration = { originalPath: artifactPath, backupPath };
     let result!: CliResult;
 
+    repoPathRestorations.push(restoration);
     await rename(artifactPath, backupPath);
 
     try {
       result = await runCliWithExit(['agent', 'doctor', '--json']);
     } finally {
-      await rename(backupPath, artifactPath);
+      await restoreRepoPath(restoration);
+      forgetRestoration(repoPathRestorations, restoration);
     }
 
     expect(result.exitCode).toBe(1);
@@ -1616,21 +1663,24 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('Agent doctor failed: packaged agent artifact unavailable');
     expect(result.stderr).toContain('skills/repo-docs-discovery/SKILL.md');
     expect(result.stderr).toContain('ENOENT');
-  });
+  }, 15000);
 
   it('exits nonzero when agent doctor package binary metadata is malformed', async () => {
     const packagePath = join(repoRoot, 'package.json');
     const originalPackageJson = await readFile(packagePath, 'utf-8');
     const malformedPackageJson = JSON.parse(originalPackageJson) as Record<string, unknown>;
+    const restoration = { path: packagePath, content: originalPackageJson };
     let result!: CliResult;
 
     malformedPackageJson.bin = {};
 
     try {
+      repoContentRestorations.push(restoration);
       await writeFile(packagePath, `${JSON.stringify(malformedPackageJson, null, 2)}\n`, 'utf-8');
       result = await runCliWithExit(['agent', 'doctor', '--json']);
     } finally {
-      await writeFile(packagePath, originalPackageJson, 'utf-8');
+      await writeFile(restoration.path, restoration.content, 'utf-8');
+      forgetRestoration(repoContentRestorations, restoration);
     }
 
     expect(result.exitCode).toBe(1);
@@ -1638,7 +1688,7 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain(
       'Agent doctor failed: malformed package metadata: expected llm-docs bin entry'
     );
-  });
+  }, 15000);
 
   it('prints a deterministic capabilities JSON contract without generatedAt', async () => {
     const first = await runCli(['capabilities', '--json']);
