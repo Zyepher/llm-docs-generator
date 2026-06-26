@@ -34,7 +34,7 @@ Use this skill when the task is about this repository or about calling the insta
   installation, package resolution, auto-selection, directory generation, or
   sandboxing unless capabilities reports those features separately.
 - Do not treat discovery reports as source-selection decisions. They are candidate evidence reports for agent review, and report order is not authority, source truth, freshness, or task-fit proof.
-- Reject unsupported candidate scoring, CLI source-selection, authority/source-truth, correctness, task-fit, or "top candidate" claims in docs or code review. Do not add numeric candidate scores; report ordering is readability only.
+- Reject unsupported candidate scoring, CLI source-selection, authority/source-truth, correctness, source-intent, task-fit, or "top candidate" claims in docs or code review. Do not add numeric candidate scores; report ordering is readability only. Require explicit user/agent candidate input or a documented automation flag before generation from discovery candidates.
 
 ## Current Safe Workflow
 

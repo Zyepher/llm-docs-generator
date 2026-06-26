@@ -37,9 +37,11 @@ extracting links from already fetched content, and producing candidate evidence
 reports for agent review. Discovery reports may list, group, filter, and
 deterministically order candidates only by factual evidence signals: file type,
 path, metadata, source URL, hash, freshness metadata when explicitly observed,
-parseability, and explicit user-provided scope. The CLI must not silently choose
-authoritative sources, guess source-specific documentation rules, crawl
-arbitrary links, render JavaScript, or pretend to understand arbitrary websites.
+parseability, and explicit user-provided scope. The CLI must not decide
+authority, correctness, source truth, source intent, task fit, or whether a
+candidate satisfies the user's task. It must not silently choose sources, guess
+source-specific documentation rules, crawl arbitrary links, render JavaScript,
+or pretend to understand arbitrary websites.
 
 ## Current Capability Versus Target Capability
 
@@ -508,8 +510,10 @@ For future worker or reviewer prompts that touch CLI source ingestion,
 discovery-like inspection, manifests, freshness, provenance, or docs contracts,
 include an explicit reminder to align with the Product Boundary above.
 Those prompts must explicitly check for unsupported candidate scoring,
-CLI source-selection, authority/source-truth, correctness, task-fit, or
-"top candidate" claims.
+source-selection, authority, source-truth, correctness, source-intent,
+task-fit, or "top candidate" claims, and must require explicit candidate input
+or a documented automation flag before any generation from discovery
+candidates.
 
 Reviewers must allow:
 
@@ -522,7 +526,8 @@ Reviewers must allow:
 Reviewers must reject:
 
 - CLI behavior or docs that imply discovery decides authority, correctness,
-  source truth, source-truth confidence, or task fit.
+  source truth, source-truth confidence, source intent, task fit, or whether a
+  candidate satisfies the user's task.
 - Discovery or candidate changes that add or imply candidate scoring, source
   rating, trust rating, authority rating, hidden preferred-source logic,
   authority/trust scoring or ratings, new numeric scores, or numeric task-fit
@@ -533,9 +538,9 @@ Reviewers must reject:
   reports.
 - CLI selection of a discovery-report candidate, generation from a report's first
   entry or implied leading entry, hidden preferred-source logic,
-  authority/trust scoring or ratings, or unsupported discovery claims unless
-  the user or agent supplies that candidate explicitly or a documented
-  automation flag requires it.
+  authority/trust scoring or ratings, or unsupported discovery claims. Any
+  generation from discovery candidates must require explicit user/agent
+  candidate input or a documented automation flag.
 - Hidden source-specific guesses, such as inferring product-specific docs paths,
   release lines, package identity, or framework behavior without explicit
   source evidence.

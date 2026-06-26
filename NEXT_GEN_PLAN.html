@@ -45,7 +45,7 @@
               Humans should prompt their AI agent, not manually drive a complex CLI. The agent resolves
               intent, source, scope, version, and path, then uses <code>llm-docs</code> as a deterministic
               capability layer. The CLI ingests explicit sources, performs bounded inspection such as
-              scoped repo file listing or URL crawling, converts selected docs into structured Markdown,
+              scoped repo file listing or URL resource inspection, converts explicit agent/user-selected docs into structured Markdown,
               and records exactly where every generated artifact came from. When users ask for
               source-truth codebase docs, the agent must choose that workflow explicitly and preserve
               source-file provenance.
@@ -303,7 +303,7 @@
             <div class="flow-line">
               <span class="label">5. Convert</span>
               <p>
-                Parse the selected source into the shared DocNode tree, format it into agent-optimized
+                Parse the explicit agent/user-selected source into the shared DocNode tree, format it into agent-optimized
                 Markdown, chunk by semantic boundaries, and preserve stable section IDs for repeatable
                 references.
               </p>
@@ -543,7 +543,7 @@ llm-docs discover supabase/supabase --format openref</code></pre>
           </article>
 
           <article class="command">
-            <h3>Generate From Selected Source</h3>
+            <h3>Generate From Explicit Source</h3>
             <p>
               Use an agent-supplied source, candidate, or manifest, then write an agent-readable
               Markdown pack plus manifest. Future discovery-report input must require an explicit
@@ -859,8 +859,8 @@ capabilities:
             <h3>Website But No Repo Link</h3>
             <p>
               Check llms.txt, sitemap.xml, canonical tags, robots.txt, and package metadata within the
-              explicit URL scope. If no source is found, crawl only when allowed and record that output came
-              from HTML.
+              explicit URL scope. If no source is found, stop at the candidate evidence report or use an
+              explicitly approved HTML extraction workflow, and record that output came from HTML.
             </p>
             <div class="tag-row"><span class="pill">HTML fallback</span><span class="pill amber">Lower confidence</span></div>
           </article>
@@ -1083,7 +1083,7 @@ failure:
               <li>Clone or update GitHub repos in a stable external cache.</li>
               <li>Discover OpenAPI, Swagger, OpenRef, markdown, MDX, DocC, RST, llms.txt, and sitemap candidates.</li>
               <li>List, group, filter, and deterministically order observed candidates using factual evidence signals for agent review.</li>
-              <li>Generate agent-optimized Markdown only from explicit sources or explicit agent/user-selected candidates, and write manifest, candidate evidence report, and failure report artifacts for the relevant workflow.</li>
+              <li>Generate agent-optimized Markdown only from explicit sources, explicit agent/user-selected candidates, or documented automation-flag candidate handling, and write manifest, candidate evidence report, and failure report artifacts for the relevant workflow.</li>
               <li>Support source-code verification of official docs when the source repo is available and the user asks for source-truth confidence.</li>
               <li>Distinguish repo docs conversion from source-truth codebase docs generation, and fail clearly if the requested mode is not implemented.</li>
               <li>Verify old outputs against source existence, commit hash, content hash, and parser success.</li>
@@ -1097,6 +1097,7 @@ failure:
               <li>Execute examples, package scripts, docs build scripts, or arbitrary repository commands.</li>
               <li>Bypass authentication, scrape private content without user-provided access, or store tokens.</li>
               <li>Claim a docs website is authoritative when only a noisy HTML extraction succeeded.</li>
+              <li>Generate from a discovery report's first or leading candidate without explicit candidate input or a documented automation flag.</li>
               <li>Silently use stale cache content when current source verification fails.</li>
               <li>Mix unrelated SDKs or products in one output just because they share a monorepo.</li>
             </ul>
