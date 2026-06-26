@@ -16,6 +16,12 @@ import {
   type SemanticChunkManifestIndexChunk,
 } from './semantic-chunk-index.js';
 import {
+  buildSourceVerificationFileEvidenceIndexFromUnknownReport,
+  sourceVerificationFileEvidenceIndexesEqual,
+  validateSourceVerificationFileEvidenceIndex,
+  type SourceVerificationFileEvidenceIndex,
+} from './source-verification-file-evidence-index.js';
+import {
   validateParserPluginManifestFile,
   type ParserPluginFormatMetadata,
   type ParserPluginManifestMetadata,
@@ -1215,6 +1221,13 @@ async function verifySourceVerificationManifest(
   const source = sourceVerificationRecord.source;
   const docs = sourceVerificationRecord.docs;
   const summary = sourceVerificationRecord.summary;
+  const fileEvidenceIndex =
+    sourceVerificationRecord.fileEvidenceIndex === undefined
+      ? undefined
+      : validateSourceVerificationFileEvidenceIndex(
+          sourceVerificationRecord.fileEvidenceIndex,
+          failures
+        );
 
   if (!isNonEmptyString(reportPath)) {
     failures.push('malformed manifest: sourceVerification.reportPath must be a non-empty string');
@@ -1297,6 +1310,7 @@ async function verifySourceVerificationManifest(
         source: source as Record<string, unknown>,
         docs: docs as Record<string, unknown>,
         summary: summary as Record<string, unknown>,
+        fileEvidenceIndex,
       },
       failures,
     });
@@ -4342,6 +4356,7 @@ async function verifySourceVerificationReportFile(options: {
     source: Record<string, unknown>;
     docs: Record<string, unknown>;
     summary: Record<string, unknown>;
+    fileEvidenceIndex: SourceVerificationFileEvidenceIndex | undefined;
   };
   failures: string[];
 }): Promise<void> {
@@ -4417,6 +4432,25 @@ async function verifySourceVerificationReportFile(options: {
   }
 
   validateSourceVerificationReportSummaryConsistency(report, summary, failures);
+
+  if (expected.fileEvidenceIndex !== undefined) {
+    const rebuiltFileEvidenceIndex = buildSourceVerificationFileEvidenceIndexFromUnknownReport(
+      report,
+      failures
+    );
+
+    if (
+      rebuiltFileEvidenceIndex !== undefined &&
+      !sourceVerificationFileEvidenceIndexesEqual(
+        expected.fileEvidenceIndex,
+        rebuiltFileEvidenceIndex
+      )
+    ) {
+      failures.push(
+        'source-verification file evidence index: manifest metadata does not match source-verification-report.json'
+      );
+    }
+  }
 
   if (isObjectRecord(report.source) && isObjectRecord(report.sourceInspection)) {
     compareSourceVerificationReportEndpoint({

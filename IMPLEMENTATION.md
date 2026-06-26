@@ -255,7 +255,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       facts with raw evidence report and provenance manifest
 - [x] Explicit `source-truth verify-docs --source --docs --output-dir`
       source/docs lexical evidence report for local Markdown/MDX inline-code
-      references compared with observed local source exported names
+      references compared with observed local source exported names, plus
+      compact content-free manifest file evidence index metadata derived from
+      the local report
 - [x] Partial content-free line/token manifest metadata for generated/report
       files and local source-docs source files (`lineCount` and deterministic
       `estimatedTokenCount`)
@@ -492,17 +494,19 @@ Current source/docs evidence scope:
 - Exact matches are lexical matches against observed source exported names.
   Unmatched references are reported as observations, not correctness failures.
 - Successful runs write `source-verification-report.json` and `manifest.json`.
+  The manifest includes compact content-free source/docs file evidence index
+  metadata derived only from `source-verification-report.json`.
   Unsupported docs inputs or supported docs with no inline-code identifier
   references write `source-verification-report.json` plus `failure.json` and do
   not write a manifest.
   `source-verification-local-evidence` manifests are supported by `verify` for
   deterministic report file integrity, report path consistency, source/docs
   endpoint provenance against the report, manifest/report summary consistency,
-  report summary consistency with body arrays, and `sourceInspection.source`
-  consistency only. They do not refresh outputs or sources, inspect additional
-  source/docs files, perform broad official-docs claim checking, validate
-  source-code behavior, decide task fit/source truth/source selection, or prove
-  docs correctness.
+  report summary consistency with body arrays, `sourceInspection.source`
+  consistency, and optional file evidence index rebuild checks only. They do not
+  refresh outputs or sources, inspect additional source/docs files, perform broad
+  official-docs claim checking, validate source-code behavior, decide task
+  fit/source truth/source selection, or prove docs correctness.
 
 Current explicit local source docs generation scope:
 
@@ -569,11 +573,12 @@ Current explicit local source docs generation scope:
   Source-verification manifest checks verify `source-verification-report.json`
   file integrity, report path consistency, source/docs endpoint provenance
   against the report, manifest/report summary consistency, report summary
-  consistency with body arrays, and `sourceInspection.source` consistency; they
-  do not refresh outputs or sources, inspect additional source/docs files,
-  parse behavior claims, perform broad official-docs claim checking, validate
-  source-code behavior, decide task fit/source truth/source selection, or prove
-  docs correctness.
+  consistency with body arrays, `sourceInspection.source` consistency, and
+  optional compact content-free source/docs file evidence index metadata rebuilt
+  from the report; they do not refresh outputs or sources, inspect additional
+  source/docs files, parse behavior claims, perform broad official-docs claim
+  checking, validate source-code behavior, decide task fit/source truth/source
+  selection, or prove docs correctness.
 
 - `refresh --manifest <path>` / `refresh --output-dir <dir>` supports only
   current built-in-parser `local-source-docs`, `source-truth-local-docs`, and

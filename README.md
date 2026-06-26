@@ -300,12 +300,14 @@ Source-verification manifest checks cover `source-verification-report.json`
 existence, hash, byte size, line count, deterministic estimated token count,
 report schema/mode/output path consistency, source/docs endpoint provenance
 against the report, manifest summary consistency with report metadata, report
-summary consistency with body arrays, and `sourceInspection.source`
-consistency. These checks do not refresh outputs or sources, inspect
-additional source/docs files, perform broad official-docs claim checking,
-validate source-code behavior or runtime behavior, validate freshness, refresh
-remote resources, decide candidate authority, task fit, source truth, or source
-selection, or prove that docs statements are correct.
+summary consistency with body arrays, `sourceInspection.source` consistency,
+and optional compact content-free source/docs file evidence index metadata
+rebuilt from `source-verification-report.json`. These checks do not refresh
+outputs or sources, inspect additional source/docs files, perform broad
+official-docs claim checking, validate source-code behavior or runtime
+behavior, validate freshness, refresh remote resources, decide candidate
+authority, task fit, source truth, or source selection, or prove that docs
+statements are correct.
 
 Refresh currently supports existing built-in-parser `local-source-docs`,
 `source-truth-local-docs`, and configured OpenRef SDK manifests with recorded
@@ -372,14 +374,16 @@ local implementation source path, it can run:
 llm-docs source-truth verify-docs --source ./src --docs ./docs --output-dir ./reports/source-verification
 ```
 
-This writes `source-verification-report.json` and `manifest.json`. The report
-reuses the conservative `source-truth inspect` source facts and extracts only
-Markdown/MDX inline-code identifier references from the explicit docs path.
-Exact matches are lexical matches against observed exported names. Unmatched
-references are reported as observations for agent review, not correctness
-failures. This mode does not fetch network sources, render JavaScript, select
-sources, verify broad official docs claims, infer routes/frameworks/runtime
-behavior, or decide source authority.
+This writes `source-verification-report.json` and `manifest.json`. The manifest
+includes compact content-free source/docs file evidence index metadata derived
+only from the local report. The report reuses the conservative `source-truth
+inspect` source facts and extracts only Markdown/MDX inline-code identifier
+references from the explicit docs path. Exact matches are lexical matches
+against observed exported names. Unmatched references are reported as
+observations for agent review, not correctness failures. This mode does not
+fetch network sources, render JavaScript, select sources, verify broad official
+docs claims, infer routes/frameworks/runtime behavior, or decide source
+authority.
 
 ## Failure Reports
 

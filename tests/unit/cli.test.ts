@@ -418,6 +418,10 @@ interface CandidateEvidenceManifestIndex {
   }>;
 }
 
+type SourceVerificationFileEvidenceManifestIndex = NonNullable<
+  SourceVerificationManifest['sourceVerification']['fileEvidenceIndex']
+>;
+
 interface CapabilitiesContract {
   schemaVersion: string;
   generator: {
@@ -942,6 +946,24 @@ function candidateEvidenceIndexAggregateHashForTest(index: CandidateEvidenceMani
   return `sha256:${hash.digest('hex')}`;
 }
 
+function sourceVerificationFileEvidenceIndexAggregateHashForTest(
+  index: SourceVerificationFileEvidenceManifestIndex
+): string {
+  const hash = createHash('sha256');
+  hash.update('llm-docs-generator:source-verification-file-evidence-index:v1\n');
+  hash.update(
+    JSON.stringify({
+      sourceFileCount: index.sourceFileCount,
+      docsFileCount: index.docsFileCount,
+      sourceFiles: index.sourceFiles,
+      docsFiles: index.docsFiles,
+    })
+  );
+  hash.update('\n');
+
+  return `sha256:${hash.digest('hex')}`;
+}
+
 function expectLocalCandidateEvidenceIndex(
   index: CandidateEvidenceManifestIndex | undefined,
   report: { candidates: DiscoveryCandidate[] },
@@ -1015,6 +1037,75 @@ function expectCandidateEvidenceIndexHasNoReportContent(
   expect(text).not.toContain('Stable docs.');
   expect(text).not.toContain('<h1>Home</h1>');
   expect(text).not.toContain('Readme\\n======');
+}
+
+function expectSourceVerificationFileEvidenceIndex(
+  index: SourceVerificationFileEvidenceManifestIndex | undefined,
+  report: SourceVerificationReport
+): asserts index is SourceVerificationFileEvidenceManifestIndex {
+  expect(index).toBeDefined();
+  expect(index).toMatchObject({
+    sourceFileCount: report.sourceInspection.files.length,
+    docsFileCount: report.docs.files.length,
+  });
+  expect(index.aggregateHash).toBe(sourceVerificationFileEvidenceIndexAggregateHashForTest(index));
+  expect(index.sourceFiles).toEqual(
+    report.sourceInspection.files
+      .map((file) => ({
+        path: file.path,
+        status: file.status,
+        byteSize: file.byteSize,
+        ...(file.sha256 === undefined ? {} : { sha256: file.sha256 }),
+        supported: file.supported,
+        facts: file.facts.length,
+        configFacts: file.configFacts.length,
+        contextFacts: file.contextFacts.length,
+        ...(file.parseDiagnostics === undefined || file.parseDiagnostics.length === 0
+          ? {}
+          : { parseDiagnostics: file.parseDiagnostics.length }),
+        ...(file.skipReason === undefined ? {} : { skipReason: file.skipReason }),
+      }))
+      .sort(compareSourceVerificationFileEvidenceEntries)
+  );
+  expect(index.docsFiles).toEqual(
+    report.docs.files
+      .map((file) => ({
+        path: file.path,
+        status: file.status,
+        byteSize: file.byteSize,
+        ...(file.sha256 === undefined ? {} : { sha256: file.sha256 }),
+        supported: file.supported,
+        references: file.referenceCount,
+        ...(file.skipReason === undefined ? {} : { skipReason: file.skipReason }),
+      }))
+      .sort(compareSourceVerificationFileEvidenceEntries)
+  );
+}
+
+function expectSourceVerificationFileEvidenceIndexHasNoReportContent(
+  index: SourceVerificationFileEvidenceManifestIndex
+): void {
+  const text = JSON.stringify(index);
+
+  expect(text).not.toContain('makeClient()');
+  expect(text).not.toContain('MissingClient');
+  expect(text).not.toContain('return {} as Client');
+  expect(text).not.toContain('source note that should not leak');
+  expect(text).not.toContain('docs note that should not leak');
+}
+
+function compareSourceVerificationFileEvidenceEntries(
+  left: { path: string; status: string },
+  right: { path: string; status: string }
+): number {
+  return (
+    compareStringsByCodeUnitForTest(left.path, right.path) ||
+    compareStringsByCodeUnitForTest(left.status, right.status)
+  );
+}
+
+function compareStringsByCodeUnitForTest(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -1304,6 +1395,59 @@ async function createWebsiteDiscoveryVerifyFixture(
   };
 }
 
+async function createSourceVerificationVerifyFixture(
+  prefix = 'llm-docs-source-verification-verify-'
+): Promise<{
+  dir: string;
+  sourceDir: string;
+  docsDir: string;
+  outputDir: string;
+  reportPath: string;
+  manifestPath: string;
+}> {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), prefix));
+  tempDirs.push(dir);
+  const sourceDir = join(dir, 'source');
+  const docsDir = join(dir, 'docs');
+  const outputDir = join(dir, 'reports');
+  const reportPath = join(outputDir, 'source-verification-report.json');
+  const manifestPath = join(outputDir, 'manifest.json');
+
+  await mkdir(sourceDir, { recursive: true });
+  await mkdir(docsDir, { recursive: true });
+  await writeFile(
+    join(sourceDir, 'index.ts'),
+    ['export function makeClient(): Client {', '  return {} as Client;', '}', ''].join('\n'),
+    'utf-8'
+  );
+  await writeFile(join(sourceDir, 'notes.txt'), 'source note that should not leak\n', 'utf-8');
+  await writeFile(
+    join(docsDir, 'guide.md'),
+    ['# Guide', '', 'Call `makeClient()` before using `MissingClient`.', ''].join('\n'),
+    'utf-8'
+  );
+  await writeFile(join(docsDir, 'notes.txt'), 'docs note that should not leak\n', 'utf-8');
+  await runCli([
+    'source-truth',
+    'verify-docs',
+    '--source',
+    sourceDir,
+    '--docs',
+    docsDir,
+    '--output-dir',
+    outputDir,
+  ]);
+
+  return {
+    dir,
+    sourceDir,
+    docsDir,
+    outputDir,
+    reportPath,
+    manifestPath,
+  };
+}
+
 async function refreshDiscoveryManifestReportMetadata(
   manifestPath: string,
   reportPath: string
@@ -1314,6 +1458,27 @@ async function refreshDiscoveryManifestReportMetadata(
 
   if (output === undefined) {
     throw new Error('expected discovery manifest output metadata');
+  }
+
+  output.byteSize = await byteSize(reportPath);
+  output.hash = await sha256File(reportPath);
+  output.lineCount = countTextLines(reportText);
+  output.estimatedTokenCount = estimateTextTokens(reportText);
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+  return manifest;
+}
+
+async function refreshSourceVerificationManifestReportMetadata(
+  manifestPath: string,
+  reportPath: string
+): Promise<SourceVerificationManifest> {
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceVerificationManifest;
+  const reportText = await readFile(reportPath, 'utf-8');
+  const output = manifest.generatedOutputs[0];
+
+  if (output === undefined) {
+    throw new Error('expected source-verification manifest output metadata');
   }
 
   output.byteSize = await byteSize(reportPath);
@@ -2116,6 +2281,7 @@ describe('CLI compatibility behavior', () => {
       limitations: expect.arrayContaining([
         'explicit local paths only',
         'Markdown/MDX-style text docs only',
+        'file evidence index metadata is content-free and derived only from the local report',
         'exact matches are lexical exported-name evidence only',
         'unmatched references are observations, not failures',
         'no behavior inference',
@@ -2304,6 +2470,9 @@ describe('CLI compatibility behavior', () => {
     expect(sourceVerificationVerify?.summary).toEqual(
       expect.stringContaining('sourceInspection.source consistency')
     );
+    expect(sourceVerificationVerify?.summary).toEqual(
+      expect.stringContaining('file evidence index')
+    );
     expect(sourceVerificationVerify).toMatchObject({
       command: 'verify',
       mode: 'verify --manifest or verify --output-dir',
@@ -2312,6 +2481,7 @@ describe('CLI compatibility behavior', () => {
       outputFiles: ['stdout verification result'],
       limitations: expect.arrayContaining([
         'source-verification-local-evidence manifest mode only',
+        'file evidence indexes are source/docs file metadata only',
         'verify does not refresh outputs or sources',
         'no additional source/docs inspection',
         'no broad official-docs claim checking',
@@ -3952,11 +4122,13 @@ describe('CLI compatibility behavior', () => {
       ['export function makeClient(): Client {', '  return {} as Client;', '}', ''].join('\n'),
       'utf-8'
     );
+    await writeFile(join(sourceDir, 'notes.txt'), 'source note that should not leak\n', 'utf-8');
     await writeFile(
       join(docsDir, 'guide.mdx'),
       ['# Guide', '', 'Call `makeClient()` before using `MissingClient`.', ''].join('\n'),
       'utf-8'
     );
+    await writeFile(join(docsDir, 'notes.txt'), 'docs note that should not leak\n', 'utf-8');
 
     const { stdout, stderr } = await runCli([
       'source-truth',
@@ -4021,6 +4193,13 @@ describe('CLI compatibility behavior', () => {
         },
       ],
     });
+    expectSourceVerificationFileEvidenceIndex(
+      manifest.sourceVerification.fileEvidenceIndex,
+      report
+    );
+    expectSourceVerificationFileEvidenceIndexHasNoReportContent(
+      manifest.sourceVerification.fileEvidenceIndex
+    );
     expect(verifyResult.stdout).toContain('Manifest verification');
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
@@ -8987,11 +9166,7 @@ describe('CLI compatibility behavior', () => {
       name: 'llm-docs output file',
       setup: async (fixture: { outputDir: string; outsideDir: string }) => {
         const outsidePath = join(fixture.outsideDir, 'outside-full-llms.txt');
-        const targetPath = join(
-          fixture.outputDir,
-          'llm-docs',
-          'supabase-swift-v2-full-llms.txt'
-        );
+        const targetPath = join(fixture.outputDir, 'llm-docs', 'supabase-swift-v2-full-llms.txt');
 
         await writeFile(outsidePath, 'preserve outside full doc\n', 'utf-8');
         await rm(targetPath, { force: true });
@@ -9076,7 +9251,8 @@ describe('CLI compatibility behavior', () => {
         await writeFile(fixture.preservedOutputPath, 'preserve configured output\n', 'utf-8');
         fixture.manifest.source.resolvedSpecPath = insideSpecPath;
       },
-      expected: 'manifest source path must not be the same as, or inside, the manifest output directory',
+      expected:
+        'manifest source path must not be the same as, or inside, the manifest output directory',
     },
   ])('refresh rejects configured SDK manifests with $name resolvedSpecPath', async (testCase) => {
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-refresh-sdk-path-'));
@@ -9084,11 +9260,7 @@ describe('CLI compatibility behavior', () => {
     const outputDir = join(dir, 'output');
     const manifestPath = join(outputDir, 'manifest.json');
     const sourcePath = join(dir, 'source.yml');
-    const preservedOutputPath = join(
-      outputDir,
-      'llm-docs',
-      'supabase-swift-v2-full-llms.txt'
-    );
+    const preservedOutputPath = join(outputDir, 'llm-docs', 'supabase-swift-v2-full-llms.txt');
 
     await mkdir(dirname(preservedOutputPath), { recursive: true });
     await writeFile(sourcePath, testSpecYaml, 'utf-8');
@@ -9224,7 +9396,9 @@ describe('CLI compatibility behavior', () => {
     },
   ])('refresh rejects configured SDK manifests with $name metadata', async (testCase) => {
     const fixture = await generateSwiftFixture();
-    const manifest = JSON.parse(await readFile(fixture.manifestPath, 'utf-8')) as GenerationManifest;
+    const manifest = JSON.parse(
+      await readFile(fixture.manifestPath, 'utf-8')
+    ) as GenerationManifest;
 
     testCase.mutate(manifest);
     await writeFile(fixture.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
@@ -9583,6 +9757,305 @@ describe('CLI compatibility behavior', () => {
     expect(tamperedResult.stdout).toContain('Checked files: 1');
     expect(tamperedResult.stderr).toContain('output discovery-report.json');
     expect(tamperedResult.stderr).toContain('hash mismatch');
+  });
+
+  it('verifies a generated source-verification manifest with matching file evidence index', async () => {
+    const { outputDir, manifestPath, reportPath } = await createSourceVerificationVerifyFixture(
+      'llm-docs-source-verification-index-pass-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
+    const result = await runCli(['verify', '--output-dir', outputDir]);
+
+    expectSourceVerificationFileEvidenceIndex(
+      manifest.sourceVerification.fileEvidenceIndex,
+      report
+    );
+    expectSourceVerificationFileEvidenceIndexHasNoReportContent(
+      manifest.sourceVerification.fileEvidenceIndex
+    );
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 1');
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
+  });
+
+  it('rejects stale source-verification file evidence index metadata', async () => {
+    const { outputDir, reportPath, manifestPath } = await createSourceVerificationVerifyFixture(
+      'llm-docs-source-verification-index-stale-'
+    );
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
+    const sourceFile = report.sourceInspection.files.find((file) => file.path === 'index.ts');
+    const docsFile = report.docs.files.find((file) => file.path === 'guide.md');
+
+    if (sourceFile === undefined || docsFile === undefined) {
+      throw new Error('expected source and docs file evidence');
+    }
+
+    sourceFile.byteSize += 1;
+    docsFile.referenceCount += 1;
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+    await refreshSourceVerificationManifestReportMetadata(manifestPath, reportPath);
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 1');
+    expect(result.stderr).toContain(
+      'source-verification file evidence index: manifest metadata does not match source-verification-report.json'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects source-verification file evidence index aggregate hash tampering', async () => {
+    const { outputDir, manifestPath } = await createSourceVerificationVerifyFixture(
+      'llm-docs-source-verification-index-hash-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const fileEvidenceIndex = manifest.sourceVerification.fileEvidenceIndex;
+
+    if (fileEvidenceIndex === undefined) {
+      throw new Error('expected file evidence index');
+    }
+
+    fileEvidenceIndex.aggregateHash = `sha256:${'0'.repeat(64)}`;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.aggregateHash must match file evidence index metadata'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects source-verification file evidence index count field tampering', async () => {
+    const { outputDir, manifestPath } = await createSourceVerificationVerifyFixture(
+      'llm-docs-source-verification-index-counts-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const fileEvidenceIndex = manifest.sourceVerification.fileEvidenceIndex;
+
+    if (fileEvidenceIndex === undefined) {
+      throw new Error('expected file evidence index');
+    }
+
+    fileEvidenceIndex.sourceFileCount += 1;
+    fileEvidenceIndex.docsFileCount += 1;
+    fileEvidenceIndex.aggregateHash =
+      sourceVerificationFileEvidenceIndexAggregateHashForTest(fileEvidenceIndex);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.sourceFileCount must match sourceFiles length'
+    );
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.docsFileCount must match docsFiles length'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects matching malformed source-verification report and index skipReason arrays', async () => {
+    const { outputDir, reportPath, manifestPath } = await createSourceVerificationVerifyFixture(
+      'llm-docs-source-verification-index-skip-array-'
+    );
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const reportFile = report.sourceInspection.files.find((file) => file.path === 'notes.txt') as
+      | (SourceVerificationReport['sourceInspection']['files'][number] & {
+          skipReason?: unknown;
+        })
+      | undefined;
+    const fileEvidenceIndex = manifest.sourceVerification.fileEvidenceIndex;
+    const indexFile = fileEvidenceIndex?.sourceFiles.find((file) => file.path === 'notes.txt') as
+      | (SourceVerificationFileEvidenceManifestIndex['sourceFiles'][number] & {
+          skipReason?: unknown;
+        })
+      | undefined;
+
+    if (reportFile === undefined || fileEvidenceIndex === undefined || indexFile === undefined) {
+      throw new Error('expected skipped source file evidence');
+    }
+
+    reportFile.skipReason = ['unsupported-extension'];
+    indexFile.skipReason = ['unsupported-extension'];
+    fileEvidenceIndex.aggregateHash =
+      sourceVerificationFileEvidenceIndexAggregateHashForTest(fileEvidenceIndex);
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+    await refreshSourceVerificationManifestReportMetadata(manifestPath, reportPath);
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.sourceFiles[1].skipReason must be unsupported-extension, oversized, or unreadable when present'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects non-string source-verification file evidence index status and skipReason fields', async () => {
+    const { outputDir, manifestPath } = await createSourceVerificationVerifyFixture(
+      'llm-docs-source-verification-index-enums-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const fileEvidenceIndex = manifest.sourceVerification.fileEvidenceIndex;
+    const sourceInspectedFile = fileEvidenceIndex?.sourceFiles.find(
+      (file) => file.path === 'index.ts'
+    ) as
+      | (SourceVerificationFileEvidenceManifestIndex['sourceFiles'][number] & {
+          status: unknown;
+        })
+      | undefined;
+    const sourceSkippedFile = fileEvidenceIndex?.sourceFiles.find(
+      (file) => file.path === 'notes.txt'
+    ) as
+      | (SourceVerificationFileEvidenceManifestIndex['sourceFiles'][number] & {
+          skipReason?: unknown;
+        })
+      | undefined;
+    const docsInspectedFile = fileEvidenceIndex?.docsFiles.find(
+      (file) => file.path === 'guide.md'
+    ) as
+      | (SourceVerificationFileEvidenceManifestIndex['docsFiles'][number] & {
+          status: unknown;
+        })
+      | undefined;
+    const docsSkippedFile = fileEvidenceIndex?.docsFiles.find(
+      (file) => file.path === 'notes.txt'
+    ) as
+      | (SourceVerificationFileEvidenceManifestIndex['docsFiles'][number] & {
+          skipReason?: unknown;
+        })
+      | undefined;
+
+    if (
+      fileEvidenceIndex === undefined ||
+      sourceInspectedFile === undefined ||
+      sourceSkippedFile === undefined ||
+      docsInspectedFile === undefined ||
+      docsSkippedFile === undefined
+    ) {
+      throw new Error('expected source and docs file evidence index entries');
+    }
+
+    sourceInspectedFile.status = ['inspected'];
+    sourceSkippedFile.skipReason = { reason: 'unsupported-extension' };
+    docsInspectedFile.status = { status: 'inspected' };
+    docsSkippedFile.skipReason = ['unsupported-extension'];
+    fileEvidenceIndex.aggregateHash =
+      sourceVerificationFileEvidenceIndexAggregateHashForTest(fileEvidenceIndex);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.sourceFiles[0].status must be inspected or skipped'
+    );
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.sourceFiles[1].skipReason must be unsupported-extension, oversized, or unreadable when present'
+    );
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.docsFiles[0].status must be inspected or skipped'
+    );
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.docsFiles[1].skipReason must be unsupported-extension, oversized, or unreadable when present'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects malformed source-verification file evidence index content fields', async () => {
+    const { outputDir, manifestPath } = await createSourceVerificationVerifyFixture(
+      'llm-docs-source-verification-index-leak-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const fileEvidenceIndex = manifest.sourceVerification.fileEvidenceIndex as
+      | (SourceVerificationFileEvidenceManifestIndex & { content?: string })
+      | undefined;
+    const sourceFile = fileEvidenceIndex?.sourceFiles[0] as
+      | (SourceVerificationFileEvidenceManifestIndex['sourceFiles'][number] & {
+          rawText?: string;
+        })
+      | undefined;
+    const docsFile = fileEvidenceIndex?.docsFiles[0] as
+      | (Omit<SourceVerificationFileEvidenceManifestIndex['docsFiles'][number], 'references'> & {
+          references: unknown;
+          rawText?: string;
+        })
+      | undefined;
+
+    if (fileEvidenceIndex === undefined || sourceFile === undefined || docsFile === undefined) {
+      throw new Error('expected file evidence index entries');
+    }
+
+    fileEvidenceIndex.content = '# Leaked report content\n';
+    sourceFile.rawText = 'export function makeClient(): Client';
+    docsFile.rawText = 'Call `makeClient()` before using `MissingClient`.';
+    docsFile.references = ['makeClient()', 'MissingClient'];
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.content is not supported'
+    );
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.sourceFiles[0].rawText is not supported'
+    );
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.docsFiles[0].rawText is not supported'
+    );
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex.docsFiles[0].references must be a non-negative integer'
+    );
+  });
+
+  it('accepts older source-verification manifests without a file evidence index', async () => {
+    const { outputDir, manifestPath } = await createSourceVerificationVerifyFixture(
+      'llm-docs-source-verification-index-backcompat-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+
+    delete manifest.sourceVerification.fileEvidenceIndex;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 1');
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
   });
 
   it('rejects discovery report mode drift after file metadata still matches', async () => {

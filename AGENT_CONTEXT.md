@@ -164,14 +164,15 @@ Current implementation:
   directories inside either input tree, reuses `inspectSourceTruth` for source
   export facts, and extracts only Markdown/MDX inline-code identifier evidence
   from the explicit docs path. It writes `source-verification-report.json` and
-  a `source-verification-local-evidence` `manifest.json` when docs reference
-  evidence exists; no supported docs files or no inline-code identifier
-  references produce `failure.json` plus the evidence report. Exact matches are
-  lexical matches against observed exported names. Unmatched references are
-  observations for agent review, not correctness failures. It does not fetch
-  network sources, render JavaScript, select sources, infer routes/frameworks
-  or runtime behavior, verify broad official-docs behavior/API claims, or
-  decide source authority.
+  a `source-verification-local-evidence` `manifest.json` with compact
+  content-free source/docs file evidence index metadata derived only from the
+  local report when docs reference evidence exists; no supported docs files or
+  no inline-code identifier references produce `failure.json` plus the evidence
+  report. Exact matches are lexical matches against observed exported names.
+  Unmatched references are observations for agent review, not correctness
+  failures. It does not fetch network sources, render JavaScript, select
+  sources, infer routes/frameworks or runtime behavior, verify broad
+  official-docs behavior/API claims, or decide source authority.
 - Can run `generate --source <local-file-or-directory> --output-dir <dir>` for
   deterministic local source docs generation through the registered parser and
   universal formatter. Source mode supports `--format auto`, `markdown`, `mdx`
@@ -444,12 +445,14 @@ filename signals plus AST-observed test-case label facts from files already
 identified as tests. Test-case names are labels only, not proof of behavior or
 correctness, and test bodies, assertion text, expected values, closures, and
 runtime-derived names are omitted. `source-truth generate` formats only those
-observed facts into Markdown and provenance files. `source-truth verify-docs` only compares
-Markdown/MDX inline-code identifier references from an explicit local docs path
-against observed exported names from the same conservative inspector. These
-modes do not parse assertions, execute tests, prove claims, summarize runtime
-behavior, infer framework identity, decide source selection, choose task fit,
-or resolve re-export targets beyond existing source-truth facts.
+observed facts into Markdown and provenance files. `source-truth verify-docs`
+only compares Markdown/MDX inline-code identifier references from an explicit
+local docs path against observed exported names from the same conservative
+inspector and records compact content-free source/docs file index metadata in
+the manifest. These modes do not parse assertions, execute tests, prove claims,
+summarize runtime behavior, infer framework identity, decide source selection,
+choose task fit, or resolve re-export targets beyond existing source-truth
+facts.
 
 ### Intent 4: Refresh Or Verify Existing Generated Docs
 
@@ -798,12 +801,13 @@ freshness evidence when present. For source-verification manifests, it checks
 deterministic estimated token count, report schema/mode/output path
 consistency, source/docs endpoint provenance against the report, manifest
 summary consistency with report metadata, report summary consistency with body
-arrays, and `sourceInspection.source` consistency. It does not perform refresh,
-inspect additional source/docs files, verify repo freshness, perform broad
-official-docs claim verification, validate source-code behavior, make candidate
-selection, validate HTTP freshness, refresh remote resources, make task-fit
-judgments, resolve source truth, make source selection decisions, or prove docs
-correctness. The current
+arrays, `sourceInspection.source` consistency, and optional compact
+content-free source/docs file evidence index metadata rebuilt from the report.
+It does not perform refresh, inspect additional source/docs files, verify repo
+freshness, perform broad official-docs claim verification, validate source-code
+behavior, make candidate selection, validate HTTP freshness, refresh remote
+resources, make task-fit judgments, resolve source truth, make source selection
+decisions, or prove docs correctness. The current
 `refresh` command
 supports only built-in-parser `local-source-docs`,
 `source-truth-local-docs`, and configured OpenRef SDK manifests that already
