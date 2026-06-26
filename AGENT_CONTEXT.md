@@ -22,21 +22,24 @@ The AI agent must identify the user's intent before choosing a workflow.
 ## Product Boundary
 
 The AI agent is the intelligent planner. It investigates the user's request,
-resolves intent, source, scope, version, and path, and chooses which command to
-run.
+resolves intent, source, scope, version, path, and candidate when a report
+exists, and chooses which command to run.
 
 The CLI is a deterministic, scriptable capability layer for agents. It should
 ingest explicit sources, normalize documentation, preserve structure, write
-index, manifest, provenance, and freshness metadata, validate output, and report
-honest failures.
+index, manifest, provenance, and freshness metadata when explicitly observed,
+validate output, and report honest failures.
 
 Discovery-like CLI behavior must stay bounded, explicit, inspectable, and
 deterministic. Acceptable examples include listing files under a provided source
 path, inspecting an explicit URL plus fixed same-origin well-known resources,
 extracting links from already fetched content, and producing candidate evidence
-reports for agent review. The CLI must not silently choose authoritative
-sources, guess source-specific documentation rules, crawl arbitrary links,
-render JavaScript, or pretend to understand arbitrary websites.
+reports for agent review. Discovery reports may list, group, filter, and
+deterministically order candidates only by factual evidence signals: file type,
+path, metadata, source URL, hash, freshness metadata when explicitly observed,
+parseability, and explicit user-provided scope. The CLI must not silently choose
+authoritative sources, guess source-specific documentation rules, crawl
+arbitrary links, render JavaScript, or pretend to understand arbitrary websites.
 
 ## Current Capability Versus Target Capability
 
@@ -96,9 +99,12 @@ Current implementation:
   `source-truth-report.json` when available.
 - Can run `discover --source <local-file-or-directory>` for explicit local,
   bounded inspection and write `discovery-report.json` plus a discovery-report
-  `manifest.json` with candidate file hints, deterministic evidence categories
-  and signals, report order, hashes, traversal settings, warnings, and a compact
-  content-free `candidateEvidenceIndex` derived from `discovery-report.json`.
+  `manifest.json` with candidate file hints, deterministic
+  listing/grouping/filtering/report order from factual signals such as file
+  type, path, metadata, source URL when present, hashes, freshness metadata when
+  explicitly observed, parseability, explicit scope, traversal settings,
+  warnings, and a compact content-free `candidateEvidenceIndex` derived from
+  `discovery-report.json`.
 - Can run `discover --repo <git-url-or-local-git-repo>` with optional
   `--scope <path>`, `--cache-dir <dir>`, and `--output-dir <dir>` for a bounded
   repo inspection report. Repo mode clones missing repos into a stable cache
@@ -247,11 +253,12 @@ Current implementation:
   candidate evidence indexes. Discovery modes are inspection foundations only;
   they do not generate docs, choose sources, assign trust or authority labels, infer
   authority, or claim source truth.
-- Local and repo discovery order candidates by deterministic evidence category
-  and normalized path for agent review. Website discovery orders extracted
-  candidate URLs by deterministic observation order and aggregates evidence from
-  the inspected resources. These orders are not source-selection or authority
-  judgments.
+- Local, repo, and website discovery list, group, filter, and deterministically
+  order candidates for agent review only. Ordering is factual report structure,
+  based on observed file type, path, metadata, source URL, hash, freshness
+  metadata when explicitly observed, parseability, and explicit user-provided
+  scope; it is not source-selection, task-fit, correctness, source-truth, or
+  authority judgment.
 
 Target next-generation implementation:
 
@@ -311,9 +318,10 @@ Agent workflow:
    - DocC directories
    - GitHub source links from docs pages
 4. If a source repo is discovered, use the repo exploration workflow.
-5. Review candidate evidence reports by first-party evidence, structure,
-   explicit scope/version/product matches, freshness, and parseability; treat
-   this as agent judgment, not a CLI judgment.
+5. Review candidate evidence reports in light of the user task, project
+   context, version constraints, source/provenance evidence, source intent,
+   explicit scope/version/product matches, freshness metadata when explicitly
+   observed, and parseability; treat this as agent judgment, not a CLI judgment.
 6. Run this project's parser/formatter on the agent-selected source.
 7. If the user asks for source-truth confidence and a source repo is available,
    verify API signatures, config defaults, routes, exported types, and behavior
@@ -473,22 +481,25 @@ Reviewers must allow:
 
 - Deterministic CLI listing, grouping, filtering, and ordering of observed
   candidates when based only on factual evidence signals such as file type,
-  path, metadata, source URL, hash, freshness, parseability, and explicit
-  user-provided scope. This is report readability, not source selection.
+  path, metadata, source URL, hash, freshness metadata when explicitly
+  observed, parseability, and explicit user-provided scope. This is report
+  readability, not source selection.
 
 Reviewers must reject:
 
 - CLI behavior or docs that imply discovery decides authority, correctness,
   source truth, source-truth confidence, or task fit.
 - Discovery or candidate changes that add or imply source rating, trust
-  rating, authority rating, hidden preferred-source selection, or numeric
-  task-fit ordering.
-- Candidate evidence reports described as ambiguous candidate reports, trust
-  ratings, preferred-source selection, or hidden source-specific guessing
-  instead of factual evidence reports.
-- Generation from a first ordered candidate unless the user or agent
-  supplies that candidate explicitly, or a documented automation flag requires
-  it.
+  rating, authority rating, hidden preferred-source logic, authority/trust
+  scoring or ratings, or numeric task-fit ordering.
+- Candidate evidence reports framed as ratings, hidden preferred-source logic,
+  hidden source-specific guessing, or anything other than factual evidence
+  reports.
+- CLI selection of a discovery-report candidate, generation from a report's first
+  entry or implied leading entry, hidden preferred-source logic,
+  authority/trust scoring or ratings, or unsupported discovery claims unless
+  the user or agent supplies that candidate explicitly or a documented
+  automation flag requires it.
 - Hidden source-specific guesses, such as inferring product-specific docs paths,
   release lines, package identity, or framework behavior without explicit
   source evidence.
@@ -766,9 +777,9 @@ Do not ask when:
 - Do not silently upgrade pinned versions.
 - Do not let CLI discovery make hidden authority decisions; it must produce
   inspectable deterministic evidence and ordering for agent review.
-- Do not generate from a first ordered candidate unless the user or
-  agent has explicitly selected that candidate or a documented automation flag
-  requires it.
+- Do not generate from a discovery-report candidate unless the user or agent has
+  explicitly selected that candidate or a documented automation flag requires
+  it.
 - Do not claim source-truth codebase docs go beyond observed export/signature,
   package/config, path/filename test/example context evidence, and observed
   test-case labels unless the implementation actually inspects and proves that

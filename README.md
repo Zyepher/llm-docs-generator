@@ -97,9 +97,9 @@ Current implemented capabilities include:
   binary metadata, PATH visibility, and skipped/not-configured host checks
 
 Planned capabilities such as configured SDK refresh, discovery report refresh,
-remote freshness checks, diff, host install helpers, broad crawling, automatic
-source selection, broad official-docs behavior/API claim verification, and
-additional presets are not implemented in the current CLI.
+remote freshness checks, diff, host install helpers, broad crawling, documented
+automation-flag candidate handling, broad official-docs behavior/API claim
+verification, and additional presets are not implemented in the current CLI.
 
 ## Command Model
 
@@ -175,8 +175,11 @@ The CLI is responsible for:
 ## Source Evidence For Agent Review
 
 When several explicit candidates exist, the CLI records factual evidence and the
-agent reviews source intent, version, project context, and task fit. A useful
-review order is:
+agent reviews source intent, version, project context, and task fit. Discovery
+reports may list, group, filter, and deterministically order candidates only by
+factual signals such as file type, path, metadata, source URL, hash, freshness
+metadata when explicitly observed, parseability, and explicit user-provided
+scope. A useful agent review order is:
 
 1. First-party machine-readable specs: OpenAPI, Swagger, OpenRef.
 2. First-party docs source: Markdown, MDX, RST, DocC.
@@ -185,7 +188,7 @@ review order is:
 5. Implementation source files only when the user asks for source-truth
    codebase docs or source-code verification.
 
-The CLI records evidence; the agent owns the final source-selection judgment.
+The CLI records evidence; the agent owns the final candidate-selection judgment.
 
 ## Freshness And Verification
 
