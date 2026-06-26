@@ -69,18 +69,21 @@ Current implemented capabilities include:
 - manifests with source or discovery provenance, content hashes, generated file
   hashes, parser/formatter metadata, and warnings
 - configured OpenRef SDK generation plus configured-SDK, source-docs,
-  source-truth docs, and discovery-report manifest verification
+  source-truth docs, discovery-report, and source-verification manifest
+  verification
 - explicit-manifest refresh for local source docs and source-truth docs that
   already record a local source path, with post-refresh manifest integrity
   verification
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
+- narrow explicit-local source/docs evidence reports that compare Markdown/MDX
+  inline-code references against observed local source exported names
 - read-only bundled agent context metadata
 
 Planned capabilities such as configured SDK refresh, discovery report refresh,
 remote freshness checks, diff, host setup helpers, broad crawling, automatic
-source selection, source-code verification, and additional presets are not
-implemented in the current CLI.
+source selection, broad official-docs behavior/API claim verification, and
+additional presets are not implemented in the current CLI.
 
 ## Command Model
 
@@ -103,6 +106,7 @@ llm-docs generate --source ./openapi.yaml --format openapi --output-dir ./api-ag
 
 llm-docs source-truth inspect --source ./src
 llm-docs source-truth generate --source ./src --output-dir ./reports/source-truth
+llm-docs source-truth verify-docs --source ./src --docs ./docs --output-dir ./reports/source-verification
 
 llm-docs refresh --output-dir ./agent-docs
 llm-docs refresh --manifest ./reports/source-truth/manifest.json
@@ -141,9 +145,9 @@ The CLI is responsible for:
 - parsing and normalizing supported formats
 - preserving headings, examples, semantic structure, and stable IDs
 - writing Markdown packs, manifests, discovery reports, provenance metadata,
-  and source-truth failure reports
+  source-truth failure reports, and narrow local source/docs evidence reports
 - verifying configured-SDK, source-docs, source-truth docs, and
-  discovery-report files against recorded metadata
+  discovery-report/source-verification files against recorded metadata
 - refreshing only existing `local-source-docs` and `source-truth-local-docs`
   manifests that already record explicit local source paths, then verifying the
   regenerated manifest outputs
@@ -175,14 +179,16 @@ llm-docs verify --manifest ./output/swift/v2/manifest.json
 llm-docs verify --output-dir ./agent-docs
 llm-docs verify --output-dir ./reports/source-truth
 llm-docs verify --output-dir ./reports/local-docs
+llm-docs verify --output-dir ./reports/source-verification
 llm-docs refresh --output-dir ./agent-docs
 llm-docs refresh --manifest ./reports/source-truth/manifest.json
 ```
 
 Verification currently supports `configured-sdk`, `local-source-docs`,
-`source-truth-local-docs`, and `discovery-report` manifests. Configured SDK
-verification checks manifest shape, source path existence, source content hash
-and byte size, and generated file hashes and byte sizes. Source-docs
+`source-truth-local-docs`, `discovery-report`, and
+`source-verification-local-evidence` manifests. Configured SDK verification
+checks manifest shape, source path existence, source content hash and byte
+size, and generated file hashes and byte sizes. Source-docs
 verification checks local source path shape and existence, recorded source file
 hashes and byte sizes, generated output paths, hashes, byte sizes, line counts,
 deterministic estimated token counts, and optional semantic chunk indexes
@@ -194,8 +200,10 @@ consistency with `source-truth-report.json` when available. Discovery-report
 verification checks `discovery-report.json` existence, hash, byte size, line
 count, estimated token count, basic report schema/mode/kind/count consistency,
 and optional content-free candidate evidence index metadata against the report.
-It does not judge candidate authority, task fit, source truth, freshness,
-source-code behavior, or runtime behavior.
+Source-verification manifest checks cover `source-verification-report.json`
+file integrity and basic schema/count consistency. These checks do not judge
+candidate authority, task fit, source truth, freshness, source-code behavior,
+runtime behavior, or whether docs statements are correct.
 
 Refresh currently supports only existing `local-source-docs` and
 `source-truth-local-docs` manifests. For source docs, it reads the manifest,
@@ -240,6 +248,24 @@ This mode is explicit. It is not used just because a repository has source code.
 It does not infer runtime behavior, routes, framework identity, or source-code
 verification confidence.
 
+## Local Source/Docs Evidence
+
+When an agent already has both an explicit local docs path and an explicit
+local implementation source path, it can run:
+
+```bash
+llm-docs source-truth verify-docs --source ./src --docs ./docs --output-dir ./reports/source-verification
+```
+
+This writes `source-verification-report.json` and `manifest.json`. The report
+reuses the conservative `source-truth inspect` source facts and extracts only
+Markdown/MDX inline-code identifier references from the explicit docs path.
+Exact matches are lexical matches against observed exported names. Unmatched
+references are reported as observations for agent review, not correctness
+failures. This mode does not fetch network sources, render JavaScript, select
+sources, verify broad official docs claims, infer routes/frameworks/runtime
+behavior, or decide source authority.
+
 ## Failure Reports
 
 Discovery and source-truth runs write useful artifacts when an output directory
@@ -254,9 +280,11 @@ output/
 
 Discovery writes `discovery-report.json` and a discovery-report `manifest.json`
 only when it can complete bounded inspection. Source-truth no-facts paths may
-write `failure.json` plus an evidence report. `generate --source` failures
-report honestly on stderr and clean stale source-mode `manifest.json` /
-`llm-docs/` artifacts when present, but they do not currently write
+write `failure.json` plus an evidence report. Source/docs evidence paths with
+no supported Markdown/MDX files or no inline-code identifier references write
+`failure.json` plus `source-verification-report.json`. `generate --source`
+failures report honestly on stderr and clean stale source-mode `manifest.json`
+/ `llm-docs/` artifacts when present, but they do not currently write
 `failure.json`.
 
 Failures explain what was checked, what was skipped, which permissions or

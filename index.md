@@ -77,15 +77,15 @@ Use this map to choose the intended workflow. Some workflows are target
 next-generation behavior and are not fully implemented in the current CLI yet;
 check [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and source before promising support.
 
-| User Intent | First File To Read | Workflow |
-|---|---|---|
-| Convert a known local docs path | [AGENT_CONTEXT.md](AGENT_CONTEXT.md) | Intent 2: locally provided documentation |
-| Generate docs for official product docs | [AGENT_CONTEXT.md](AGENT_CONTEXT.md) | Intent 1: official documentation |
-| Verify official docs against source code | [AGENT_CONTEXT.md](AGENT_CONTEXT.md) | Intent 1 plus source verification |
-| Generate docs from a GitHub repo | [AGENT_CONTEXT.md](AGENT_CONTEXT.md) | Determine whether user means repo docs or source-truth codebase docs |
-| Generate docs from source code | [AGENT_CONTEXT.md](AGENT_CONTEXT.md) | Intent 3: source-truth codebase docs |
-| Refresh generated docs | [AGENT_CONTEXT.md](AGENT_CONTEXT.md) | Intent 4: refresh or verify |
-| Implement new functionality | [IMPLEMENTATION.md](IMPLEMENTATION.md) | Intent 5: maintain or extend tool |
+| User Intent                              | First File To Read                     | Workflow                                                             |
+| ---------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
+| Convert a known local docs path          | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Intent 2: locally provided documentation                             |
+| Generate docs for official product docs  | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Intent 1: official documentation                                     |
+| Verify official docs against source code | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Intent 1 plus source verification                                    |
+| Generate docs from a GitHub repo         | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Determine whether user means repo docs or source-truth codebase docs |
+| Generate docs from source code           | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Intent 3: source-truth codebase docs                                 |
+| Refresh generated docs                   | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Intent 4: refresh or verify                                          |
+| Implement new functionality              | [IMPLEMENTATION.md](IMPLEMENTATION.md) | Intent 5: maintain or extend tool                                    |
 
 ## Current CLI
 
@@ -98,6 +98,7 @@ npx tsx src/cli.ts discover --url https://example.com/docs --output-dir ./report
 npx tsx src/cli.ts capabilities --json
 npx tsx src/cli.ts source-truth inspect --source ./src
 npx tsx src/cli.ts source-truth generate --source ./src --output-dir ./reports/source-truth
+npx tsx src/cli.ts source-truth verify-docs --source ./src --docs ./docs --output-dir ./reports/source-verification
 npx tsx src/cli.ts agent context --json
 npx tsx src/cli.ts generate --source ./docs --format markdown --output-dir ./agent-docs
 npx tsx src/cli.ts generate --source ./docs --format markdown --chunks jsonl --output-dir ./agent-docs
@@ -181,6 +182,18 @@ rejects output directories that are the source path or inside the source path.
 The source-truth docs manifest records generated output hashes, byte sizes, line
 counts, and deterministic estimated token counts.
 
+The current `source-truth verify-docs --source --docs --output-dir` command
+accepts explicit local source and docs file/directory paths only, reuses
+`inspectSourceTruth` for source export facts, and extracts bounded Markdown/MDX
+inline-code identifier evidence from the explicit local docs path. It writes
+`source-verification-report.json` and a `manifest.json` on success, or
+`failure.json` plus the evidence report when no supported docs files or no
+inline-code identifier references are found. Exact matches are lexical matches
+against observed exported names; unmatched references are observations for
+agent review, not correctness failures. It does not fetch network resources,
+render JavaScript, select sources, infer routes/frameworks/runtime behavior,
+or perform broad official-docs behavior/API claim verification.
+
 The current `generate --source <local-file-or-directory>` command supports
 explicit local source docs generation only. It rejects URL-like inputs, missing
 paths, discovery reports, `--source` plus `--sdk`, unknown presets, and presets
@@ -224,11 +237,13 @@ configured-SDK manifests, discovery-report manifests, URLs, repo freshness,
 broad crawling, source selection, source-code verification, behavior
 validation, remote network work, or source project script execution.
 
-The current CLI still does not expose source-code verification. It also writes
-`manifest.json` for successful configured `generate --sdk` tasks and
-successful discovery tasks with generated output or report hashes, byte sizes,
-line counts, and deterministic estimated token counts. Current `verify`
-supports configured-SDK, source-mode, source-truth docs, and discovery-report
+The current CLI exposes only narrow explicit-local source/docs lexical evidence
+through `source-truth verify-docs`; broad official-docs behavior/API claim
+verification remains planned/unsupported. It also writes `manifest.json` for
+successful configured `generate --sdk` tasks and successful discovery tasks
+with generated output or report hashes, byte sizes, line counts, and
+deterministic estimated token counts. Current `verify` supports configured-SDK,
+source-mode, source-truth docs, discovery-report, and source-verification
 manifests.
 Configured SDK verification checks source and output file hashes and byte sizes,
 and validates optional line/token metadata shape when present without
@@ -246,6 +261,9 @@ basic schema/mode/kind/count consistency, and optional candidate evidence index
 metadata against `discovery-report.json`. Discovery reports do not generate
 docs, choose sources, assign trust scores, infer authority, or claim source
 truth.
+Source-verification manifest verification checks report file integrity and
+basic schema/count consistency for `source-verification-report.json` only; it
+does not refresh sources, inspect additional files, or judge docs correctness.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable
@@ -371,18 +389,20 @@ agent intent/source/scope resolution
   `discover --source`, and
   repo cache/inspection reports are available through `discover --repo`.
   Bounded explicit URL inspection reports are available through `discover
-  --url`; the implemented command surface is available through deterministic
+--url`; the implemented command surface is available through deterministic
   `capabilities --json`; bounded local TypeScript/JavaScript export, optional
   AST signature, package/config, and path-based test/example context evidence
   reports are available through `source-truth inspect --source`, and
   evidence-bound Markdown is available through `source-truth generate --source
-  --output-dir`. Explicit local manifest refresh for current
+--output-dir`. Narrow explicit-local source/docs reference evidence is
+  available through `source-truth verify-docs --source --docs --output-dir`.
+  Explicit local manifest refresh for current
   `local-source-docs` and `source-truth-local-docs` manifests is available
   through `refresh --manifest <path>` or `refresh --output-dir <dir>`, with
   deterministic post-refresh manifest/output integrity verification. Broader
   crawling, configured SDK refresh, discovery-report refresh, remote freshness
-  refresh, source-code verification, and behavior-level source documentation
-  remain planned.
+  refresh, broad official-docs behavior/API claim verification, and
+  behavior-level source documentation remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL

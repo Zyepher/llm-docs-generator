@@ -131,7 +131,7 @@ Current implementation:
   prove claims, infer behavior, infer framework identity, decide source
   selection, or choose task fit.
 - Can run `source-truth generate --source <local-file-or-directory>
-  --output-dir <dir>` to write an evidence-bound Markdown file, the raw
+--output-dir <dir>` to write an evidence-bound Markdown file, the raw
   evidence report, and a manifest with generated output hashes, byte sizes, line
   counts, and deterministic estimated token counts. The command reuses
   `inspectSourceTruth`, accepts only an explicit local source path, and fails
@@ -139,6 +139,21 @@ Current implementation:
   extractable export or package/config facts or path-based context facts are
   found. It rejects output directories that are the source path or inside the
   source path.
+- Can run `source-truth verify-docs --source <local-file-or-directory>
+--docs <local-file-or-directory> --output-dir <dir>` for a narrow explicit
+  local source/docs evidence report. The command accepts only explicit local
+  paths, rejects URL-like/git-like inputs, symlink roots or parents, and output
+  directories inside either input tree, reuses `inspectSourceTruth` for source
+  export facts, and extracts only Markdown/MDX inline-code identifier evidence
+  from the explicit docs path. It writes `source-verification-report.json` and
+  a `source-verification-local-evidence` `manifest.json` when docs reference
+  evidence exists; no supported docs files or no inline-code identifier
+  references produce `failure.json` plus the evidence report. Exact matches are
+  lexical matches against observed exported names. Unmatched references are
+  observations for agent review, not correctness failures. It does not fetch
+  network sources, render JavaScript, select sources, infer routes/frameworks
+  or runtime behavior, verify broad official-docs behavior/API claims, or
+  decide source authority.
 - Can run `generate --source <local-file-or-directory> --output-dir <dir>` for
   deterministic local source docs generation through the registered parser and
   universal formatter. Source mode supports `--format auto`, `markdown`, `mdx`
@@ -157,7 +172,7 @@ Current implementation:
   output kind/name metadata, per-chunk index facts without chunk content, and
   warnings.
 - Can run `generate --source <explicit-local-docs-path> --preset swift-book
-  --output-dir <dir>` for a deterministic Swift Programming Language output
+--output-dir <dir>` for a deterministic Swift Programming Language output
   preset over explicit local Markdown/DocC-style sources. The preset supplies
   Markdown format defaults, `swift-book` output naming, title, neutral
   source-derived system prompt, and non-authoritative preset provenance only. It
@@ -197,13 +212,15 @@ Current implementation:
   does not install or register skills, write user config, probe environment
   state, or perform network work.
 - Current CLI commands are limited to local/repo/website `discover`,
-  `source-truth inspect`, `source-truth generate`, `generate --source`,
+  `source-truth inspect`, `source-truth generate`,
+  `source-truth verify-docs`, `generate --source`,
   `generate --source --preset swift-book`, `generate --sdk`, `refresh`,
   `verify`, `list-sdks`, `validate --sdk`,
   `capabilities --json`, and read-only `agent context`.
 - Does not yet implement broad website crawling, configured SDK refresh,
-  discovery-report refresh, remote freshness refresh, source verification, full
-  next-generation manifests, or behavior-level source documentation from code.
+  discovery-report refresh, remote freshness refresh, broad official-docs
+  behavior/API claim verification, full next-generation manifests, or
+  behavior-level source documentation from code.
   Semantic chunking exists as a library capability for existing DocNode IR and
   as an opt-in JSONL export for explicit `generate --source` outputs only;
   source-docs refresh preserves that chunk JSONL output only when the existing
@@ -248,10 +265,12 @@ Use this router before running commands.
 The workflows below describe the approved next-generation product direction.
 When using the current CLI, verify that the needed command exists first. If the
 workflow needs discovery, repo caching, refresh beyond current local
-explicit-manifest source-docs/source-truth modes, source verification,
+explicit-manifest source-docs/source-truth modes, source verification beyond
+the narrow explicit-local `source-truth verify-docs` evidence report,
 behavior-level source documentation, or manifest data beyond the current source
-docs, configured SDK, source-truth docs, and discovery-report manifests, treat
-it as planned work unless source and tests prove it has been implemented.
+docs, configured SDK, source-truth docs, discovery-report, and
+source-verification manifests, treat it as planned work unless source and tests
+prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -358,8 +377,13 @@ Agent workflow:
    `llm-docs source-truth generate --source <path> --output-dir <dir>` to
    generate conservative evidence Markdown and provenance files from the
    inspected implementation and config files.
-7. Feed inspected structured facts into the LLM-friendly formatter.
-8. Write provenance with repo URL, commit/tag, source files analyzed, and
+7. If the agent also has an explicit local docs path and wants lexical evidence
+   comparing docs references with observed exports, it may run
+   `llm-docs source-truth verify-docs --source <path> --docs <docs-path>
+--output-dir <dir>`. Treat unmatched references as observations, not
+   correctness failures.
+8. Feed inspected structured facts into the LLM-friendly formatter.
+9. Write provenance with repo URL, commit/tag, source files analyzed, and
    confidence warnings.
 
 Important current-state rule:
@@ -370,9 +394,12 @@ facts, optional direct-declaration AST signature evidence, and `package.json` /
 `tsconfig*.json` package/config facts from an explicit local source path. It
 also extracts file-level test/example context facts from explicit path and
 filename signals only. `source-truth generate` formats only those observed facts
-into Markdown and provenance files. These modes do not parse assertions, execute
-tests, prove claims, summarize runtime behavior, infer framework identity,
-decide source selection, choose task fit, or resolve re-export targets.
+into Markdown and provenance files. `source-truth verify-docs` only compares
+Markdown/MDX inline-code identifier references from an explicit local docs path
+against observed exported names from the same conservative inspector. These
+modes do not parse assertions, execute tests, prove claims, summarize runtime
+behavior, infer framework identity, decide source selection, choose task fit,
+or resolve re-export targets beyond existing source-truth facts.
 
 ### Intent 4: Refresh Or Verify Existing Generated Docs
 
@@ -396,9 +423,10 @@ Agent workflow:
    `llm-docs refresh --manifest <path>` or `--output-dir <dir>` and will use
    only the recorded local source path, then verify the regenerated manifest
    outputs.
-4. If the manifest is `configured-sdk`, `discovery-report`, URL/repo/website,
-   or requires freshness/source-code verification, treat refresh as planned and
-   unsupported in the CLI.
+4. If the manifest is `configured-sdk`, `discovery-report`,
+   `source-verification-local-evidence`, URL/repo/website, or requires
+   freshness/source-code verification, treat refresh as planned and unsupported
+   in the CLI.
 5. For future remote/freshness workflows, re-resolve source URL, repo, path,
    branch, tag, or commit as the agent, respect pinned versions, and report
    what changed before regenerating.
@@ -448,8 +476,8 @@ Reviewers must reject:
   release lines, package identity, or framework behavior without explicit
   source evidence.
 - Claims that source-truth codebase docs, source verification, manifests,
-  freshness, or discovery are implemented when code, tests, CLI behavior, and
-  docs do not all agree.
+  freshness, or discovery are implemented beyond the narrow code, tests, CLI
+  behavior, and docs that actually agree.
 
 ## Repo Exploration Workflow
 
@@ -636,8 +664,8 @@ with discovery kind, report path, report schema/mode, factual counts, and
 report file hash, byte size, line count, deterministic estimated token count,
 and compact content-free candidate evidence index metadata derived from the
 report. The current `verify` command supports `configured-sdk`,
-`local-source-docs`, `source-truth-local-docs`, and `discovery-report`
-manifests.
+`local-source-docs`, `source-truth-local-docs`, `discovery-report`, and
+`source-verification-local-evidence` manifests.
 For configured SDK manifests, it checks source and generated output hashes and
 byte sizes, and rejects malformed optional generated output line/token metadata
 when present; it does not recompute those optional counts. For source-mode
@@ -656,9 +684,12 @@ discovery-report manifests, it checks `discovery-report.json` existence, hash,
 byte size, line count, deterministic estimated token count, and basic report
 schema/mode/kind/count consistency. When optional candidate evidence index
 metadata is present, it rebuilds that metadata from `discovery-report.json` and
-fails on malformed or stale index data. It does not perform refresh, repo
-freshness verification, source-code verification, candidate selection, task-fit
-judgment, source truth resolution, or behavior validation. The current
+fails on malformed or stale index data. For source-verification manifests, it
+checks `source-verification-report.json` existence, hash, byte size, line count,
+deterministic estimated token count, and basic schema/count consistency. It
+does not perform refresh, repo freshness verification, broad official-docs
+claim verification, candidate selection, task-fit judgment, source truth
+resolution, or behavior validation. The current
 `refresh` command
 supports only `local-source-docs` and `source-truth-local-docs` manifests that
 already record an absolute local source path. It regenerates into the existing
@@ -764,8 +795,9 @@ Source-truth codebase docs:
 ```text
 User: Generate docs from this repo and verify against source code.
 Agent: Use repo exploration, resolve version, run `source-truth generate` for
-observed export facts, and use separate source verification only if implemented
-for the requested claim checks.
+observed export facts, and use `source-truth verify-docs` only when explicit
+local docs and source paths are available for lexical reference evidence.
+Broader claim checks remain planned unless code and tests show otherwise.
 ```
 
 Pinned version:
@@ -798,6 +830,7 @@ llm-docs discover --repo https://github.com/owner/repo --scope docs --output-dir
 llm-docs discover --url https://example.com/docs --output-dir ./reports/website
 llm-docs capabilities --json
 llm-docs source-truth inspect --source ./src
+llm-docs source-truth verify-docs --source ./src --docs ./docs --output-dir ./reports/source-verification
 llm-docs generate --source ./TSPL.docc --preset swift-book --output-dir ./swift-book-agent-docs
 llm-docs generate --sdk swift --sdk-version v2
 llm-docs generate --sdk all --sdk-version all

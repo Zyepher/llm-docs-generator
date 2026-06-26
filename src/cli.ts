@@ -164,12 +164,10 @@ async function writeCliDiscoveryReportManifest(options: {
 async function removeKnownDiscoveryArtifacts(outputDir: string): Promise<void> {
   const resolvedOutputDir = resolve(outputDir);
 
-  await Promise.all(
-    [
-      removeOwnedDiscoveryReportArtifact(resolve(resolvedOutputDir, DISCOVERY_REPORT_FILE)),
-      removeOwnedDiscoveryManifestArtifact(resolve(resolvedOutputDir, DISCOVERY_MANIFEST_FILE)),
-    ]
-  );
+  await Promise.all([
+    removeOwnedDiscoveryReportArtifact(resolve(resolvedOutputDir, DISCOVERY_REPORT_FILE)),
+    removeOwnedDiscoveryManifestArtifact(resolve(resolvedOutputDir, DISCOVERY_MANIFEST_FILE)),
+  ]);
 }
 
 async function removeOwnedDiscoveryReportArtifact(path: string): Promise<void> {
@@ -416,6 +414,38 @@ const CAPABILITIES_CONTRACT = {
       ],
     },
     {
+      id: 'source-truth-verify-docs',
+      command: 'source-truth verify-docs',
+      mode: 'source-truth verify-docs --source --docs --output-dir',
+      status: 'implemented',
+      inputBoundary:
+        'explicit local source file or directory plus explicit local Markdown/MDX docs file or directory',
+      options: ['--source <path>', '--docs <path>', '--output-dir <dir>'],
+      outputFiles: ['source-verification-report.json', 'manifest.json', 'failure.json'],
+      factFamilies: [
+        'source export facts from source-truth inspection',
+        'docs inline-code identifier references',
+        'exact lexical exported-name matches',
+        'unmatched docs references',
+      ],
+      summary:
+        'deterministic local evidence comparing explicit docs references with observed source exported names',
+      limitations: [
+        'explicit local paths only',
+        'Markdown/MDX-style text docs only',
+        'docs evidence limited to inline-code identifiers and empty call identifiers',
+        'exact matches are lexical exported-name evidence only',
+        'unmatched references are observations, not failures',
+        'no behavior inference',
+        'no assertion parsing',
+        'no test execution',
+        'no framework inference',
+        'no route inference',
+        'no re-export resolution beyond existing source-truth facts',
+        'no automatic source selection',
+      ],
+    },
+    {
       id: 'agent-context',
       command: 'agent context',
       mode: 'agent context --json',
@@ -571,6 +601,23 @@ const CAPABILITIES_CONTRACT = {
       ],
     },
     {
+      id: 'verify-source-verification',
+      command: 'verify',
+      mode: 'verify --manifest or verify --output-dir',
+      status: 'implemented',
+      inputBoundary: 'source-verification-local-evidence manifest.json',
+      outputFiles: ['stdout verification result'],
+      summary:
+        'file integrity and basic schema/count consistency checks for source-verification evidence manifests',
+      limitations: [
+        'source-verification-local-evidence manifest mode only',
+        'verify does not refresh outputs',
+        'no additional source/docs inspection',
+        'no broad official-docs claim checking',
+        'no source selection',
+      ],
+    },
+    {
       id: 'refresh-source-docs',
       command: 'refresh',
       mode: 'refresh --manifest or refresh --output-dir for local-source-docs',
@@ -669,16 +716,18 @@ const CAPABILITIES_CONTRACT = {
     },
     {
       id: 'refresh-unsupported-manifests',
-      command: 'refresh for configured SDK, discovery report, URL, repo, website, or freshness workflows',
+      command:
+        'refresh for configured SDK, discovery report, URL, repo, website, or freshness workflows',
       status: 'planned-unsupported',
       reason:
         'only explicit local-source-docs and source-truth-local-docs manifest refresh is implemented; configured SDK, discovery report, remote URL/repo, freshness, crawling, and source-code verification refresh remain planned',
     },
     {
       id: 'source-code-verification',
-      command: 'source verification for official docs',
+      command: 'broad source verification for official docs',
       status: 'planned-unsupported',
-      reason: 'no current claim verification workflow against implementation source files',
+      reason:
+        'broad official-docs behavior/API claim verification remains planned; implemented source-truth verify-docs is explicit-local lexical evidence only',
     },
     {
       id: 'broad-crawling',
@@ -1204,6 +1253,53 @@ sourceTruthCommand
         console.error(chalk.yellow(`Evidence report: ${error.reportPath}`));
       } else {
         console.error(chalk.red(`Source-truth generation failed: ${errorMsg}`));
+      }
+
+      process.exit(1);
+    }
+  });
+
+sourceTruthCommand
+  .command('verify-docs')
+  .description('Compare explicit local docs references with observed local source export facts')
+  .requiredOption('--source <path>', 'Explicit local source file or directory to inspect')
+  .requiredOption('--docs <path>', 'Explicit local Markdown/MDX docs file or directory to inspect')
+  .requiredOption('--output-dir <dir>', 'Directory for source-verification evidence files')
+  .action(async (options: { source: string; docs: string; outputDir: string }) => {
+    try {
+      const { verifyDocsAgainstSource } = await import('./core/source-verification.js');
+      const result = await verifyDocsAgainstSource({
+        source: options.source,
+        docs: options.docs,
+        outputDir: options.outputDir,
+        generator: {
+          name: GENERATOR_NAME,
+          version: GENERATOR_VERSION,
+          cliName: CLI_NAME,
+        },
+      });
+
+      console.log(chalk.bold('Local source/docs evidence generated'));
+      console.log(`  Source: ${result.report.source.resolvedPath}`);
+      console.log(`  Docs: ${result.report.docs.resolvedPath}`);
+      console.log(`  Docs references: ${result.report.summary.docsReferenceCount}`);
+      console.log(`  Exact export matches: ${result.report.summary.exactMatchCount}`);
+      console.log(`  Unmatched references: ${result.report.summary.unmatchedReferenceCount}`);
+      console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
+      console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
+      console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
+    } catch (error) {
+      const { SourceVerificationNoDocsEvidenceError } = await import(
+        './core/source-verification.js'
+      );
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      if (error instanceof SourceVerificationNoDocsEvidenceError) {
+        console.error(chalk.red(`Local source/docs evidence failed: ${errorMsg}`));
+        console.error(chalk.yellow(`Failure report: ${error.failurePath}`));
+        console.error(chalk.yellow(`Evidence report: ${error.reportPath}`));
+      } else {
+        console.error(chalk.red(`Local source/docs evidence failed: ${errorMsg}`));
       }
 
       process.exit(1);
