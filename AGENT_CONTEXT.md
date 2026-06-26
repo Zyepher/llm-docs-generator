@@ -478,6 +478,9 @@ Agent workflow:
 For future worker or reviewer prompts that touch CLI source ingestion,
 discovery-like inspection, manifests, freshness, provenance, or docs contracts,
 include an explicit reminder to align with the Product Boundary above.
+Those prompts must explicitly check for unsupported candidate scoring,
+CLI source-selection, authority/source-truth, correctness, task-fit, or
+"top candidate" claims.
 
 Reviewers must allow:
 
@@ -491,9 +494,11 @@ Reviewers must reject:
 
 - CLI behavior or docs that imply discovery decides authority, correctness,
   source truth, source-truth confidence, or task fit.
-- Discovery or candidate changes that add or imply source rating, trust
-  rating, authority rating, hidden preferred-source logic, authority/trust
-  scoring or ratings, or numeric task-fit ordering.
+- Discovery or candidate changes that add or imply candidate scoring, source
+  rating, trust rating, authority rating, hidden preferred-source logic,
+  authority/trust scoring or ratings, new numeric scores, or numeric task-fit
+  ordering. If an existing compatibility contract keeps a numeric score, it
+  must be documented as non-authoritative report readability only.
 - Candidate evidence reports framed as ratings, hidden preferred-source logic,
   hidden source-specific guessing, or anything other than factual evidence
   reports.

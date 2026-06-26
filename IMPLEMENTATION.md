@@ -314,9 +314,12 @@ a candidate satisfies the task, or implement source-truth codebase docs
 generation. It lists, groups, filters, and orders candidates deterministically
 for agent review only by factual evidence signals: file type, path, metadata,
 source URL, hash, freshness metadata when explicitly observed, parseability, and
-explicit user-provided scope. It does not select a discovery-report candidate or
-generate from one unless the agent or user explicitly selects that candidate or
-a future documented automation flag requires it. Repo cache handling is
+explicit user-provided scope. The current discovery report contract has no
+numeric candidate score; do not add one as an authority, task-fit,
+source-truth, correctness, or source-selection signal. It does not select a
+discovery-report candidate or generate from one unless the agent or user
+explicitly selects that candidate or a future documented automation flag
+requires it. Repo cache handling is
 non-destructive; clean
 matching caches fetch remote refs without pulling into the checkout, and cached
 checkouts with local changes or ignored files are warned about and inspected as

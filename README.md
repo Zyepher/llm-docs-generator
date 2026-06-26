@@ -191,6 +191,8 @@ scope. A useful agent review order is:
    codebase docs or source-code verification.
 
 The CLI records evidence; the agent owns the final candidate-selection judgment.
+If no candidate is authoritative for the user's task, the agent continues
+manual investigation, uses another explicit source, or asks the user.
 
 ## Freshness And Verification
 

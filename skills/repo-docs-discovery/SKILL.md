@@ -11,7 +11,7 @@ Use this skill to turn a user's documentation goal into explicit CLI inputs. The
 
 - The agent owns ambiguity resolution, source authority, task fit, version choice, and candidate selection.
 - The CLI owns bounded inspection, parsing, formatting, metadata, validation, and honest failure reporting.
-- Candidate reports are evidence reports. Deterministic ordering is for review readability, not authority, task-fit judgment, or source selection. Do not generate from the first ordered candidate unless the user selected it, the agent explicitly selected it, or a documented automation flag exists.
+- Candidate evidence reports are evidence reports. Deterministic ordering is for review readability, not authority, task-fit judgment, or source selection. Do not generate from the first ordered candidate unless the user selected it, the agent explicitly selected it, or a documented automation flag exists.
 - Do not execute repository scripts, docs build scripts, package install hooks, examples, or arbitrary commands from inspected sources.
 - Do not store credentials or tokens in manifests, reports, or generated docs.
 
@@ -55,6 +55,7 @@ llm-docs discover --url https://example.com/docs --output-dir ./reports/site-doc
 - URL discovery fetches only the explicit HTTP(S) URL, same-origin root `/llms.txt`, and same-origin root `/sitemap.xml`. It does not fetch extracted candidate links, render JavaScript, or crawl arbitrary paths.
 - Discovery reports factual evidence, warnings, skipped items, and deterministic ordering. The agent must review the report before selecting a source.
 - Do not describe candidate order as trust, authority, source truth, freshness, or task-fit proof.
+- Do not add or infer candidate scores; if a compatibility report already contains one, treat it as non-authoritative readability metadata only.
 
 ## Cache Rules
 
@@ -63,7 +64,7 @@ llm-docs discover --url https://example.com/docs --output-dir ./reports/site-doc
 - Never discard local changes in a cached checkout. If the cache is dirty or contains ignored local files, inspect it as-is, choose a separate cache/worktree, or ask the user.
 - If a package or product name resolves to a repo, the agent records that resolution and then calls the CLI with the explicit repo URL, scope, or selected local path. The CLI does not resolve package authority.
 
-## Candidate Report Handling
+## Candidate Evidence Report Handling
 
 - Read the report path, discovery kind, inspected input, candidate count, warnings, skipped paths or resources, provenance fields, and manifest integrity facts.
 - Use report ordering only to make review deterministic. The agent decides whether a candidate fits the user's intent.
