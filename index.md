@@ -41,8 +41,13 @@ Important distribution note:
 Read:
 
 1. [AGENT_CONTEXT.md](AGENT_CONTEXT.md)
-2. [NEXT_GEN_PLAN.html](NEXT_GEN_PLAN.html)
-3. [README.md](README.md)
+2. [skills/repo-docs-discovery/SKILL.md](skills/repo-docs-discovery/SKILL.md)
+   when the task starts from an external repo URL, docs URL,
+   package/product name, or local docs path
+3. [skills/llm-docs-generator/SKILL.md](skills/llm-docs-generator/SKILL.md)
+   when maintaining this repo or checking the installed CLI contract
+4. [NEXT_GEN_PLAN.html](NEXT_GEN_PLAN.html)
+5. [README.md](README.md)
 
 Use [AGENT_CONTEXT.md](AGENT_CONTEXT.md) to decide the user's intent before
 running commands.
@@ -165,7 +170,7 @@ and skill artifact hash checks, the expected binary name, an informational PATH
 check for `llm-docs`, and a skipped/not-configured Codex skill-installation
 check. Missing `llm-docs` on PATH is a warning, not a hard failure. The command
 does not install/register skills, write user config, mutate host skill
-directories, run network requests, or infer source truth/task fit. `agent
+directories, run network requests, or infer source truth or task fit. `agent
 install codex` remains planned/unsupported and is reported that way through
 `capabilities --json`.
 
@@ -272,8 +277,8 @@ symlink/path containment, and count consistency with `source-truth-report.json`
 when available. Discovery-report verification checks report file integrity and
 basic schema/mode/kind/count consistency, and optional candidate evidence index
 metadata against `discovery-report.json`. Discovery reports do not generate
-docs, choose sources, assign trust scores, infer authority, or claim source
-truth.
+docs, choose sources, assign trust or authority labels, infer authority, or
+claim source truth.
 Source-verification manifest verification checks report file integrity and
 basic schema/count consistency for `source-verification-report.json` only; it
 does not refresh sources, inspect additional files, or judge docs correctness.

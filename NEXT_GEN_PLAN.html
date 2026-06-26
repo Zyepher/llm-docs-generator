@@ -545,7 +545,7 @@ llm-docs discover supabase/supabase --format openref</code></pre>
               Use an agent-supplied source, candidate, or manifest, then write an agent-readable
               Markdown pack plus manifest. Future discovery-report input must require an explicit
               agent/user-selected candidate or a documented automation flag; the current CLI does not
-              auto-select from discovery reports or generate directly from URLs.
+              automatically select from discovery reports or generate directly from URLs.
             </p>
             <pre><code># future/planned: requires explicit candidate selection or documented automation flag
 llm-docs generate --source ./reports/supabase/discovery-report.json --candidate apps/docs/spec/supabase_swift_v2.yml
@@ -958,8 +958,8 @@ capabilities:
           <p>
             Target manifest shape, not the current implemented manifest contract. Any
             <code>selection</code> metadata records an explicit agent/user choice or documented
-            automation-flag choice; it is not CLI authority, scoring, source-truth, or task-fit
-            selection.
+            automation-flag choice; it is not CLI authority, source-truth, task-fit, or
+            source-selection judgment.
           </p>
           <pre><code>{
   "schemaVersion": "1.0",
@@ -1217,8 +1217,8 @@ failure:
               <p>Make the repo usable by AI agents as a guided workflow, not just a CLI.</p>
               <ul>
                 <li>Create <code>skills/repo-docs-discovery/SKILL.md</code>.</li>
-                <li>Include discovery rules, cache rules, and failure handling.</li>
-                <li>Add examples for repo URL, docs URL, package name, and local path inputs.</li>
+                <li>Include discovery rules, cache rules, candidate evidence report handling, and failure handling.</li>
+                <li>Add examples for repo URL, docs URL, package/product name, and local path inputs.</li>
                 <li>Maintain <code>index.md</code> and <code>AGENT_CONTEXT.md</code> as the agent crawl map and intent contract.</li>
                 <li>Keep skill instructions separate from parser logic.</li>
               </ul>

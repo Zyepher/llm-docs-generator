@@ -16,13 +16,13 @@ Use this skill when the task is about this repository or about calling the insta
 - Treat `agent doctor` as read-only diagnostics only when `capabilities --json`
   reports it as implemented; it must not be described as installing/registering
   skills, writing user config, mutating host skill directories, or proving
-  source truth/task fit.
+  source truth or task fit.
 - Do not claim refresh beyond the explicit local-manifest modes reported by
   `capabilities --json`; configured SDK refresh, discovery-report refresh,
   remote freshness refresh, crawling, and source-code verification remain
   unsupported unless the installed CLI says otherwise. Refresh must not fetch
   remote sources or run source project scripts.
-- Do not treat discovery reports as source-selection decisions. They are candidate evidence reports for agent review.
+- Do not treat discovery reports as source-selection decisions. They are candidate evidence reports for agent review, and report order is not authority, source truth, freshness, or task-fit proof.
 
 ## Current Safe Workflow
 
@@ -38,6 +38,24 @@ llm-docs agent doctor --json
 
 4. Use only implemented deterministic commands for the task.
 5. Report warnings, planned/unsupported capabilities, and incomplete evidence honestly.
+
+## External Target Workflow
+
+When the user's input is a repo URL, docs URL, package name, product name, or local path, use the `repo-docs-discovery` skill for source investigation. Keep these boundaries:
+
+- Package and product names are resolved by the agent before CLI calls. Convert them to explicit repo URLs, docs URLs, scopes, versions, or local paths first.
+- Repo and URL discovery produce candidate evidence reports for agent review. They do not choose package authority, source truth, task fit, or the final source.
+- `generate --source` currently takes explicit local files or directories. Do not pass package names, docs URLs, repo URLs, or discovery reports as `--source`.
+- If URL or repo discovery cannot produce an explicit local source suitable for an implemented generation mode, report the evidence and limitation instead of inventing a conversion.
+
+Example boundaries:
+
+```text
+Repo URL: agent chooses repo intent and scope -> llm-docs discover --repo <url> --scope <scope> -> agent reviews report -> llm-docs generate --source <explicit-local-path>
+Docs URL: agent chooses URL to inspect -> llm-docs discover --url <url> -> agent reviews report; generation needs an explicit local source.
+Package/product: agent resolves official package/product identity, version, repo/docs, and scope -> CLI receives only explicit repo/docs/local inputs.
+Local path: agent verifies the path -> optional llm-docs discover --source <path> -> llm-docs generate --source <path>
+```
 
 ## Maintenance Workflow
 

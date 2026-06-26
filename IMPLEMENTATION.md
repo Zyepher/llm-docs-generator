@@ -304,10 +304,10 @@ Current discovery scope:
   It does not fetch linked candidates or render JavaScript.
 
 Discovery does not generate docs, crawl linked website candidates, choose
-candidates, assign trust scores, infer authority, claim source truth, decide
-task fit, or implement source-truth codebase docs generation. It lists, groups,
+candidates, assign trust or authority labels, infer authority, claim source
+truth, decide task fit, or implement source-truth codebase docs generation. It lists, groups,
 filters, and orders candidates deterministically for agent review only. There is
-no auto-selection or generation from a top/first ordered candidate unless the
+no automatic selection or generation from a first ordered candidate unless the
 agent or user explicitly selects that candidate or a future documented
 automation flag requires it. Repo cache handling is non-destructive; clean
 matching caches fetch remote refs without pulling into the checkout, and cached
@@ -397,9 +397,12 @@ Current agent doctor diagnostics scope:
   not mutate host skill directories, and does not infer source authority, source
   truth, or task fit.
 - The bundled skill files are current-state instructions for agents. They tell
-  agents to inspect `capabilities --json` before assuming support and preserve
+  agents to inspect `capabilities --json` before assuming support, preserve
   the boundary that the agent chooses explicit source/scope/candidate while the
-  CLI reports deterministic evidence.
+  CLI reports deterministic evidence, and include repo URL, docs URL,
+  package/product name, and local path examples. Candidate evidence reports are
+  described as inputs for agent review, not source selection or authority
+  decisions.
 
 Current source-truth evidence scope:
 
@@ -466,8 +469,8 @@ Current explicit local source docs generation scope:
   without `--source`, presets with `--sdk`, and preset-incompatible explicit
   formats fail before output work.
 - URL-like sources, missing paths, symlinked source roots, discovery reports,
-  and candidate evidence/discovery report auto-selection are rejected honestly;
-  there is no generation from a top/first ordered candidate. Source mode never
+  and candidate evidence/discovery report automatic selection are rejected honestly;
+  there is no generation from a first ordered candidate. Source mode never
   fetches network resources and does not consume discovery reports
   automatically.
 - `--format` is a parser hint. Supported values are `auto`, `markdown`, `mdx`
