@@ -251,6 +251,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       context facts for inspected supported files
 - [x] Explicit `source-truth generate --source --output-dir` Markdown evidence
       facts with raw evidence report and provenance manifest
+- [x] Explicit `source-truth verify-docs --source --docs --output-dir`
+      source/docs lexical evidence report for local Markdown/MDX inline-code
+      references compared with observed local source exported names
 - [x] Partial generated-output RAG metadata for configured SDK and source-truth
       docs manifests (`lineCount` and deterministic `estimatedTokenCount`)
 - [x] RST parser foundation for explicit local Python-style documentation
@@ -267,8 +270,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Deterministic semantic chunk manifest-index metadata for opt-in
       source-docs `chunks/semantic-chunks.jsonl` exports
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
-- [ ] Source-code verification, broad website crawling, configured SDK refresh,
-      discovery-report refresh, and remote freshness refresh
+- [ ] Broad official-docs behavior/API claim verification, broad website
+      crawling, configured SDK refresh, discovery-report refresh, and remote
+      freshness refresh
 - [ ] Plugin system for custom parsers
 - [x] OpenRef backward compatibility tests
 
@@ -317,23 +321,26 @@ Current capabilities contract scope:
   planned/unsupported entries.
 - Implemented entries cover `discover --source`, `discover --repo`,
   `discover --url`, `source-truth inspect --source`,
-  `source-truth generate --source --output-dir`, read-only `agent context`,
+  `source-truth generate --source --output-dir`,
+  `source-truth verify-docs --source --docs --output-dir`, read-only
+  `agent context`,
   explicit local `generate --source` with parser hints and optional
   `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
   `--format openref-0.1`, configured SDK, source-docs, source-truth docs, and
-  discovery-report `verify`, local explicit-manifest source-docs/source-truth
-  `refresh`, `list-sdks`, and `validate --sdk`.
+  discovery-report/source-verification `verify`, local explicit-manifest
+  source-docs/source-truth `refresh`, `list-sdks`, and `validate --sdk`.
 - Planned/unsupported entries include additional `generate --preset` names,
   configured SDK refresh, discovery-report refresh, remote freshness refresh,
-  source-code verification for official docs, broad website crawling,
+  broad official-docs behavior/API claim verification, broad website crawling,
   automatic source selection or top-candidate generation, framework/route
   understanding, behavior-level generation from source code,
   `agent install codex`, and `agent doctor`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
-  `manifest.json`, `failure.json`, source docs under `llm-docs/`, configured
-  SDK parsed spec output, and configured SDK LLM docs output.
+  `source-verification-report.json`, `manifest.json`, `failure.json`, source
+  docs under `llm-docs/`, configured SDK parsed spec output, and configured SDK
+  LLM docs output.
 - Generated-output manifest metadata is currently partial: source docs,
   configured SDK, source-truth docs, and discovery-report manifests record
   `lineCount` and deterministic `estimatedTokenCount` for explicit generated
@@ -345,8 +352,8 @@ Current capabilities contract scope:
   records. Source-docs refresh preserves that output and regenerates the index
   when the existing manifest recorded it. Capabilities output does not claim
   full RAG systems, configured SDK refresh, discovery-report refresh, remote
-  freshness refresh, source-code verification, broad crawling, or automatic
-  source selection.
+  freshness refresh, broad official-docs behavior/API claim verification, broad
+  crawling, or automatic source selection.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
@@ -405,6 +412,29 @@ Current source-truth evidence scope:
   documentation claims, infer runtime behavior, decide task fit, select sources,
   or summarize behavior beyond observed export and package/config facts.
 
+Current source/docs evidence scope:
+
+- `llm-docs source-truth verify-docs --source <path> --docs <path>
+--output-dir <dir>` accepts explicit local source and docs paths only.
+- The source side reuses `inspectSourceTruth`; it does not execute code, run
+  package scripts, load project config dynamically, resolve re-export targets
+  beyond existing facts, infer routes/frameworks, or infer runtime behavior.
+- The docs side accepts explicit local `.md`, `.mdx`, and `.markdown` files or
+  directories, traverses with bounded depth/entry/file/byte limits, skips common
+  dependency/generated directories, rejects symlink roots and parents, and does
+  not fetch network resources or render JavaScript.
+- Docs evidence is limited to inline-code identifiers and empty call identifiers
+  such as `makeClient` or `makeClient()`, outside fenced code. Each reference
+  records file path, line range, raw text, normalized identifier, and order.
+- Exact matches are lexical matches against observed source exported names.
+  Unmatched references are reported as observations, not correctness failures.
+- Successful runs write `source-verification-report.json` and `manifest.json`.
+  Unsupported docs inputs or supported docs with no inline-code identifier
+  references write `source-verification-report.json` plus `failure.json` and do
+  not write a manifest.
+  `source-verification-local-evidence` manifests are supported by `verify` for
+  report file integrity and basic schema/count consistency only.
+
 Current explicit local source docs generation scope:
 
 - `llm-docs generate --source <local-file-or-directory> --output-dir <dir>`
@@ -445,7 +475,8 @@ Current explicit local source docs generation scope:
   hash, per-chunk IDs/order/title/path/nodePath/content hash/counts/source
   metadata, and warning counts without chunk content.
 - `verify` supports current `configured-sdk`, `local-source-docs`,
-  `source-truth-local-docs`, and `discovery-report` manifests.
+  `source-truth-local-docs`, `discovery-report`, and
+  `source-verification-local-evidence` manifests.
   Discovery-report verification checks `discovery-report.json` existence, hash,
   byte size, line count, deterministic estimated token count, and basic report
   schema/mode/kind/count consistency. When optional candidate evidence index
@@ -459,7 +490,11 @@ Current explicit local source docs generation scope:
   Source-truth docs verification checks deterministic source-truth manifest
   shape, source/source-file integrity, generated output integrity, symlink/path
   containment, inspection basics, and raw report count consistency; it does not
-  infer behavior or perform source-code verification.
+  infer behavior or perform broad source-code verification.
+  Source-verification manifest checks verify `source-verification-report.json`
+  file integrity and basic schema/count consistency only; they do not refresh
+  sources, inspect additional files, parse behavior claims, or decide whether
+  docs statements are correct.
 
 - `refresh --manifest <path>` / `refresh --output-dir <dir>` supports only
   current `local-source-docs` and `source-truth-local-docs` manifests. For
@@ -508,7 +543,7 @@ Current Markdown / MDX parser scope:
 - Does not evaluate JSX, execute imports, fetch network sources, or add
   product-specific MDX rules.
 - Is available through `generate --source <local-file-or-directory>
-  --format markdown`; `--format mdx` is accepted as a Markdown parser hint.
+--format markdown`; `--format mdx` is accepted as a Markdown parser hint.
 
 Current RST parser scope:
 
@@ -523,7 +558,7 @@ Current RST parser scope:
 - Does not execute or fetch includes, run Sphinx/docutils transforms, resolve
   references, or claim full RST/Sphinx support.
 - Is available through `generate --source <local-file-or-directory>
-  --format rst`.
+--format rst`.
 
 Current HTML parser scope:
 
@@ -541,7 +576,7 @@ Current HTML parser scope:
 - Does not render JavaScript, execute content, fetch linked resources, follow
   links, infer source authority, or choose candidate sources.
 - Is available through `generate --source <local-file-or-directory>
-  --format html`.
+--format html`.
 
 Current semantic chunking scope:
 
