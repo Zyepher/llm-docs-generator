@@ -44,8 +44,10 @@ llm-docs generate --source <explicit-tailwind-v3-docs-path> --format markdown --
 ```
 
 The CLI never silently decides that a source is authoritative. Discovery
-produces candidate evidence reports for the agent to review. Generation uses an
-explicit local file or directory selected by the agent.
+produces candidate evidence reports for the agent to review. Generation from
+discovery candidates or reports requires an explicit agent/user-selected source
+or documented automation flag; the current CLI generates only from an explicit
+local file or directory.
 
 Common input patterns:
 
@@ -253,6 +255,9 @@ scope. A useful agent review order is:
 The CLI records evidence; the agent owns the final candidate-selection judgment.
 If no candidate is authoritative for the user's task, the agent continues
 manual investigation, uses another explicit source, or asks the user.
+Do not generate from a discovery report's first or leading candidate, or from
+candidate order alone, unless the agent/user explicitly selected it or a
+documented automation flag requires it.
 
 ## Freshness And Verification
 
