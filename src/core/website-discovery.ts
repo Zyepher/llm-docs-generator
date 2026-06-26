@@ -55,6 +55,13 @@ export interface WebsiteInspectedResource {
   byteSize: number;
   truncated: boolean;
   sourceRole: WebsiteResourceRole;
+  freshness: WebsiteResourceFreshnessMetadata;
+}
+
+export interface WebsiteResourceFreshnessMetadata {
+  observedAt: string;
+  etag: string | null;
+  lastModified: string | null;
 }
 
 export interface WebsiteCrawlPolicy {
@@ -346,8 +353,11 @@ async function fetchWebsiteResource(options: {
   let timedOut = false;
   let status: number | null = null;
   let contentType: string | null = null;
+  let etag: string | null = null;
+  let lastModified: string | null = null;
   let byteSize = 0;
   let truncated = false;
+  const observedAt = new Date().toISOString();
   const timeout = setTimeout(() => {
     timedOut = true;
     abortController.abort();
@@ -367,6 +377,10 @@ async function fetchWebsiteResource(options: {
     });
     status = response.statusCode;
     contentType = normalizeContentType(readHeaderValue(response.headers['content-type']));
+    etag = normalizeFreshnessHeaderValue(readHeaderValue(response.headers.etag));
+    lastModified = normalizeFreshnessHeaderValue(
+      readHeaderValue(response.headers['last-modified'])
+    );
     const readBody = await readBodyWithLimit(response.body, maxBytesPerResponse);
     byteSize = readBody.byteSize;
     truncated = readBody.truncated;
@@ -379,6 +393,11 @@ async function fetchWebsiteResource(options: {
         byteSize,
         truncated,
         sourceRole: plannedResource.sourceRole,
+        freshness: {
+          observedAt,
+          etag,
+          lastModified,
+        },
       },
       text: readBody.text,
       error: null,
@@ -397,6 +416,11 @@ async function fetchWebsiteResource(options: {
         byteSize,
         truncated,
         sourceRole: plannedResource.sourceRole,
+        freshness: {
+          observedAt,
+          etag,
+          lastModified,
+        },
       },
       text: null,
       error: timedOut ? `Timed out after ${timeoutMs} ms` : formatFetchError(error),
@@ -881,6 +905,16 @@ function normalizeContentType(value: string | null): string | null {
   const mediaType = value.split(';')[0]?.trim().toLowerCase();
 
   return mediaType === '' || mediaType === undefined ? null : mediaType;
+}
+
+function normalizeFreshnessHeaderValue(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  return trimmed === '' ? null : trimmed;
 }
 
 function formatContentTypeForWarning(contentType: string | null): string {

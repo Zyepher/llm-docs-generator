@@ -329,6 +329,11 @@ interface WebsiteDiscoveryReport {
     byteSize: number;
     truncated: boolean;
     sourceRole: string;
+    freshness: {
+      observedAt: string;
+      etag: string | null;
+      lastModified: string | null;
+    };
   }>;
   crawlPolicy: {
     inspectedResourceUrls: string[];
@@ -745,9 +750,10 @@ function writeHttpResponse(
   response: ServerResponse,
   status: number,
   contentType: string,
-  body: string
+  body: string,
+  headers: Record<string, string> = {}
 ): void {
-  response.writeHead(status, { 'content-type': contentType });
+  response.writeHead(status, { 'content-type': contentType, ...headers });
   response.end(body);
 }
 
@@ -977,6 +983,13 @@ function expectWebsiteCandidateEvidenceIndex(
         inspectedResourceCount: report.inspectedResources.length,
         sameOriginWellKnownResourceCount: report.crawlPolicy.sameOriginWellKnownResources.length,
       },
+      resourceFreshness: report.inspectedResources.map((resource) => ({
+        url: resource.url,
+        sourceRole: resource.sourceRole,
+        observedAt: resource.freshness.observedAt,
+        etag: resource.freshness.etag,
+        lastModified: resource.freshness.lastModified,
+      })),
     },
   });
   expect(index.aggregateHash).toBe(candidateEvidenceIndexAggregateHashForTest(index));
@@ -1233,6 +1246,58 @@ async function createSourceDiscoveryVerifyFixture(prefix = 'llm-docs-discovery-v
   return {
     dir,
     sourceDir,
+    outputDir,
+    reportPath,
+    manifestPath,
+  };
+}
+
+async function createWebsiteDiscoveryVerifyFixture(
+  prefix = 'llm-docs-url-discovery-verify-'
+): Promise<{
+  dir: string;
+  outputDir: string;
+  reportPath: string;
+  manifestPath: string;
+}> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  const { baseUrl } = await startTestServer((request, response) => {
+    const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? ''}`);
+
+    switch (requestUrl.pathname) {
+      case '/docs/page':
+        writeHttpResponse(
+          response,
+          200,
+          'text/html',
+          '<html><body><a href="/docs/api">API</a></body></html>',
+          {
+            etag: '"docs-page-v1"',
+            'last-modified': 'Wed, 21 Oct 2015 07:28:00 GMT',
+          }
+        );
+        return;
+      case '/llms.txt':
+        writeHttpResponse(response, 200, 'text/plain', '[Guide](/docs/guide.md)\n', {
+          etag: 'W/"llms-v1"',
+        });
+        return;
+      case '/sitemap.xml':
+        writeHttpResponse(response, 200, 'application/xml', '<urlset></urlset>\n');
+        return;
+      default:
+        writeHttpResponse(response, 404, 'text/plain', 'missing\n');
+    }
+  });
+  const outputDir = join(dir, 'reports');
+  const reportPath = join(outputDir, 'discovery-report.json');
+  const manifestPath = join(outputDir, 'manifest.json');
+
+  await runCli(['discover', '--url', `${baseUrl}/docs/page`, '--output-dir', outputDir]);
+
+  return {
+    dir,
     outputDir,
     reportPath,
     manifestPath,
@@ -2025,6 +2090,12 @@ describe('CLI compatibility behavior', () => {
       'discovery-report.json',
       'manifest.json',
     ]);
+    expect(implemented.get('discover-url')?.summary).toContain(
+      'explicit observed HTTP freshness validators'
+    );
+    expect(implemented.get('discover-url')?.limitations).toContain(
+      'observed HTTP freshness evidence is not freshness validation or remote refresh'
+    );
     expect(implemented.get('source-truth-inspect')?.outputFiles).toEqual([
       'stdout JSON evidence report',
     ]);
@@ -2188,6 +2259,7 @@ describe('CLI compatibility behavior', () => {
         'no task fit decision',
         'no source selection',
         'verify does not refresh discovery reports',
+        'verify does not refresh remote freshness evidence',
         'no source-code verification',
       ]),
     });
@@ -4166,7 +4238,11 @@ describe('CLI compatibility behavior', () => {
               '<a href="/blog">Blog</a>',
               '</body>',
               '</html>',
-            ].join('')
+            ].join(''),
+            {
+              etag: '"docs-page-v1"',
+              'last-modified': 'Wed, 21 Oct 2015 07:28:00 GMT',
+            }
           );
           return;
         case '/llms.txt':
@@ -4180,7 +4256,10 @@ describe('CLI compatibility behavior', () => {
               '[Guide](/docs/llms-guide.md)',
               'https://external.example/openapi.json',
               '',
-            ].join('\n')
+            ].join('\n'),
+            {
+              etag: 'W/"llms-v1"',
+            }
           );
           return;
         case '/sitemap.xml':
@@ -4194,7 +4273,10 @@ describe('CLI compatibility behavior', () => {
               `<url><loc>${origin}/docs/sitemap-entry</loc></url>`,
               `<url><loc>${origin}/docs/api</loc></url>`,
               '</urlset>',
-            ].join('')
+            ].join(''),
+            {
+              'last-modified': 'Thu, 22 Oct 2015 07:28:00 GMT',
+            }
           );
           return;
         default:
@@ -4249,6 +4331,12 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expectWebsiteCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report);
+    expectCandidateEvidenceIndexHasNoReportContent(manifest.candidateEvidenceIndex);
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+    expect(verifyResult.stdout).toContain('Manifest verification');
+    expect(verifyResult.stdout).toContain('Checked files: 1');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
     expect(requests.map((requestPath) => new URL(requestPath, baseUrl).pathname)).toEqual([
       '/docs/page',
       '/llms.txt',
@@ -4285,6 +4373,11 @@ describe('CLI compatibility behavior', () => {
         byteSize: expect.any(Number),
         truncated: false,
         sourceRole: 'explicit-url',
+        freshness: {
+          observedAt: expect.any(String),
+          etag: '"docs-page-v1"',
+          lastModified: 'Wed, 21 Oct 2015 07:28:00 GMT',
+        },
       },
       {
         url: `${baseUrl}/llms.txt`,
@@ -4293,6 +4386,11 @@ describe('CLI compatibility behavior', () => {
         byteSize: expect.any(Number),
         truncated: false,
         sourceRole: 'llms-txt',
+        freshness: {
+          observedAt: expect.any(String),
+          etag: 'W/"llms-v1"',
+          lastModified: null,
+        },
       },
       {
         url: `${baseUrl}/sitemap.xml`,
@@ -4301,8 +4399,18 @@ describe('CLI compatibility behavior', () => {
         byteSize: expect.any(Number),
         truncated: false,
         sourceRole: 'sitemap-xml',
+        freshness: {
+          observedAt: expect.any(String),
+          etag: null,
+          lastModified: 'Thu, 22 Oct 2015 07:28:00 GMT',
+        },
       },
     ]);
+    for (const resource of report.inspectedResources) {
+      expect(new Date(resource.freshness.observedAt).toISOString()).toBe(
+        resource.freshness.observedAt
+      );
+    }
     expect(report.candidates.map((candidate) => candidate.url)).toEqual([
       `${baseUrl}/docs/page?view=canonical`,
       `${baseUrl}/docs/api`,
@@ -4546,7 +4654,15 @@ describe('CLI compatibility behavior', () => {
       contentType: 'text/html',
       truncated: false,
       sourceRole: 'explicit-url',
+      freshness: {
+        observedAt: expect.any(String),
+        etag: null,
+        lastModified: null,
+      },
     });
+    expect(new Date(report.inspectedResources[0]?.freshness.observedAt ?? '').toISOString()).toBe(
+      report.inspectedResources[0]?.freshness.observedAt
+    );
     expect(report.inspectedResources[0]?.byteSize).toBeGreaterThan(0);
     expect(report.warnings).toContain(
       `Fetch failed for explicit-url resource: ${baseUrl}/docs/slow. Timed out after 50 ms`
@@ -4711,6 +4827,11 @@ describe('CLI compatibility behavior', () => {
         byteSize: 0,
         truncated: false,
         sourceRole: 'explicit-url',
+        freshness: {
+          observedAt: expect.any(String),
+          etag: null,
+          lastModified: null,
+        },
       },
       {
         url: `${baseUrl}/llms.txt`,
@@ -4719,6 +4840,11 @@ describe('CLI compatibility behavior', () => {
         byteSize: 0,
         truncated: false,
         sourceRole: 'llms-txt',
+        freshness: {
+          observedAt: expect.any(String),
+          etag: null,
+          lastModified: null,
+        },
       },
       {
         url: `${baseUrl}/sitemap.xml`,
@@ -4727,8 +4853,18 @@ describe('CLI compatibility behavior', () => {
         byteSize: 0,
         truncated: false,
         sourceRole: 'sitemap-xml',
+        freshness: {
+          observedAt: expect.any(String),
+          etag: null,
+          lastModified: null,
+        },
       },
     ]);
+    for (const resource of report.inspectedResources) {
+      expect(new Date(resource.freshness.observedAt).toISOString()).toBe(
+        resource.freshness.observedAt
+      );
+    }
     expect(report.candidates).toEqual([]);
     expect(report.warnings).toHaveLength(3);
     expect(report.warnings[0]).toContain(
@@ -9536,6 +9672,79 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).not.toContain('hash mismatch');
   });
 
+  it('rejects stale URL discovery resource freshness index metadata', async () => {
+    const { outputDir, manifestPath } = await createWebsiteDiscoveryVerifyFixture(
+      'llm-docs-url-discovery-freshness-stale-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest & {
+      candidateEvidenceIndex: CandidateEvidenceManifestIndex;
+    };
+    const context = manifest.candidateEvidenceIndex.context as {
+      resourceFreshness?: Array<{
+        etag: string | null;
+      }>;
+    };
+    const firstResource = context.resourceFreshness?.[0];
+
+    if (firstResource === undefined) {
+      throw new Error('expected URL resource freshness metadata');
+    }
+
+    firstResource.etag = '"stale-etag"';
+    manifest.candidateEvidenceIndex.aggregateHash = candidateEvidenceIndexAggregateHashForTest(
+      manifest.candidateEvidenceIndex
+    );
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 1');
+    expect(result.stderr).toContain(
+      'discovery candidate evidence index: manifest metadata does not match discovery-report.json'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects malformed URL discovery resource freshness index metadata', async () => {
+    const { outputDir, manifestPath } = await createWebsiteDiscoveryVerifyFixture(
+      'llm-docs-url-discovery-freshness-malformed-'
+    );
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest & {
+      candidateEvidenceIndex: CandidateEvidenceManifestIndex;
+    };
+    const context = manifest.candidateEvidenceIndex.context as {
+      resourceFreshness?: Array<{
+        observedAt: string;
+      }>;
+    };
+    const firstResource = context.resourceFreshness?.[0];
+
+    if (firstResource === undefined) {
+      throw new Error('expected URL resource freshness metadata');
+    }
+
+    firstResource.observedAt = 'not-a-date';
+    manifest.candidateEvidenceIndex.aggregateHash = candidateEvidenceIndexAggregateHashForTest(
+      manifest.candidateEvidenceIndex
+    );
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.context.resourceFreshness[0].observedAt must be an ISO timestamp'
+    );
+  });
+
   it('rejects discovery candidate evidence index content leakage and score fields', async () => {
     const { outputDir, manifestPath } = await createSourceDiscoveryVerifyFixture(
       'llm-docs-discovery-candidate-index-leak-'
@@ -9600,6 +9809,15 @@ describe('CLI compatibility behavior', () => {
         evidence: 'link',
       },
     ];
+    manifest.candidateEvidenceIndex.context.resourceFreshness = [
+      {
+        url: 'https://example.com/docs',
+        sourceRole: 'explicit-url',
+        observedAt: new Date(0).toISOString(),
+        etag: null,
+        lastModified: null,
+      },
+    ];
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
@@ -9610,6 +9828,55 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('candidateEvidenceIndex.candidates[0].url is not supported');
     expect(result.stderr).toContain(
       'candidateEvidenceIndex.candidates[0].sourceResources is not supported'
+    );
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.context.resourceFreshness is not supported'
+    );
+  });
+
+  it('rejects URL-only freshness context on repo discovery candidate evidence indexes', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(
+      join(tmpdir(), 'llm-docs-discovery-candidate-index-repo-wrong-kind-')
+    );
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'reports');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      join(dir, 'cache'),
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest & {
+      candidateEvidenceIndex: CandidateEvidenceManifestIndex;
+    };
+
+    manifest.candidateEvidenceIndex.context.resourceFreshness = [
+      {
+        url: 'https://example.com/docs',
+        sourceRole: 'explicit-url',
+        observedAt: new Date(0).toISOString(),
+        etag: null,
+        lastModified: null,
+      },
+    ];
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex.context.resourceFreshness is not supported'
     );
   });
 

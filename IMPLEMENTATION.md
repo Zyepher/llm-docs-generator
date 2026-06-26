@@ -314,10 +314,12 @@ Current discovery scope:
   same-origin root `/llms.txt` and `/sitemap.xml`. It writes a candidate
   evidence report at `discovery-report.json` plus a discovery-report
   `manifest.json` with website input, normalized URL, inspected resources,
-  status/content type/byte counts, truncation flags, crawl policy, candidate
-  URLs, evidence/provenance, and warnings. The manifest includes a compact
-  content-free `candidateEvidenceIndex` derived from `discovery-report.json`.
-  It does not fetch linked candidates or render JavaScript.
+  status/content type/byte counts, truncation flags, explicit observed HTTP
+  freshness evidence (`ETag`, `Last-Modified`) when returned, crawl policy,
+  candidate URLs, evidence/provenance, and warnings. The manifest includes a
+  compact content-free `candidateEvidenceIndex` derived from
+  `discovery-report.json`. It does not fetch linked candidates, render
+  JavaScript, validate freshness, or refresh remote resources.
 
 Discovery does not generate docs, crawl linked website candidates, choose
 candidates, assign trust or authority labels, infer authority, claim source
@@ -548,9 +550,10 @@ Current explicit local source docs generation scope:
   byte size, line count, deterministic estimated token count, and basic report
   schema/mode/kind/count consistency. When optional candidate evidence index
   metadata is present, verification rebuilds it from `discovery-report.json`
-  and fails on malformed or stale index data; it does not choose candidates,
-  validate task fit, claim source truth, refresh repos or websites, or perform
-  source-code verification. Configured-SDK verification checks recorded
+  and fails on malformed or stale index data, including URL resource observed
+  HTTP freshness evidence when present; it does not choose candidates, validate
+  task fit, claim source truth, validate freshness, refresh repos or websites,
+  or perform source-code verification. Configured-SDK verification checks recorded
   generator/sdk/parser/formatter metadata, configured source, and generated
   outputs.
   Source-docs verification checks recorded generator/parser/formatter metadata,

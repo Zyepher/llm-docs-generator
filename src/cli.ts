@@ -392,10 +392,11 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'explicit http or https URL',
       outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
-        'bounded static website inspection for the explicit URL plus same-origin /llms.txt and /sitemap.xml, with a compact content-free candidate evidence manifest index',
+        'bounded static website inspection for the explicit URL plus same-origin /llms.txt and /sitemap.xml, recording explicit observed HTTP freshness validators in a compact content-free candidate evidence manifest index',
       limitations: [
         'candidate evidence for agent review only',
         'candidate evidence index is manifest metadata only',
+        'observed HTTP freshness evidence is not freshness validation or remote refresh',
         'no linked candidate fetching',
         'no JavaScript rendering',
         'no broad crawling',
@@ -652,7 +653,7 @@ const CAPABILITIES_CONTRACT = {
       status: 'implemented',
       inputBoundary: 'discovery-report manifest.json',
       summary:
-        'file integrity, basic schema consistency, and optional candidate evidence index checks for discovery report manifests',
+        'file integrity, basic schema consistency, and optional content-free candidate evidence index checks for discovery report manifests',
       limitations: [
         'discovery-report manifest mode only',
         'candidate evidence for agent review only',
@@ -660,6 +661,7 @@ const CAPABILITIES_CONTRACT = {
         'no task fit decision',
         'no source selection',
         'verify does not refresh discovery reports',
+        'verify does not refresh remote freshness evidence',
         'no source-code verification',
       ],
     },
