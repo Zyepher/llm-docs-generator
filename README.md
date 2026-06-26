@@ -56,17 +56,18 @@ Current implemented capabilities include:
   workspace
 - bounded website inspection from provided URLs, the same-origin `/llms.txt`,
   and the same-origin `/sitemap.xml`
-- candidate reports with deterministic evidence, warnings, and skipped paths
+- candidate reports with deterministic evidence, warnings, skipped paths, and
+  discovery report integrity manifests
 - parsers for OpenRef, OpenAPI/Swagger, Markdown, MDX, RST, DocC, and HTML
   fallback extraction from explicit local sources
 - agent-optimized Markdown output for explicit local source generation
 - a scoped `swift-book` preset that adds deterministic Markdown output
   defaults only when the agent or user supplies the exact local source path
 - opt-in semantic chunk JSONL output for explicit local source generation
-- manifests with source provenance, content hashes, generated file hashes,
-  parser/formatter metadata, and warnings
-- configured OpenRef SDK generation plus configured-SDK and source-docs manifest
-  verification
+- manifests with source or discovery provenance, content hashes, generated file
+  hashes, parser/formatter metadata, and warnings
+- configured OpenRef SDK generation plus configured-SDK, source-docs, and
+  discovery-report manifest verification
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
 - read-only bundled agent context metadata
@@ -132,8 +133,8 @@ The CLI is responsible for:
 - preserving headings, examples, semantic structure, and stable IDs
 - writing Markdown packs, manifests, discovery reports, provenance metadata,
   and source-truth failure reports
-- verifying configured-SDK and source-docs generated outputs against recorded
-  hashes and source metadata
+- verifying configured-SDK and source-docs generated outputs, plus
+  discovery-report files, against recorded metadata
 - failing clearly when a requested source, format, parser, permission, or mode
   cannot be used
 
@@ -154,20 +155,26 @@ The CLI records evidence; the agent owns the final source-selection judgment.
 
 ## Freshness And Verification
 
-Configured SDK and local source docs generated packs can be checked later:
+Configured SDK, local source docs, and discovery-report outputs can be checked
+later:
 
 ```bash
 llm-docs verify --manifest ./output/swift/v2/manifest.json
 llm-docs verify --output-dir ./agent-docs
+llm-docs verify --output-dir ./reports/local-docs
 ```
 
-Verification currently supports `configured-sdk` and `local-source-docs`
-manifests. Configured SDK verification checks manifest shape, source path
-existence, source content hash and byte size, and generated file hashes and byte
-sizes. Source-docs verification checks local source path shape and existence,
-recorded source file hashes and byte sizes, generated output paths, hashes,
-byte sizes, line counts, and deterministic estimated token counts. Refresh and
-source-code verification remain planned but are not implemented.
+Verification currently supports `configured-sdk`, `local-source-docs`, and
+`discovery-report` manifests. Configured SDK verification checks manifest shape,
+source path existence, source content hash and byte size, and generated file
+hashes and byte sizes. Source-docs verification checks local source path shape
+and existence, recorded source file hashes and byte sizes, generated output
+paths, hashes, byte sizes, line counts, and deterministic estimated token
+counts. Discovery-report verification checks `discovery-report.json` existence,
+hash, byte size, line count, estimated token count, and basic report
+schema/mode/kind/count consistency. It does not judge candidate authority, task
+fit, source truth, freshness, or source-code behavior. Refresh and source-code
+verification remain planned but are not implemented.
 
 When `generate --source` is run with `--chunks jsonl`, it also writes
 `chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a
@@ -195,20 +202,22 @@ verification confidence.
 
 ## Failure Reports
 
-Failed discovery and source-truth runs write useful artifacts when an output
-directory is provided and the workflow has enough evidence to report:
+Discovery and source-truth runs write useful artifacts when an output directory
+is provided and the workflow has enough evidence to report:
 
 ```text
 output/
-  discovery-report.json
-  failure.json
+  discovery-report.json  # successful discovery
+  manifest.json          # successful discovery only
+  failure.json           # supported failure modes
 ```
 
-Discovery writes `discovery-report.json` when it can complete bounded
-inspection. Source-truth no-facts paths may write `failure.json` plus an
-evidence report. `generate --source` failures report honestly on stderr and
-clean stale source-mode `manifest.json` / `llm-docs/` artifacts when present,
-but they do not currently write `failure.json`.
+Discovery writes `discovery-report.json` and a discovery-report `manifest.json`
+only when it can complete bounded inspection. Source-truth no-facts paths may
+write `failure.json` plus an evidence report. `generate --source` failures
+report honestly on stderr and clean stale source-mode `manifest.json` /
+`llm-docs/` artifacts when present, but they do not currently write
+`failure.json`.
 
 Failures explain what was checked, what was skipped, which permissions or
 formats were missing, and what the agent can try next. The tool does not invent

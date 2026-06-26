@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -13,6 +13,7 @@ import {
   inspectLocalSource,
   isUrlLikeInput,
 } from './discovery.js';
+import { writeTextFileSafely } from '../utils/safe-write.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -191,7 +192,7 @@ export async function discoverRepo(options: DiscoverRepoOptions): Promise<Discov
   };
 
   await mkdir(outputDir, { recursive: true });
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+  await writeTextFileSafely(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 
   return { report, reportPath };
 }

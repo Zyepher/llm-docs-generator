@@ -8,16 +8,26 @@ import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
+import { writeTextFileSafely } from '../utils/safe-write.js';
 
 const HASH_PREFIX = 'sha256:';
 
 export const MANIFEST_SCHEMA_VERSION = '0.1.0';
 export const CONFIGURED_SDK_MODE = 'configured-sdk';
+export const DISCOVERY_REPORT_MODE = 'discovery-report';
 const SOURCE_DOCS_MODE = 'local-source-docs';
 const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS = new Set<GeneratedOutputKind>([
   'parsed-spec-json',
   'llm-docs',
 ]);
+const DISCOVERY_REPORT_SCHEMA_VERSION = '0.2.0';
+const DISCOVERY_REPORT_OUTPUT_KIND = 'discovery-report';
+const DISCOVERY_REPORT_GENERATED_OUTPUT_KINDS = new Set([DISCOVERY_REPORT_OUTPUT_KIND]);
+const DISCOVERY_REPORT_MODE_BY_KIND = {
+  source: 'local-bounded-inspection',
+  repo: 'repo-bounded-inspection',
+  url: 'website-bounded-inspection',
+} as const;
 const SOURCE_DOCS_GENERATED_OUTPUT_KINDS = new Set(['llm-docs', 'semantic-chunks-jsonl']);
 const SOURCE_DOCS_SOURCE_TYPES = new Set(['file', 'directory']);
 const SOURCE_DOCS_FORMAT_HINTS = new Set([
@@ -45,6 +55,7 @@ export const SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS = [
 ] as const;
 
 export type GeneratedOutputKind = 'parsed-spec-json' | 'llm-docs';
+export type DiscoveryReportKind = keyof typeof DISCOVERY_REPORT_MODE_BY_KIND;
 
 export interface GeneratorMetadata {
   name: string;
@@ -109,6 +120,14 @@ export interface VerifyGenerationManifestResult {
   failures: string[];
 }
 
+export interface WriteDiscoveryReportManifestOptions {
+  manifestPath: string;
+  generator: GeneratorMetadata;
+  discoveryKind: DiscoveryReportKind;
+  reportPath: string;
+  report: unknown;
+}
+
 export async function writeGenerationManifest(
   options: WriteGenerationManifestOptions
 ): Promise<void> {
@@ -153,6 +172,45 @@ export async function writeGenerationManifest(
 
   await mkdir(manifestDir, { recursive: true });
   await writeFile(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+}
+
+export async function writeDiscoveryReportManifest(
+  options: WriteDiscoveryReportManifestOptions
+): Promise<void> {
+  const manifestDir = dirname(options.manifestPath);
+  const reportSummary = summarizeDiscoveryReport(options.discoveryKind, options.report);
+  const reportFile = await describeGeneratedTextOutput(options.reportPath);
+  const reportPath = toManifestRelativePath(manifestDir, options.reportPath);
+  const discovery = {
+    kind: options.discoveryKind,
+    reportPath,
+    reportSchemaVersion: reportSummary.schemaVersion,
+    reportMode: reportSummary.mode,
+    candidateCount: reportSummary.candidateCount,
+    warningCount: reportSummary.warningCount,
+    ...(reportSummary.urlResourceCount === undefined
+      ? {}
+      : { urlResourceCount: reportSummary.urlResourceCount }),
+  };
+  const manifest = {
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    generator: options.generator,
+    mode: DISCOVERY_REPORT_MODE,
+    discovery,
+    generatedOutputs: [
+      {
+        path: reportPath,
+        kind: DISCOVERY_REPORT_OUTPUT_KIND,
+        byteSize: reportFile.byteSize,
+        hash: reportFile.hash,
+        lineCount: reportFile.lineCount,
+        estimatedTokenCount: reportFile.estimatedTokenCount,
+      },
+    ],
+  };
+
+  await mkdir(manifestDir, { recursive: true });
+  await writeTextFileSafely(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 export async function verifyGenerationManifest(
@@ -212,10 +270,171 @@ export async function verifyManifestFile(
     return verifySourceDocsManifest(manifestPath, manifest);
   }
 
+  if (mode === DISCOVERY_REPORT_MODE) {
+    return verifyDiscoveryReportManifest(manifestPath, manifest);
+  }
+
   return {
     manifestPath,
     checkedFiles: 0,
     failures: [`unsupported manifest mode: ${String(mode)}`],
+  };
+}
+
+async function verifyDiscoveryReportManifest(
+  manifestPath: string,
+  manifest: Record<string, unknown>
+): Promise<VerifyGenerationManifestResult> {
+  const failures: string[] = [];
+  const manifestDir = dirname(manifestPath);
+  const generator = manifest.generator;
+  const discovery = manifest.discovery;
+  const generatedOutputs = manifest.generatedOutputs;
+
+  if (!isObjectRecord(generator)) {
+    failures.push('malformed manifest: missing generator object');
+  } else {
+    validateGeneratorMetadata(generator, failures);
+  }
+
+  if (!isObjectRecord(discovery)) {
+    failures.push('malformed manifest: missing discovery object');
+  }
+
+  if (!Array.isArray(generatedOutputs)) {
+    failures.push('malformed manifest: missing generatedOutputs array');
+  }
+
+  if (failures.length > 0) {
+    return {
+      manifestPath,
+      checkedFiles: 0,
+      failures,
+    };
+  }
+
+  const fileChecks: FileCheck[] = [];
+  const discoveryRecord = discovery as Record<string, unknown>;
+  const outputRecords = generatedOutputs as unknown[];
+  const discoveryKind = discoveryRecord.kind;
+  const reportPath = discoveryRecord.reportPath;
+  const reportSchemaVersion = discoveryRecord.reportSchemaVersion;
+  const reportMode = discoveryRecord.reportMode;
+  const candidateCount = discoveryRecord.candidateCount;
+  const warningCount = discoveryRecord.warningCount;
+  const urlResourceCount = discoveryRecord.urlResourceCount;
+
+  if (!isDiscoveryReportKind(discoveryKind)) {
+    failures.push('malformed manifest: discovery.kind must be source, repo, or url');
+  }
+
+  if (!isNonEmptyString(reportPath)) {
+    failures.push('malformed manifest: discovery.reportPath must be a non-empty string');
+  } else if (isAbsolute(reportPath)) {
+    failures.push(`malformed manifest: discovery.reportPath must be relative: ${reportPath}`);
+  } else if (!isInsideDirectory(manifestDir, resolve(manifestDir, reportPath))) {
+    failures.push(
+      `malformed manifest: discovery.reportPath escapes manifest directory: ${reportPath}`
+    );
+  }
+
+  if (reportSchemaVersion !== DISCOVERY_REPORT_SCHEMA_VERSION) {
+    failures.push(
+      `malformed manifest: discovery.reportSchemaVersion must be ${DISCOVERY_REPORT_SCHEMA_VERSION}`
+    );
+  }
+
+  if (
+    isDiscoveryReportKind(discoveryKind) &&
+    reportMode !== DISCOVERY_REPORT_MODE_BY_KIND[discoveryKind]
+  ) {
+    failures.push(
+      `malformed manifest: discovery.reportMode must be ${DISCOVERY_REPORT_MODE_BY_KIND[discoveryKind]}`
+    );
+  }
+
+  if (!isNonNegativeInteger(candidateCount)) {
+    failures.push('malformed manifest: discovery.candidateCount must be a non-negative integer');
+  }
+
+  if (!isNonNegativeInteger(warningCount)) {
+    failures.push('malformed manifest: discovery.warningCount must be a non-negative integer');
+  }
+
+  if (discoveryKind === 'url') {
+    if (!isNonNegativeInteger(urlResourceCount)) {
+      failures.push(
+        'malformed manifest: discovery.urlResourceCount must be a non-negative integer'
+      );
+    }
+  } else if ('urlResourceCount' in discoveryRecord) {
+    failures.push('malformed manifest: discovery.urlResourceCount is only valid for url discovery');
+  }
+
+  if (outputRecords.length !== 1) {
+    failures.push('malformed manifest: discovery manifests must contain exactly one output');
+  }
+
+  const outputRecord = outputRecords[0];
+  if (isObjectRecord(outputRecord)) {
+    if (
+      isNonEmptyString(reportPath) &&
+      !isAbsolute(reportPath) &&
+      outputRecord.path !== reportPath
+    ) {
+      failures.push('malformed manifest: generatedOutputs[0].path must match discovery.reportPath');
+    }
+
+    if (outputRecord.kind !== DISCOVERY_REPORT_OUTPUT_KIND) {
+      failures.push(`malformed manifest: generatedOutputs[0].kind must be ${DISCOVERY_REPORT_OUTPUT_KIND}`);
+    }
+  }
+
+  validateGeneratedOutputs({
+    generatedOutputs: outputRecords,
+    manifestDir,
+    failures,
+    fileChecks,
+    requireTextMetadata: true,
+    rejectSymlinks: true,
+    allowedKinds: DISCOVERY_REPORT_GENERATED_OUTPUT_KINDS,
+  });
+
+  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
+
+  if (failures.length === 0) {
+    for (const check of fileChecks) {
+      await verifyFile(check, failures);
+    }
+  }
+
+  if (
+    failures.length === 0 &&
+    isDiscoveryReportKind(discoveryKind) &&
+    isNonEmptyString(reportPath) &&
+    !isAbsolute(reportPath)
+  ) {
+    const expectedReport = {
+      kind: discoveryKind,
+      schemaVersion: DISCOVERY_REPORT_SCHEMA_VERSION,
+      mode: DISCOVERY_REPORT_MODE_BY_KIND[discoveryKind],
+      candidateCount: candidateCount as number,
+      warningCount: warningCount as number,
+      ...(discoveryKind === 'url' ? { urlResourceCount: urlResourceCount as number } : {}),
+    };
+
+    await verifyDiscoveryReportFile({
+      manifestDir,
+      reportPath: resolve(manifestDir, reportPath),
+      expected: expectedReport,
+      failures,
+    });
+  }
+
+  return {
+    manifestPath,
+    checkedFiles,
+    failures,
   };
 }
 
@@ -462,6 +681,219 @@ async function verifySourceDocsManifest(
   }
 
   return runFileChecks(manifestPath, failures, fileChecks);
+}
+
+interface DiscoveryReportSummary {
+  schemaVersion: string;
+  mode: string;
+  candidateCount: number;
+  warningCount: number;
+  urlResourceCount?: number;
+}
+
+function summarizeDiscoveryReport(
+  discoveryKind: DiscoveryReportKind,
+  report: unknown
+): DiscoveryReportSummary {
+  if (!isObjectRecord(report)) {
+    throw new Error('discovery report must be an object before writing manifest');
+  }
+
+  const expectedMode = DISCOVERY_REPORT_MODE_BY_KIND[discoveryKind];
+  const candidates = report.candidates;
+  const warnings = report.warnings;
+
+  if (report.schemaVersion !== DISCOVERY_REPORT_SCHEMA_VERSION) {
+    throw new Error(
+      `discovery report schemaVersion must be ${DISCOVERY_REPORT_SCHEMA_VERSION} before writing manifest`
+    );
+  }
+
+  if (report.mode !== expectedMode) {
+    throw new Error(`discovery report mode must be ${expectedMode} before writing manifest`);
+  }
+
+  if (!Array.isArray(candidates)) {
+    throw new Error('discovery report candidates must be an array before writing manifest');
+  }
+
+  if (!Array.isArray(warnings)) {
+    throw new Error('discovery report warnings must be an array before writing manifest');
+  }
+
+  if (discoveryKind === 'url') {
+    const inspectedResources = report.inspectedResources;
+
+    if (!Array.isArray(inspectedResources)) {
+      throw new Error(
+        'website discovery report inspectedResources must be an array before writing manifest'
+      );
+    }
+
+    return {
+      schemaVersion: DISCOVERY_REPORT_SCHEMA_VERSION,
+      mode: expectedMode,
+      candidateCount: candidates.length,
+      warningCount: warnings.length,
+      urlResourceCount: inspectedResources.length,
+    };
+  }
+
+  return {
+    schemaVersion: DISCOVERY_REPORT_SCHEMA_VERSION,
+    mode: expectedMode,
+    candidateCount: candidates.length,
+    warningCount: warnings.length,
+  };
+}
+
+function validateGeneratorMetadata(generator: Record<string, unknown>, failures: string[]): void {
+  if (!isNonEmptyString(generator.name)) {
+    failures.push('malformed manifest: generator.name must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(generator.version)) {
+    failures.push('malformed manifest: generator.version must be a non-empty string');
+  }
+
+  if ('cliName' in generator && !isNonEmptyString(generator.cliName)) {
+    failures.push('malformed manifest: generator.cliName must be a non-empty string when present');
+  }
+}
+
+async function verifyDiscoveryReportFile(options: {
+  manifestDir: string;
+  reportPath: string;
+  expected: {
+    kind: DiscoveryReportKind;
+    schemaVersion: string;
+    mode: string;
+    candidateCount: number;
+    warningCount: number;
+    urlResourceCount?: number;
+  };
+  failures: string[];
+}): Promise<void> {
+  const { manifestDir, reportPath, expected, failures } = options;
+  let report: unknown;
+
+  try {
+    report = JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+  } catch (error) {
+    failures.push(`discovery report: malformed JSON: ${errorMessage(error)}`);
+    return;
+  }
+
+  if (!isObjectRecord(report)) {
+    failures.push('discovery report: root must be an object');
+    return;
+  }
+
+  if (report.schemaVersion !== expected.schemaVersion) {
+    failures.push(
+      `discovery report: schemaVersion mismatch (expected ${expected.schemaVersion}, actual ${String(
+        report.schemaVersion
+      )})`
+    );
+  }
+
+  if (report.mode !== expected.mode) {
+    failures.push(
+      `discovery report: mode mismatch (expected ${expected.mode}, actual ${String(report.mode)})`
+    );
+  }
+
+  const output = report.output;
+  if (!isObjectRecord(output)) {
+    failures.push('discovery report: missing output object');
+  } else if (!isNonEmptyString(output.reportPath)) {
+    failures.push('discovery report: output.reportPath must be a non-empty string');
+  } else if (resolveManifestSourcePath(output.reportPath, manifestDir) !== reportPath) {
+    failures.push('discovery report: output.reportPath must match manifest discovery.reportPath');
+  }
+
+  validateDiscoveryReportKindShape(report, expected.kind, failures);
+  validateDiscoveryReportCounts(report, expected, failures);
+}
+
+function validateDiscoveryReportKindShape(
+  report: Record<string, unknown>,
+  kind: DiscoveryReportKind,
+  failures: string[]
+): void {
+  if (kind === 'source') {
+    if (!isObjectRecord(report.source)) {
+      failures.push('discovery report: source discovery must include source object');
+    }
+
+    return;
+  }
+
+  if (kind === 'repo') {
+    if (!isObjectRecord(report.repo)) {
+      failures.push('discovery report: repo discovery must include repo object');
+    }
+
+    if (!isObjectRecord(report.scope)) {
+      failures.push('discovery report: repo discovery must include scope object');
+    }
+
+    return;
+  }
+
+  if (!isObjectRecord(report.website)) {
+    failures.push('discovery report: url discovery must include website object');
+  }
+
+  if (!isObjectRecord(report.crawlPolicy)) {
+    failures.push('discovery report: url discovery must include crawlPolicy object');
+  }
+}
+
+function validateDiscoveryReportCounts(
+  report: Record<string, unknown>,
+  expected: {
+    kind: DiscoveryReportKind;
+    candidateCount: number;
+    warningCount: number;
+    urlResourceCount?: number;
+  },
+  failures: string[]
+): void {
+  const candidates = report.candidates;
+  const warnings = report.warnings;
+
+  if (!Array.isArray(candidates)) {
+    failures.push('discovery report: candidates must be an array');
+  } else if (candidates.length !== expected.candidateCount) {
+    failures.push(
+      `discovery report: candidate count mismatch (expected ${expected.candidateCount}, actual ${candidates.length})`
+    );
+  }
+
+  if (!Array.isArray(warnings)) {
+    failures.push('discovery report: warnings must be an array');
+  } else if (warnings.length !== expected.warningCount) {
+    failures.push(
+      `discovery report: warning count mismatch (expected ${expected.warningCount}, actual ${warnings.length})`
+    );
+  }
+
+  if (expected.kind !== 'url') {
+    return;
+  }
+
+  const inspectedResources = report.inspectedResources;
+
+  if (!Array.isArray(inspectedResources)) {
+    failures.push('discovery report: inspectedResources must be an array for url discovery');
+  } else if (inspectedResources.length !== expected.urlResourceCount) {
+    failures.push(
+      `discovery report: URL resource count mismatch (expected ${String(
+        expected.urlResourceCount
+      )}, actual ${inspectedResources.length})`
+    );
+  }
 }
 
 function validateGeneratedOutputs(options: {
@@ -1162,6 +1594,13 @@ function isSha256Hash(value: unknown): value is string {
 
 function isAllowedOutputKind(value: unknown, allowedKinds: ReadonlySet<string>): value is string {
   return typeof value === 'string' && allowedKinds.has(value);
+}
+
+function isDiscoveryReportKind(value: unknown): value is DiscoveryReportKind {
+  return (
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(DISCOVERY_REPORT_MODE_BY_KIND, value)
+  );
 }
 
 function formatAllowedOutputKinds(allowedKinds: ReadonlySet<string>): string {

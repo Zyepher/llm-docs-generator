@@ -241,6 +241,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit local `discover --source` bounded inspection report
 - [x] Explicit repo `discover --repo` cache and bounded inspection report
 - [x] Explicit website `discover --url` bounded inspection report
+- [x] Deterministic discovery report manifests and integrity verification for
+      `discover --source`, `discover --repo`, and `discover --url`
 - [x] Explicit `source-truth inspect --source` deterministic evidence report
       for conservative TypeScript/JavaScript export facts and `package.json` /
       `tsconfig*.json` package/config facts, plus path-based test/example
@@ -265,19 +267,21 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 Current discovery scope:
 
 - `llm-docs discover --source <path>` accepts an explicit local file or
-  directory, writes `discovery-report.json`, and reports candidate file hints,
-  deterministic evidence categories and signals, report order, byte sizes,
-  hashes, traversal bounds, skipped generated directories, and warnings.
+  directory, writes `discovery-report.json` plus a discovery-report
+  `manifest.json`, and reports candidate file hints, deterministic evidence
+  categories and signals, report order, byte sizes, hashes, traversal bounds,
+  skipped generated directories, and warnings.
 - `llm-docs discover --repo <git-url-or-local-git-repo>` clones or reuses an
   explicit git repo in a cache, optionally inspects repo-relative
-  `--scope <path>`, and writes `discovery-report.json` with repo input, cache
-  path, commit, dirty state, traversal settings, candidates, and warnings.
+  `--scope <path>`, and writes `discovery-report.json` plus a discovery-report
+  `manifest.json` with repo input, cache path, commit, dirty state, traversal
+  settings, candidates, and warnings.
 - `llm-docs discover --url <http-or-https-url>` inspects one explicit URL plus
   same-origin root `/llms.txt` and `/sitemap.xml`. It writes
-  `discovery-report.json` with website input, normalized URL, inspected
-  resources, status/content type/byte counts, truncation flags, crawl policy,
-  candidate URLs, evidence/provenance, and warnings. It does not fetch linked
-  candidates or render JavaScript.
+  `discovery-report.json` plus a discovery-report `manifest.json` with website
+  input, normalized URL, inspected resources, status/content type/byte counts,
+  truncation flags, crawl policy, candidate URLs, evidence/provenance, and
+  warnings. It does not fetch linked candidates or render JavaScript.
 
 Discovery does not generate docs, crawl linked website candidates, choose
 candidates, assign trust scores, infer authority, claim source truth, or
@@ -300,8 +304,8 @@ Current capabilities contract scope:
   explicit local `generate --source` with parser hints and optional
   `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
-  `--format openref-0.1`, configured SDK `verify`, `list-sdks`, and
-  `validate --sdk`.
+  `--format openref-0.1`, configured SDK, source-docs, and discovery-report
+  `verify`, `list-sdks`, and `validate --sdk`.
 - Planned/unsupported entries include additional `generate --preset` names,
   `refresh`, source-code verification for official docs, broad website
   crawling, automatic source selection, framework/route understanding,
@@ -312,12 +316,12 @@ Current capabilities contract scope:
   `manifest.json`, `failure.json`, source docs under `llm-docs/`, configured
   SDK parsed spec output, and configured SDK LLM docs output.
 - Generated-output manifest metadata is currently partial: source docs,
-  configured SDK, and source-truth docs manifests record `lineCount` and
-  deterministic `estimatedTokenCount` for explicit generated files. Source docs
-  can additionally publish opt-in `chunks/semantic-chunks.jsonl` records for
-  explicit `generate --source` outputs, but capabilities output does not claim
-  full manifest expansion, refresh support, source-code verification, or
-  automatic source selection.
+  configured SDK, source-truth docs, and discovery-report manifests record
+  `lineCount` and deterministic `estimatedTokenCount` for explicit generated
+  or report files. Source docs can additionally publish opt-in
+  `chunks/semantic-chunks.jsonl` records for explicit `generate --source`
+  outputs, but capabilities output does not claim full manifest expansion,
+  refresh support, source-code verification, or automatic source selection.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
@@ -411,8 +415,13 @@ Current explicit local source docs generation scope:
   byte sizes, line counts, deterministic estimated token counts, output
   kind/name metadata, and warnings. Opt-in chunk JSONL is recorded as a
   generated text output with kind `semantic-chunks-jsonl`.
-- `verify` supports current `configured-sdk` and `local-source-docs` manifests;
-  source-docs verification checks source files and all generated text outputs,
+- `verify` supports current `configured-sdk`, `local-source-docs`, and
+  `discovery-report` manifests. Discovery-report verification checks
+  `discovery-report.json` existence, hash, byte size, line count,
+  deterministic estimated token count, and basic report schema/mode/kind/count
+  consistency only; it does not choose candidates, validate task fit, claim
+  source truth, refresh repos or websites, or perform source-code verification.
+  Source-docs verification checks source files and all generated text outputs,
   including opt-in chunk JSONL when present.
 
 Current OpenAPI / Swagger parser scope:

@@ -14,21 +14,28 @@ import chalk from 'chalk';
 import ora from 'ora';
 import packageJson from '../package.json';
 import { createHash } from 'node:crypto';
-import { readFile, rm } from 'node:fs/promises';
+import { lstat, readFile, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ConfigLoader } from './config/loader.js';
-import { discoverLocalSource } from './core/discovery.js';
-import { discoverRepo } from './core/repo-discovery.js';
+import {
+  DISCOVERY_REPORT_SCHEMA_VERSION,
+  LOCAL_BOUNDED_INSPECTION_MODE,
+  discoverLocalSource,
+} from './core/discovery.js';
+import { REPO_BOUNDED_INSPECTION_MODE, discoverRepo } from './core/repo-discovery.js';
 import type { SourceDocsPresetMetadata } from './core/source-docs.js';
-import { discoverWebsite } from './core/website-discovery.js';
+import { WEBSITE_BOUNDED_INSPECTION_MODE, discoverWebsite } from './core/website-discovery.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
 import {
+  DISCOVERY_REPORT_MODE,
+  MANIFEST_SCHEMA_VERSION,
   SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS,
   validateSourceDocsPresetContract,
   verifyGenerationManifest,
+  writeDiscoveryReportManifest,
   writeGenerationManifest,
 } from './core/manifest.js';
 import { fetchSpec } from './utils/fetcher.js';
@@ -59,6 +66,16 @@ const SOURCE_GENERATE_FORMATS = [
 const SOURCE_GENERATE_CHUNK_FORMATS = ['jsonl'] as const;
 const SOURCE_GENERATE_PRESETS = ['swift-book'] as const;
 const SWIFT_BOOK_PRESET_FORMATS = ['markdown'] as const;
+const DISCOVERY_REPORT_FILE = 'discovery-report.json';
+const DISCOVERY_MANIFEST_FILE = 'manifest.json';
+const DISCOVERY_REPORT_OUTPUT_KIND = 'discovery-report';
+const DISCOVERY_REPORT_MODES = new Set([
+  LOCAL_BOUNDED_INSPECTION_MODE,
+  REPO_BOUNDED_INSPECTION_MODE,
+  WEBSITE_BOUNDED_INSPECTION_MODE,
+]);
+const DISCOVERY_MANIFEST_KINDS = new Set(['source', 'repo', 'url']);
+type CliDiscoveryKind = 'source' | 'repo' | 'url';
 
 const AGENT_CONTEXT_ARTIFACTS = [
   {
@@ -117,6 +134,166 @@ type AgentContextContract = {
   limitations: string[];
 };
 
+async function writeCliDiscoveryReportManifest(options: {
+  discoveryKind: CliDiscoveryKind;
+  reportPath: string;
+  report: unknown;
+}): Promise<string> {
+  const manifestPath = resolve(dirname(options.reportPath), DISCOVERY_MANIFEST_FILE);
+
+  try {
+    await writeDiscoveryReportManifest({
+      manifestPath,
+      generator: {
+        name: GENERATOR_NAME,
+        version: GENERATOR_VERSION,
+        cliName: CLI_NAME,
+      },
+      discoveryKind: options.discoveryKind,
+      reportPath: options.reportPath,
+      report: options.report,
+    });
+  } catch (error) {
+    await removeJustWrittenDiscoveryReport(options.reportPath);
+    throw error;
+  }
+
+  return manifestPath;
+}
+
+async function removeKnownDiscoveryArtifacts(outputDir: string): Promise<void> {
+  const resolvedOutputDir = resolve(outputDir);
+
+  await Promise.all(
+    [
+      removeOwnedDiscoveryReportArtifact(resolve(resolvedOutputDir, DISCOVERY_REPORT_FILE)),
+      removeOwnedDiscoveryManifestArtifact(resolve(resolvedOutputDir, DISCOVERY_MANIFEST_FILE)),
+    ]
+  );
+}
+
+async function removeOwnedDiscoveryReportArtifact(path: string): Promise<void> {
+  await removeOwnedJsonFile(path, isDiscoveryReportArtifact);
+}
+
+async function removeOwnedDiscoveryManifestArtifact(path: string): Promise<void> {
+  await removeOwnedJsonFile(path, isDiscoveryManifestArtifact);
+}
+
+async function removeOwnedJsonFile(
+  path: string,
+  isOwnedArtifact: (value: unknown) => boolean
+): Promise<void> {
+  try {
+    const stats = await lstat(path);
+
+    if (!stats.isFile()) {
+      return;
+    }
+  } catch (error) {
+    if (isPathNotFoundError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+
+  let content: unknown;
+
+  try {
+    content = JSON.parse(await readFile(path, 'utf-8')) as unknown;
+  } catch {
+    return;
+  }
+
+  if (!isOwnedArtifact(content)) {
+    return;
+  }
+
+  await rm(path, { force: true });
+}
+
+async function removeJustWrittenDiscoveryReport(path: string): Promise<void> {
+  try {
+    const stats = await lstat(path);
+
+    if (stats.isDirectory()) {
+      return;
+    }
+  } catch (error) {
+    if (isPathNotFoundError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+
+  await rm(path, { force: true });
+}
+
+function isDiscoveryReportArtifact(value: unknown): boolean {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  return (
+    value.schemaVersion === DISCOVERY_REPORT_SCHEMA_VERSION &&
+    typeof value.mode === 'string' &&
+    DISCOVERY_REPORT_MODES.has(value.mode) &&
+    Array.isArray(value.candidates) &&
+    Array.isArray(value.warnings)
+  );
+}
+
+function isDiscoveryManifestArtifact(value: unknown): boolean {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  const discovery = value.discovery;
+  const generatedOutputs = value.generatedOutputs;
+
+  if (!isObjectRecord(discovery) || !Array.isArray(generatedOutputs)) {
+    return false;
+  }
+
+  const firstOutput = generatedOutputs[0];
+
+  return (
+    value.schemaVersion === MANIFEST_SCHEMA_VERSION &&
+    value.mode === DISCOVERY_REPORT_MODE &&
+    typeof discovery.kind === 'string' &&
+    DISCOVERY_MANIFEST_KINDS.has(discovery.kind) &&
+    typeof discovery.reportPath === 'string' &&
+    discovery.reportPath.length > 0 &&
+    discovery.reportSchemaVersion === DISCOVERY_REPORT_SCHEMA_VERSION &&
+    typeof discovery.reportMode === 'string' &&
+    DISCOVERY_REPORT_MODES.has(discovery.reportMode) &&
+    isNonNegativeInteger(discovery.candidateCount) &&
+    isNonNegativeInteger(discovery.warningCount) &&
+    isObjectRecord(firstOutput) &&
+    firstOutput.kind === DISCOVERY_REPORT_OUTPUT_KIND &&
+    firstOutput.path === discovery.reportPath
+  );
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function isPathNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+  );
+}
+
 const CAPABILITIES_CONTRACT = {
   schemaVersion: CAPABILITIES_SCHEMA_VERSION,
   generator: {
@@ -142,7 +319,7 @@ const CAPABILITIES_CONTRACT = {
       mode: 'discover --source',
       status: 'implemented',
       inputBoundary: 'explicit local file or directory',
-      outputFiles: ['discovery-report.json'],
+      outputFiles: ['discovery-report.json', 'manifest.json'],
       summary: 'bounded local source inspection with deterministic candidate file evidence',
       limitations: [
         'candidate evidence for agent review only',
@@ -158,7 +335,7 @@ const CAPABILITIES_CONTRACT = {
       status: 'implemented',
       inputBoundary: 'explicit git URL or explicit local git repository',
       options: ['--scope <path>', '--cache-dir <dir>', '--output-dir <dir>'],
-      outputFiles: ['discovery-report.json'],
+      outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
         'bounded repository inspection with stable cache reuse and optional repo-relative scope',
       limitations: [
@@ -175,7 +352,7 @@ const CAPABILITIES_CONTRACT = {
       mode: 'discover --url',
       status: 'implemented',
       inputBoundary: 'explicit http or https URL',
-      outputFiles: ['discovery-report.json'],
+      outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
         'bounded static website inspection for the explicit URL plus same-origin /llms.txt and /sitemap.xml',
       limitations: [
@@ -318,6 +495,23 @@ const CAPABILITIES_CONTRACT = {
         'configured SDKs only',
         'no preset generation',
         'no discovery report consumption',
+      ],
+    },
+    {
+      id: 'verify-discovery-report',
+      command: 'verify',
+      mode: 'verify --manifest or verify --output-dir',
+      status: 'implemented',
+      inputBoundary: 'discovery-report manifest.json',
+      summary:
+        'file integrity and basic schema consistency checks for discovery report manifests',
+      limitations: [
+        'discovery-report manifest mode only',
+        'candidate evidence for agent review only',
+        'no task fit decision',
+        'no source selection',
+        'no refresh',
+        'no source-code verification',
       ],
     },
     {
@@ -942,7 +1136,7 @@ program
   .option('--url <http-or-https-url>', 'Explicit HTTP(S) URL to inspect')
   .option('--scope <path>', 'Repo-relative path to inspect in repo mode')
   .option('--cache-dir <dir>', 'Directory for cached repo clones')
-  .option('--output-dir <dir>', 'Directory for discovery-report.json')
+  .option('--output-dir <dir>', 'Directory for discovery-report.json and manifest.json')
   .action(
     async (options: {
       source?: string;
@@ -967,11 +1161,20 @@ program
             throw new Error('discover --scope and --cache-dir are only supported with --repo.');
           }
 
+          if (options.outputDir !== undefined) {
+            await removeKnownDiscoveryArtifacts(options.outputDir);
+          }
+
           const report = await discoverLocalSource(
             options.outputDir === undefined
               ? { source: options.source }
               : { source: options.source, outputDir: options.outputDir }
           );
+          const manifestPath = await writeCliDiscoveryReportManifest({
+            discoveryKind: 'source',
+            reportPath: report.output.reportPath,
+            report,
+          });
 
           console.log(chalk.bold('Local source discovery'));
           console.log(`  Source: ${report.source.resolvedPath}`);
@@ -979,6 +1182,7 @@ program
           console.log(`  Candidate files: ${report.candidates.length}`);
           console.log(`  Warnings: ${report.warnings.length}`);
           console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
+          console.log(`  Manifest: ${chalk.cyan(manifestPath)}`);
 
           return;
         }
@@ -988,11 +1192,20 @@ program
             throw new Error('discover --scope and --cache-dir are only supported with --repo.');
           }
 
+          if (options.outputDir !== undefined) {
+            await removeKnownDiscoveryArtifacts(options.outputDir);
+          }
+
           const { report } = await discoverWebsite(
             options.outputDir === undefined
               ? { url: options.url }
               : { url: options.url, outputDir: options.outputDir }
           );
+          const manifestPath = await writeCliDiscoveryReportManifest({
+            discoveryKind: 'url',
+            reportPath: report.output.reportPath,
+            report,
+          });
 
           console.log(chalk.bold('Website discovery'));
           console.log(`  URL: ${report.website.normalizedUrl}`);
@@ -1000,6 +1213,7 @@ program
           console.log(`  Candidate URLs: ${report.candidates.length}`);
           console.log(`  Warnings: ${report.warnings.length}`);
           console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
+          console.log(`  Manifest: ${chalk.cyan(manifestPath)}`);
 
           for (const warning of report.warnings) {
             console.error(chalk.yellow(`Warning: ${warning}`));
@@ -1025,10 +1239,16 @@ program
         }
 
         if (options.outputDir !== undefined) {
+          await removeKnownDiscoveryArtifacts(options.outputDir);
           repoOptions.outputDir = options.outputDir;
         }
 
         const { report } = await discoverRepo(repoOptions);
+        const manifestPath = await writeCliDiscoveryReportManifest({
+          discoveryKind: 'repo',
+          reportPath: report.output.reportPath,
+          report,
+        });
 
         console.log(chalk.bold('Repo discovery'));
         console.log(`  Repo: ${report.repo.normalizedInput}`);
@@ -1041,6 +1261,7 @@ program
         console.log(`  Candidate files: ${report.candidates.length}`);
         console.log(`  Warnings: ${report.warnings.length}`);
         console.log(`  Report: ${chalk.cyan(report.output.reportPath)}`);
+        console.log(`  Manifest: ${chalk.cyan(manifestPath)}`);
 
         for (const warning of report.warnings) {
           console.error(chalk.yellow(`Warning: ${warning}`));
@@ -1320,7 +1541,7 @@ program
 program
   .command('verify')
   .description(
-    'Verify an existing configured SDK or local source docs manifest by recorded file metadata'
+    'Verify an existing configured SDK, local source docs, or discovery report manifest by recorded file metadata'
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')

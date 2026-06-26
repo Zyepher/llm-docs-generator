@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import {
   mkdir,
   mkdtemp,
+  lstat,
   readFile,
   readdir,
   realpath,
@@ -276,6 +277,26 @@ interface WebsiteDiscoveryReport {
     }>;
   }>;
   warnings: string[];
+}
+
+interface DiscoveryReportManifest {
+  schemaVersion: string;
+  generator: {
+    name: string;
+    version: string;
+    cliName: string;
+  };
+  mode: string;
+  discovery: {
+    kind: string;
+    reportPath: string;
+    reportSchemaVersion: string;
+    reportMode: string;
+    candidateCount: number;
+    warningCount: number;
+    urlResourceCount?: number;
+  };
+  generatedOutputs: ManifestFileEntry[];
 }
 
 interface CapabilitiesContract {
@@ -737,6 +758,54 @@ async function generateSourceDocsFixture(): Promise<{
   };
 }
 
+async function createSourceDiscoveryVerifyFixture(prefix = 'llm-docs-discovery-verify-'): Promise<{
+  dir: string;
+  sourceDir: string;
+  outputDir: string;
+  reportPath: string;
+  manifestPath: string;
+}> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  const sourceDir = join(dir, 'docs');
+  const outputDir = join(dir, 'reports');
+  const reportPath = join(outputDir, 'discovery-report.json');
+  const manifestPath = join(outputDir, 'manifest.json');
+
+  await mkdir(sourceDir, { recursive: true });
+  await writeFile(join(sourceDir, 'guide.md'), '# Guide\n\nStable docs.\n', 'utf-8');
+  await runCli(['discover', '--source', sourceDir, '--output-dir', outputDir]);
+
+  return {
+    dir,
+    sourceDir,
+    outputDir,
+    reportPath,
+    manifestPath,
+  };
+}
+
+async function refreshDiscoveryManifestReportMetadata(
+  manifestPath: string,
+  reportPath: string
+): Promise<DiscoveryReportManifest> {
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
+  const reportText = await readFile(reportPath, 'utf-8');
+  const output = manifest.generatedOutputs[0];
+
+  if (output === undefined) {
+    throw new Error('expected discovery manifest output metadata');
+  }
+
+  output.byteSize = await byteSize(reportPath);
+  output.hash = await sha256File(reportPath);
+  output.lineCount = countTextLines(reportText);
+  output.estimatedTokenCount = estimateTextTokens(reportText);
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+  return manifest;
+}
+
 async function createSwiftBookSourceFixture(prefix = 'llm-docs-swift-book-'): Promise<{
   dir: string;
   sourceDir: string;
@@ -1099,6 +1168,7 @@ describe('CLI compatibility behavior', () => {
       'generate-source',
       'generate-preset-swift-book',
       'generate-sdk',
+      'verify-discovery-report',
       'verify-configured-sdk',
       'verify-source-docs',
       'list-sdks',
@@ -1123,9 +1193,18 @@ describe('CLI compatibility behavior', () => {
         (capability) => capability.status === 'planned-unsupported'
       )
     ).toBe(true);
-    expect(implemented.get('discover-source')?.outputFiles).toEqual(['discovery-report.json']);
-    expect(implemented.get('discover-repo')?.outputFiles).toEqual(['discovery-report.json']);
-    expect(implemented.get('discover-url')?.outputFiles).toEqual(['discovery-report.json']);
+    expect(implemented.get('discover-source')?.outputFiles).toEqual([
+      'discovery-report.json',
+      'manifest.json',
+    ]);
+    expect(implemented.get('discover-repo')?.outputFiles).toEqual([
+      'discovery-report.json',
+      'manifest.json',
+    ]);
+    expect(implemented.get('discover-url')?.outputFiles).toEqual([
+      'discovery-report.json',
+      'manifest.json',
+    ]);
     expect(implemented.get('source-truth-inspect')?.outputFiles).toEqual([
       'stdout JSON evidence report',
     ]);
@@ -1194,6 +1273,20 @@ describe('CLI compatibility behavior', () => {
       '--format openref|openref-0.1',
     ]);
     expect(implemented.get('generate-sdk')?.limitations).toContain('no preset generation');
+    expect(implemented.get('verify-discovery-report')).toMatchObject({
+      command: 'verify',
+      mode: 'verify --manifest or verify --output-dir',
+      status: 'implemented',
+      inputBoundary: 'discovery-report manifest.json',
+      limitations: expect.arrayContaining([
+        'discovery-report manifest mode only',
+        'candidate evidence for agent review only',
+        'no task fit decision',
+        'no source selection',
+        'no refresh',
+        'no source-code verification',
+      ]),
+    });
     expect(implemented.get('verify-source-docs')?.inputBoundary).toBe(
       'local-source-docs manifest.json'
     );
@@ -1291,7 +1384,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 13');
+    expect(stdout).toContain('Implemented modes: 14');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
@@ -1356,8 +1449,11 @@ describe('CLI compatibility behavior', () => {
 
     const { stdout } = await runCli(['discover', '--source', sourceDir, '--output-dir', outputDir]);
     const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
     const reportText = await readFile(reportPath, 'utf-8');
     const report = JSON.parse(reportText) as DiscoveryReport;
+    const manifestText = await readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(manifestText) as DiscoveryReportManifest;
     const unknownFile = join(sourceDir, 'notes.txt');
     await writeFile(unknownFile, 'plain notes\n', 'utf-8');
     const unknownReport = await discoverLocalSource({
@@ -1368,7 +1464,9 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Local source discovery');
     expect(stdout).toContain('Candidate files: 9');
     expect(stdout).toContain(`Report: ${reportPath}`);
+    expect(stdout).toContain(`Manifest: ${manifestPath}`);
     expect(reportText.endsWith('\n')).toBe(true);
+    expect(manifestText.endsWith('\n')).toBe(true);
     expect(new Date(report.generatedAt).toISOString()).toBe(report.generatedAt);
     expect(report).toMatchObject({
       schemaVersion: '0.2.0',
@@ -1390,6 +1488,34 @@ describe('CLI compatibility behavior', () => {
         truncated: false,
       },
     });
+    expect(manifest).toMatchObject({
+      schemaVersion: '0.1.0',
+      generator: {
+        name: 'llm-docs-generator',
+        version: '1.0.0',
+        cliName: 'supabase-llm-docs',
+      },
+      mode: 'discovery-report',
+      discovery: {
+        kind: 'source',
+        reportPath: 'discovery-report.json',
+        reportSchemaVersion: '0.2.0',
+        reportMode: 'local-bounded-inspection',
+        candidateCount: 9,
+        warningCount: 2,
+      },
+      generatedOutputs: [
+        {
+          path: 'discovery-report.json',
+          kind: 'discovery-report',
+          byteSize: await byteSize(reportPath),
+          hash: await sha256File(reportPath),
+          lineCount: countTextLines(reportText),
+          estimatedTokenCount: estimateTextTokens(reportText),
+        },
+      ],
+    });
+    expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
     expect(report.traversal.skippedDirectoryNames).toContain('node_modules');
     expect(report.candidates.map((candidate) => candidate.path)).toEqual([
       'spec/openapi.json',
@@ -1491,16 +1617,174 @@ describe('CLI compatibility behavior', () => {
     expect(dirname(report.output.reportPath)).not.toBe(dirname(sourcePath));
   });
 
-  it('rejects missing local discovery sources with a non-zero exit', async () => {
+  it('clears stale local discovery artifacts before a failed rerun', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-missing-'));
     tempDirs.push(dir);
+    const sourceDir = join(dir, 'source');
     const missingPath = join(dir, 'missing-docs');
+    const outputDir = join(dir, 'reports');
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const userFilePath = join(outputDir, 'notes.txt');
 
-    const result = await runCliWithExit(['discover', '--source', missingPath]);
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'guide.md'), '# Guide\n', 'utf-8');
+    await runCli(['discover', '--source', sourceDir, '--output-dir', outputDir]);
+    await writeFile(userFilePath, 'keep me\n', 'utf-8');
+
+    expect(await pathExists(reportPath)).toBe(true);
+    expect(await pathExists(manifestPath)).toBe(true);
+
+    const result = await runCliWithExit([
+      'discover',
+      '--source',
+      missingPath,
+      '--output-dir',
+      outputDir,
+    ]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('Discovery failed: source path not found');
     expect(result.stderr).toContain(missingPath);
+    expect(await pathExists(manifestPath)).toBe(false);
+    expect(await pathExists(reportPath)).toBe(false);
+    expect(await readFile(userFilePath, 'utf-8')).toBe('keep me\n');
+  });
+
+  it('preserves non-discovery manifest artifacts before a failed discovery rerun', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-preserve-manifest-'));
+    tempDirs.push(dir);
+    const missingPath = join(dir, 'missing-docs');
+    const outputDir = join(dir, 'reports');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestText = `${JSON.stringify(
+      {
+        schemaVersion: '0.1.0',
+        mode: 'configured-sdk',
+        source: {
+          resolvedSpecPath: 'config/source.yml',
+        },
+      },
+      null,
+      2
+    )}\n`;
+    const reportText = `${JSON.stringify(
+      {
+        note: 'user-owned report-like file',
+      },
+      null,
+      2
+    )}\n`;
+
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(manifestPath, manifestText, 'utf-8');
+    await writeFile(reportPath, reportText, 'utf-8');
+
+    const result = await runCliWithExit([
+      'discover',
+      '--source',
+      missingPath,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: source path not found');
+    expect(result.stderr).toContain(missingPath);
+    expect(await readFile(manifestPath, 'utf-8')).toBe(manifestText);
+    expect(await readFile(reportPath, 'utf-8')).toBe(reportText);
+  });
+
+  it('removes a report-only artifact when discovery manifest writing fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-manifest-dir-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'reports');
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'guide.md'), '# Guide\n', 'utf-8');
+    await mkdir(manifestPath, { recursive: true });
+
+    const result = await runCliWithExit([
+      'discover',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed:');
+    expect(result.stderr).toContain('manifest.json');
+    expect(await pathExists(reportPath)).toBe(false);
+    expect(await pathExists(manifestPath)).toBe(true);
+  });
+
+  it('does not follow a pre-existing discovery report symlink', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-report-symlink-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'reports');
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const targetPath = join(dir, 'outside-report-target.json');
+    const originalTarget = 'outside report target\n';
+
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(join(sourceDir, 'guide.md'), '# Guide\n', 'utf-8');
+    await writeFile(targetPath, originalTarget, 'utf-8');
+    await symlink(targetPath, reportPath, 'file');
+
+    const result = await runCliWithExit([
+      'discover',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed:');
+    expect(result.stderr).toContain('discovery-report.json');
+    expect(result.stderr).toContain('not a regular file');
+    expect((await lstat(reportPath)).isSymbolicLink()).toBe(true);
+    expect(await readFile(targetPath, 'utf-8')).toBe(originalTarget);
+  });
+
+  it('does not follow a pre-existing discovery manifest symlink or leave report-only output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-manifest-symlink-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'reports');
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const targetPath = join(dir, 'outside-manifest-target.json');
+    const originalTarget = 'outside manifest target\n';
+
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(join(sourceDir, 'guide.md'), '# Guide\n', 'utf-8');
+    await writeFile(targetPath, originalTarget, 'utf-8');
+    await symlink(targetPath, manifestPath, 'file');
+
+    const result = await runCliWithExit([
+      'discover',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed:');
+    expect(result.stderr).toContain('manifest.json');
+    expect(result.stderr).toContain('not a regular file');
+    expect(await pathExists(reportPath)).toBe(false);
+    expect((await lstat(manifestPath)).isSymbolicLink()).toBe(true);
+    expect(await readFile(targetPath, 'utf-8')).toBe(originalTarget);
   });
 
   it('rejects a symbolic link as the local discovery source root', async () => {
@@ -1997,8 +2281,12 @@ describe('CLI compatibility behavior', () => {
     const explicitUrl = `${baseUrl}/docs/page`;
     const { stdout } = await runCli(['discover', '--url', explicitUrl, '--output-dir', outputDir]);
     const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
     const reportText = await readFile(reportPath, 'utf-8');
     const report = JSON.parse(reportText) as WebsiteDiscoveryReport;
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest;
 
     expect(stdout).toContain('Website discovery');
     expect(stdout).toContain(`URL: ${explicitUrl}`);
@@ -2006,8 +2294,32 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Candidate URLs: 7');
     expect(stdout).toContain('Warnings: 0');
     expect(stdout).toContain(`Report: ${reportPath}`);
+    expect(stdout).toContain(`Manifest: ${manifestPath}`);
     expect(reportText.endsWith('\n')).toBe(true);
     expect(new Date(report.generatedAt).toISOString()).toBe(report.generatedAt);
+    expect(manifest).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'discovery-report',
+      discovery: {
+        kind: 'url',
+        reportPath: 'discovery-report.json',
+        reportSchemaVersion: '0.2.0',
+        reportMode: 'website-bounded-inspection',
+        candidateCount: 7,
+        warningCount: 0,
+        urlResourceCount: 3,
+      },
+      generatedOutputs: [
+        {
+          path: 'discovery-report.json',
+          kind: 'discovery-report',
+          byteSize: await byteSize(reportPath),
+          hash: await sha256File(reportPath),
+          lineCount: countTextLines(reportText),
+          estimatedTokenCount: estimateTextTokens(reportText),
+        },
+      ],
+    });
     expect(requests.map((requestPath) => new URL(requestPath, baseUrl).pathname)).toEqual([
       '/docs/page',
       '/llms.txt',
@@ -2653,11 +2965,16 @@ describe('CLI compatibility behavior', () => {
       outputDir,
     ]);
     const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
     const reportText = await readFile(reportPath, 'utf-8');
     const report = JSON.parse(reportText) as RepoDiscoveryReport;
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest;
 
     expect(stdout).toContain('Repo discovery');
     expect(stdout).toContain(`Report: ${reportPath}`);
+    expect(stdout).toContain(`Manifest: ${manifestPath}`);
     expect(reportText.endsWith('\n')).toBe(true);
     expect(new Date(report.generatedAt).toISOString()).toBe(report.generatedAt);
     expect(report).toMatchObject({
@@ -2690,6 +3007,29 @@ describe('CLI compatibility behavior', () => {
         truncated: false,
       },
     });
+    expect(manifest).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'discovery-report',
+      discovery: {
+        kind: 'repo',
+        reportPath: 'discovery-report.json',
+        reportSchemaVersion: '0.2.0',
+        reportMode: 'repo-bounded-inspection',
+        candidateCount: report.candidates.length,
+        warningCount: report.warnings.length,
+      },
+      generatedOutputs: [
+        {
+          path: 'discovery-report.json',
+          kind: 'discovery-report',
+          byteSize: await byteSize(reportPath),
+          hash: await sha256File(reportPath),
+          lineCount: countTextLines(reportText),
+          estimatedTokenCount: estimateTextTokens(reportText),
+        },
+      ],
+    });
+    expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
     expect(report.repo.normalizedInput.endsWith(basename(repoDir))).toBe(true);
     expect(report.repo.git.remoteUrl?.endsWith(basename(repoDir))).toBe(true);
     expect(report.repo.cachePath.startsWith(`${cacheDir}/`)).toBe(true);
@@ -5102,6 +5442,89 @@ describe('CLI compatibility behavior', () => {
     );
     expect(result.stdout).toContain('Failures: 0');
     expect(result.stdout).toContain('Verification passed');
+  });
+
+  it('verifies a source discovery manifest and rejects a tampered report', async () => {
+    const { outputDir, reportPath } = await createSourceDiscoveryVerifyFixture();
+
+    const passResult = await runCli(['verify', '--output-dir', outputDir]);
+    expect(passResult.stdout).toContain('Manifest verification');
+    expect(passResult.stdout).toContain('Checked files: 1');
+    expect(passResult.stdout).toContain('Failures: 0');
+    expect(passResult.stdout).toContain('Verification passed');
+
+    const reportText = await readFile(reportPath, 'utf-8');
+    await writeFile(reportPath, `${reportText}tampered\n`, 'utf-8');
+
+    const tamperedResult = await runCliWithExit(['verify', '--output-dir', outputDir]);
+    expect(tamperedResult.exitCode).toBe(1);
+    expect(tamperedResult.stdout).toContain('Manifest verification');
+    expect(tamperedResult.stdout).toContain('Checked files: 1');
+    expect(tamperedResult.stderr).toContain('output discovery-report.json');
+    expect(tamperedResult.stderr).toContain('hash mismatch');
+  });
+
+  it('rejects discovery report mode drift after file metadata still matches', async () => {
+    const { outputDir, reportPath, manifestPath } = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-discovery-report-mode-'
+    );
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+
+    report.mode = 'repo-bounded-inspection';
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
+    await refreshDiscoveryManifestReportMetadata(manifestPath, reportPath);
+
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 1');
+    expect(result.stderr).toContain('discovery report: mode mismatch');
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects discovery manifest and report count/path consistency drift', async () => {
+    const countFixture = await createSourceDiscoveryVerifyFixture('llm-docs-discovery-count-');
+    const countManifest = JSON.parse(
+      await readFile(countFixture.manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest;
+
+    countManifest.discovery.candidateCount += 1;
+    await writeFile(
+      countFixture.manifestPath,
+      `${JSON.stringify(countManifest, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const countResult = await runCliWithExit(['verify', '--output-dir', countFixture.outputDir]);
+
+    expect(countResult.exitCode).toBe(1);
+    expect(countResult.stdout).toContain('Manifest verification');
+    expect(countResult.stdout).toContain('Checked files: 1');
+    expect(countResult.stderr).toContain('discovery report: candidate count mismatch');
+    expect(countResult.stderr).not.toContain('hash mismatch');
+
+    const pathFixture = await createSourceDiscoveryVerifyFixture('llm-docs-discovery-path-');
+    const pathManifest = JSON.parse(
+      await readFile(pathFixture.manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest;
+
+    pathManifest.discovery.reportPath = 'other-report.json';
+    await writeFile(
+      pathFixture.manifestPath,
+      `${JSON.stringify(pathManifest, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const pathResult = await runCliWithExit(['verify', '--output-dir', pathFixture.outputDir]);
+
+    expect(pathResult.exitCode).toBe(1);
+    expect(pathResult.stdout).toContain('Manifest verification');
+    expect(pathResult.stdout).toContain('Checked files: 0');
+    expect(pathResult.stderr).toContain(
+      'generatedOutputs[0].path must match discovery.reportPath'
+    );
+    expect(pathResult.stderr).not.toContain('hash mismatch');
   });
 
   it('rejects tampered swift-book preset metadata during source docs verification', async () => {
