@@ -109,6 +109,8 @@ const DISCOVERY_REPORT_MODE_BY_KIND = {
 } as const;
 const SOURCE_DOCS_GENERATED_OUTPUT_KINDS = new Set(['llm-docs', 'semantic-chunks-jsonl']);
 const SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND = 'semantic-chunks-jsonl';
+const SOURCE_DOCS_FORMATTER_NAME = 'UniversalFormatter';
+const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
 const SOURCE_DOCS_SOURCE_TYPES = new Set(['file', 'directory']);
 const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'auto',
@@ -714,11 +716,20 @@ async function verifySourceDocsManifest(
 ): Promise<VerifyGenerationManifestResult> {
   const failures: string[] = [];
   const manifestDir = dirname(manifestPath);
+  const generator = manifest.generator;
   const source = manifest.source;
   const sourceFiles = manifest.sourceFiles;
+  const parser = manifest.parser;
+  const formatter = manifest.formatter;
   const generatedOutputs = manifest.generatedOutputs;
   const semanticChunkIndexes = manifest.semanticChunkIndexes;
   const preset = manifest.preset;
+
+  if (!isObjectRecord(generator)) {
+    failures.push('malformed manifest: missing generator object');
+  } else {
+    validateGeneratorMetadata(generator, failures);
+  }
 
   if (!isObjectRecord(source)) {
     failures.push('malformed manifest: missing source object');
@@ -726,6 +737,14 @@ async function verifySourceDocsManifest(
 
   if (!Array.isArray(sourceFiles)) {
     failures.push('malformed manifest: missing sourceFiles array');
+  }
+
+  if (!isObjectRecord(parser)) {
+    failures.push('malformed manifest: missing parser object');
+  }
+
+  if (!isObjectRecord(formatter)) {
+    failures.push('malformed manifest: missing formatter object');
   }
 
   if (!Array.isArray(generatedOutputs)) {
@@ -744,6 +763,8 @@ async function verifySourceDocsManifest(
   const pathTypeChecks: PathTypeCheck[] = [];
   const sourceRecord = source as Record<string, unknown>;
   const sourceFileRecords = sourceFiles as unknown[];
+  const parserRecord = parser as Record<string, unknown>;
+  const formatterRecord = formatter as Record<string, unknown>;
   const outputRecords = generatedOutputs as unknown[];
   const sourceInput = sourceRecord.input;
   const sourcePath = sourceRecord.resolvedPath;
@@ -773,6 +794,9 @@ async function verifySourceDocsManifest(
   ) {
     failures.push('malformed manifest: source.resolvedFormat must be a supported source format');
   }
+
+  validateSourceDocsParserMetadata(parserRecord, sourceResolvedFormat, failures);
+  validateSourceDocsFormatterMetadata(formatterRecord, failures);
 
   if (!isNonEmptyString(sourcePath)) {
     failures.push('malformed manifest: source.resolvedPath must be a non-empty string');
@@ -1701,6 +1725,54 @@ function validateGeneratorMetadata(generator: Record<string, unknown>, failures:
 
   if ('cliName' in generator && !isNonEmptyString(generator.cliName)) {
     failures.push('malformed manifest: generator.cliName must be a non-empty string when present');
+  }
+}
+
+function validateSourceDocsParserMetadata(
+  parser: Record<string, unknown>,
+  sourceResolvedFormat: unknown,
+  failures: string[]
+): void {
+  const parserFormat = parser.format;
+
+  if (!isNonEmptyString(parser.name)) {
+    failures.push('malformed manifest: parser.name must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(parser.version)) {
+    failures.push('malformed manifest: parser.version must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(parserFormat) || !SOURCE_DOCS_RESOLVED_FORMATS.has(parserFormat)) {
+    failures.push('malformed manifest: parser.format must be a supported source format');
+    return;
+  }
+
+  if (
+    isNonEmptyString(sourceResolvedFormat) &&
+    SOURCE_DOCS_RESOLVED_FORMATS.has(sourceResolvedFormat) &&
+    parserFormat !== sourceResolvedFormat
+  ) {
+    failures.push('malformed manifest: parser.format must match source.resolvedFormat');
+  }
+}
+
+function validateSourceDocsFormatterMetadata(
+  formatter: Record<string, unknown>,
+  failures: string[]
+): void {
+  if (formatter.name !== SOURCE_DOCS_FORMATTER_NAME) {
+    failures.push(`malformed manifest: formatter.name must be ${SOURCE_DOCS_FORMATTER_NAME}`);
+  }
+
+  if (!isNonEmptyString(formatter.version)) {
+    failures.push('malformed manifest: formatter.version must be a non-empty string');
+  }
+
+  if (formatter.format !== SOURCE_DOCS_FORMATTER_FORMAT) {
+    failures.push(
+      `malformed manifest: formatter.format must be ${SOURCE_DOCS_FORMATTER_FORMAT}`
+    );
   }
 }
 

@@ -635,7 +635,7 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'local-source-docs manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'source path, source file, generated output hash, byte-size, line-count, estimated-token, and optional semantic chunk index verification for local source docs manifests',
+        'recorded generator/parser/formatter metadata, source path, source file, generated output hash, byte-size, line-count, estimated-token, and optional semantic chunk index verification for local source docs manifests',
       limitations: [
         'local-source-docs manifest mode only',
         'verify does not refresh outputs',

@@ -402,10 +402,11 @@ agent intent/source/scope resolution
   configured SDK manifest file hashes, byte sizes, and valid generated output
   line/token metadata when present, while rejecting malformed optional
   line/token metadata before file checks. It also verifies
-  `local-source-docs` manifests by checking local source path
-  shape and existence, source file hashes and byte sizes, generated output
-  paths, hashes, byte sizes, line counts, deterministic estimated token counts,
-  and optional semantic chunk indexes when present. It verifies
+  `local-source-docs` manifests by checking recorded generator/parser/formatter
+  metadata, local source path shape and existence, source file hashes and byte
+  sizes, generated output paths, hashes, byte sizes, line counts,
+  deterministic estimated token counts, and optional semantic chunk indexes
+  when present. It verifies
   `source-truth-local-docs` manifests with deterministic integrity/schema
   checks over source files, generated outputs, inspection shape, and raw report
   count consistency. It also verifies discovery-report manifests by checking

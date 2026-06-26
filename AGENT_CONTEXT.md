@@ -84,10 +84,11 @@ Current implementation:
   configured source and generated output file hashes, byte sizes, and valid
   generated output line counts and estimated token counts when present.
 - Verifies current `local-source-docs` manifests by checking source manifest
-  shape, local source path existence, recorded source file byte sizes and
-  SHA-256 hashes, generated output paths, byte sizes, hashes, line counts, and
-  deterministic estimated token counts. When optional source-docs semantic
-  chunk index metadata is present, verification rebuilds it from
+  shape, recorded generator/parser/formatter metadata, local source path
+  existence, recorded source file byte sizes and SHA-256 hashes, generated
+  output paths, byte sizes, hashes, line counts, and deterministic estimated
+  token counts. When optional source-docs semantic chunk index metadata is
+  present, verification rebuilds it from
   `chunks/semantic-chunks.jsonl` and fails on malformed JSONL or stale index
   facts.
 - Verifies current `source-truth-local-docs` manifests by checking conservative
@@ -705,11 +706,12 @@ report. The current `verify` command supports `configured-sdk`,
 For configured SDK manifests, it checks source and generated output hashes,
 byte sizes, and valid generated output line/token metadata when present, and
 rejects malformed optional line/token metadata before file checks. For
-source-mode manifests, it checks local source path shape and existence, source
-file hashes and byte sizes, generated output paths, hashes, byte sizes, line
-counts, and deterministic estimated token counts; when optional semantic chunk
-manifest indexes are present, it also rebuilds them from source-docs JSONL
-records and checks for malformed or stale index data. For source-truth docs
+source-mode manifests, it checks recorded generator/parser/formatter metadata,
+local source path shape and existence, source file hashes and byte sizes,
+generated output paths, hashes, byte sizes, line counts, and deterministic
+estimated token counts; when optional semantic chunk manifest indexes are
+present, it also rebuilds them from source-docs JSONL records and checks for
+malformed or stale index data. For source-truth docs
 manifests, it checks source input/resolved path/type shape, local source path
 existence/type, source file path containment for directory sources, source file
 hashes and byte sizes, generated output path containment, allowed source-truth
