@@ -3778,6 +3778,8 @@ function validateSourceFiles(options: {
     const sourceFileResolvedPath = sourceFile.resolvedPath;
     const sourceFileByteSize = sourceFile.byteSize;
     const sourceFileHash = sourceFile.hash;
+    const sourceFileLineCount = sourceFile.lineCount;
+    const sourceFileEstimatedTokenCount = sourceFile.estimatedTokenCount;
     const sourceFileFormat = sourceFile.format;
 
     if (!isNonEmptyString(sourceFilePath)) {
@@ -3840,6 +3842,16 @@ function validateSourceFiles(options: {
       failures.push(`malformed manifest: ${label}.hash must be a sha256 hash`);
     }
 
+    if (!isNonNegativeInteger(sourceFileLineCount)) {
+      failures.push(`malformed manifest: ${label}.lineCount must be a non-negative integer`);
+    }
+
+    if (!isNonNegativeInteger(sourceFileEstimatedTokenCount)) {
+      failures.push(
+        `malformed manifest: ${label}.estimatedTokenCount must be a non-negative integer`
+      );
+    }
+
     if (!isNonEmptyString(sourceFileFormat)) {
       failures.push(`malformed manifest: ${label}.format must be a non-empty string`);
     } else if (
@@ -3872,6 +3884,14 @@ function validateSourceFiles(options: {
         expectedHash: sourceFileHash,
         rejectSymlink: true,
       };
+
+      if (
+        isNonNegativeInteger(sourceFileLineCount) &&
+        isNonNegativeInteger(sourceFileEstimatedTokenCount)
+      ) {
+        fileCheck.expectedLineCount = sourceFileLineCount;
+        fileCheck.expectedEstimatedTokenCount = sourceFileEstimatedTokenCount;
+      }
 
       if (trustedRoot !== undefined) {
         fileCheck.trustedRoot = trustedRoot;

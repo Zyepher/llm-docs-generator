@@ -172,6 +172,8 @@ interface SourceDocsManifest {
     resolvedPath: string;
     byteSize: number;
     hash: string;
+    lineCount: number;
+    estimatedTokenCount: number;
     format: string;
   }>;
   parser: {
@@ -2194,6 +2196,9 @@ describe('CLI compatibility behavior', () => {
     );
     expect(implemented.get('verify-source-docs')?.summary).toContain(
       'recorded generator/parser/formatter metadata'
+    );
+    expect(implemented.get('verify-source-docs')?.summary).toContain(
+      'source file hash, byte-size, line-count, estimated-token'
     );
     expect(implemented.get('verify-source-docs')?.limitations).toEqual(
       expect.arrayContaining([
@@ -5897,6 +5902,11 @@ describe('CLI compatibility behavior', () => {
       await byteSize(join(sourceDir, 'guides', 'usage.mdx')),
       await byteSize(join(sourceDir, 'index.md')),
     ]);
+    for (const sourceFile of manifest.sourceFiles) {
+      const text = await readFile(sourceFile.resolvedPath, 'utf-8');
+      expect(sourceFile.lineCount).toBe(countTextLines(text));
+      expect(sourceFile.estimatedTokenCount).toBe(estimateTextTokens(text));
+    }
     expect(outputPaths).toEqual(['llm-docs/docs-source-full-llms.txt']);
 
     const fullDocPath = join(outputDir, outputPaths[0] ?? '');
@@ -5955,6 +5965,7 @@ describe('CLI compatibility behavior', () => {
     const manifest = JSON.parse(manifestText) as SourceDocsManifest;
     const fullDocPath = join(outputDir, 'llm-docs', 'source-full-llms.txt');
     const fullDoc = await readFile(fullDocPath, 'utf-8');
+    const sourceText = await readFile(sourcePath, 'utf-8');
 
     expect(stdout).toContain('Local source docs generated');
     expect(stdout).toContain('Format: custom-doc');
@@ -6015,6 +6026,8 @@ describe('CLI compatibility behavior', () => {
         resolvedPath: sourcePath,
         byteSize: await byteSize(sourcePath),
         hash: await sha256File(sourcePath),
+        lineCount: countTextLines(sourceText),
+        estimatedTokenCount: estimateTextTokens(sourceText),
         format: 'custom-doc',
       },
     ]);
@@ -7230,6 +7243,7 @@ describe('CLI compatibility behavior', () => {
     const manifest = JSON.parse(
       await readFile(join(outputDir, 'manifest.json'), 'utf-8')
     ) as SourceDocsManifest;
+    const sourceText = await readFile(sourcePath, 'utf-8');
 
     expect(stdout).toContain('Local source docs generated');
     expect(manifest.source).toMatchObject({
@@ -7247,6 +7261,8 @@ describe('CLI compatibility behavior', () => {
       resolvedPath: sourcePath,
       byteSize: await byteSize(sourcePath),
       hash: await sha256File(sourcePath),
+      lineCount: countTextLines(sourceText),
+      estimatedTokenCount: estimateTextTokens(sourceText),
     });
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'llm-docs/guide-notes-full-llms.txt',
@@ -8455,16 +8471,21 @@ describe('CLI compatibility behavior', () => {
     const refreshedManifest = JSON.parse(
       await readFile(manifestPath, 'utf-8')
     ) as SourceDocsManifest;
+    const refreshedSourceFile = refreshedManifest.sourceFiles.find(
+      (file) => file.path === sourceFile.path
+    );
     const refreshedOutput = refreshedManifest.generatedOutputs.find(
       (output) => output.kind === 'llm-docs'
     );
     const expectedRefreshCheckedFiles =
       refreshedManifest.sourceFiles.length + refreshedManifest.generatedOutputs.length;
 
-    if (refreshedOutput === undefined) {
+    if (refreshedSourceFile === undefined || refreshedOutput === undefined) {
       throw new Error('expected refreshed source docs output');
     }
 
+    const refreshedSourcePath = join(sourceDir, refreshedSourceFile.path);
+    const refreshedSourceText = await readFile(refreshedSourcePath, 'utf-8');
     const refreshedText = await readFile(join(outputDir, refreshedOutput.path), 'utf-8');
     const verifyResult = await runCli(['verify', '--manifest', manifestPath]);
 
@@ -8476,6 +8497,10 @@ describe('CLI compatibility behavior', () => {
     expect(refreshedManifest.source.input).toBe(firstManifest.source.resolvedPath);
     expect(refreshedManifest.source.resolvedPath).toBe(firstManifest.source.resolvedPath);
     expect(refreshedManifest.source.formatHint).toBe(firstManifest.source.formatHint);
+    expect(refreshedSourceFile.hash).toBe(await sha256File(refreshedSourcePath));
+    expect(refreshedSourceFile.byteSize).toBe(await byteSize(refreshedSourcePath));
+    expect(refreshedSourceFile.lineCount).toBe(countTextLines(refreshedSourceText));
+    expect(refreshedSourceFile.estimatedTokenCount).toBe(estimateTextTokens(refreshedSourceText));
     expect(refreshedText).toContain('refreshed local docs');
     expect(refreshedText).not.toContain('tampered output');
     expect(verifyResult.stdout).toContain('Failures: 0');
@@ -10071,6 +10096,79 @@ describe('CLI compatibility behavior', () => {
     );
     expect(result.stderr).toContain('sourceFiles[0]');
     expect(result.stderr).toContain('hash mismatch');
+  });
+
+  it('reports local source docs source file line and token metadata drift', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0];
+
+    if (sourceFile === undefined) {
+      throw new Error('expected generated source docs fixture source file');
+    }
+
+    sourceFile.lineCount += 1;
+    sourceFile.estimatedTokenCount += 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain('sourceFiles[0]: line count mismatch');
+    expect(result.stderr).toContain('sourceFiles[0]: estimated token count mismatch');
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('requires source docs source file line and token metadata before file checks', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0] as
+      | (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>)
+      | undefined;
+
+    if (sourceFile === undefined) {
+      throw new Error('expected generated source docs fixture source file');
+    }
+
+    delete sourceFile.lineCount;
+    delete sourceFile.estimatedTokenCount;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('sourceFiles[0].lineCount must be a non-negative integer');
+    expect(result.stderr).toContain(
+      'sourceFiles[0].estimatedTokenCount must be a non-negative integer'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects malformed source docs source file line and token metadata before file checks', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const sourceFile = manifest.sourceFiles[0] as
+      | (SourceDocsManifest['sourceFiles'][number] & Record<string, unknown>)
+      | undefined;
+
+    if (sourceFile === undefined) {
+      throw new Error('expected generated source docs fixture source file');
+    }
+
+    sourceFile.lineCount = -1;
+    sourceFile.estimatedTokenCount = 1.5;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('sourceFiles[0].lineCount must be a non-negative integer');
+    expect(result.stderr).toContain(
+      'sourceFiles[0].estimatedTokenCount must be a non-negative integer'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it('reports missing local source docs source and output files', async () => {

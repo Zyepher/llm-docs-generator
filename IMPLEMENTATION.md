@@ -256,8 +256,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit `source-truth verify-docs --source --docs --output-dir`
       source/docs lexical evidence report for local Markdown/MDX inline-code
       references compared with observed local source exported names
-- [x] Partial generated-output RAG metadata for configured SDK and source-truth
-      docs manifests (`lineCount` and deterministic `estimatedTokenCount`)
+- [x] Partial content-free line/token manifest metadata for generated/report
+      files and local source-docs source files (`lineCount` and deterministic
+      `estimatedTokenCount`)
 - [x] RST parser foundation for explicit local Python-style documentation
 - [x] Static HTML parser foundation for explicit local rendered-HTML fallback
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
@@ -369,11 +370,13 @@ Current capabilities contract scope:
   `source-verification-report.json`, `manifest.json`, `failure.json`, source
   docs under `llm-docs/`, configured SDK parsed spec output, and configured SDK
   LLM docs output.
-- Generated-output manifest metadata is currently partial: source docs,
-  configured SDK, source-truth docs, and discovery-report manifests record
-  `lineCount` and deterministic `estimatedTokenCount` for explicit generated
-  or report files. Discovery-report manifests additionally record compact
-  content-free candidate evidence indexes derived only from
+- Manifest line/token metadata is currently partial and content-free: source
+  docs, configured SDK, source-truth docs, and discovery-report manifests
+  record `lineCount` and deterministic `estimatedTokenCount` for explicit
+  generated or report files, and local source-docs manifests additionally
+  record those fields for explicit `sourceFiles[]` entries. Discovery-report
+  manifests additionally record compact content-free candidate evidence indexes
+  derived only from
   `discovery-report.json`. Source docs can additionally publish opt-in
   `chunks/semantic-chunks.jsonl` records for explicit `generate --source`
   outputs plus compact manifest chunk indexes derived only from those JSONL
@@ -529,9 +532,10 @@ Current explicit local source docs generation scope:
   work.
 - The source manifest has mode `local-source-docs` and records generator
   metadata, source input/resolved path/type, format hint and resolved format,
-  parser/formatter metadata, deterministic source file hashes and byte sizes,
-  a stable directory aggregate hash when applicable, generated output hashes,
-  byte sizes, line counts, deterministic estimated token counts, output
+  parser/formatter metadata, deterministic source file hashes, byte sizes,
+  line counts, deterministic estimated token counts, a stable directory
+  aggregate hash when applicable, generated output hashes, byte sizes, line
+  counts, deterministic estimated token counts, output
   kind/name metadata, and warnings. Opt-in chunk JSONL is recorded as a
   generated text output with kind `semantic-chunks-jsonl`, plus a compact
   `semanticChunkIndexes` entry with output path, format, chunk count, aggregate
@@ -550,8 +554,9 @@ Current explicit local source docs generation scope:
   generator/sdk/parser/formatter metadata, configured source, and generated
   outputs.
   Source-docs verification checks recorded generator/parser/formatter metadata,
-  source files, and all generated text outputs, including opt-in chunk JSONL
-  when present. When a source-docs
+  source file hashes, byte sizes, line counts, deterministic estimated token
+  counts, and all generated text outputs, including opt-in chunk JSONL when
+  present. When a source-docs
   semantic chunk index is present, verification rebuilds it from the JSONL
   records and fails on malformed JSONL or stale index facts.
   Source-truth docs verification checks deterministic source-truth manifest

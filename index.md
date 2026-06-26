@@ -253,10 +253,11 @@ requested, it also writes `chunks/semantic-chunks.jsonl` from the parsed DocNode
 tree and a compact `semanticChunkIndexes` manifest entry derived from the JSONL
 records without embedding chunk content. The source manifest records the
 input path, resolved source type, format hint and resolved format, parser and
-formatter metadata, source file paths, formats, hashes and byte sizes,
-directory aggregate hash when applicable, generated output hashes, byte sizes,
-line counts, deterministic estimated token counts, output kind/name metadata,
-per-chunk index facts for opt-in chunk JSONL, and warnings.
+formatter metadata, source file paths, formats, hashes, byte sizes, line
+counts, deterministic estimated token counts, directory aggregate hash when
+applicable, generated output hashes, byte sizes, line counts, deterministic
+estimated token counts, output kind/name metadata, per-chunk index facts for
+opt-in chunk JSONL, and warnings.
 
 `--preset swift-book` is implemented only as deterministic defaults for
 explicit local Markdown/DocC-style sources. It sets Markdown generation,
@@ -305,8 +306,9 @@ Configured SDK verification checks source and output file hashes, byte sizes,
 recorded generator/sdk/parser/formatter metadata, and valid generated output
 line/token metadata when present, and rejects malformed metadata before file
 checks. Source-mode verification checks local source path shape and existence,
-recorded source file hashes and byte sizes, generated output paths, hashes,
-byte sizes, line counts, and deterministic estimated token counts. When
+recorded source file hashes, byte sizes, line counts, and deterministic
+estimated token counts, generated output paths, hashes, byte sizes, line
+counts, and deterministic estimated token counts. When
 optional source-docs semantic chunk index metadata is present, it is rebuilt
 from `chunks/semantic-chunks.jsonl` and compared with the manifest.
 Source-truth docs verification checks conservative source-truth manifest shape,
@@ -438,9 +440,10 @@ agent intent/source/scope resolution
   present, while rejecting malformed metadata before file checks. It also
   verifies `local-source-docs` manifests by checking recorded
   generator/parser/formatter
-  metadata, local source path shape and existence, source file hashes and byte
-  sizes, generated output paths, hashes, byte sizes, line counts,
-  deterministic estimated token counts, optional parser plugin metadata
+  metadata, local source path shape and existence, source file hashes, byte
+  sizes, line counts, deterministic estimated token counts, generated output
+  paths, hashes, byte sizes, line counts, deterministic estimated token counts,
+  optional parser plugin metadata
   against recorded plugin manifest contents and manifest hash/byte size, and
   optional semantic chunk indexes when present. It parses plugin manifests as
   data and does not import or execute parser plugin modules. It verifies

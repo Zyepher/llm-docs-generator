@@ -279,10 +279,11 @@ generated output line counts and deterministic estimated token counts when
 present. Source-docs verification checks recorded generator metadata, parser
 name/version/format,
 formatter name/version/format, local source path shape and existence, recorded
-source file hashes and byte sizes, generated output paths, hashes, byte sizes,
-line counts, deterministic estimated token counts, optional parser plugin
-metadata against the recorded plugin manifest contents and manifest hash/byte
-size when present, and optional semantic chunk indexes against
+source file hashes, byte sizes, line counts, and deterministic estimated token
+counts, generated output paths, hashes, byte sizes, line counts, deterministic
+estimated token counts, optional parser plugin metadata against the recorded
+plugin manifest contents and manifest hash/byte size when present, and optional
+semantic chunk indexes against
 `chunks/semantic-chunks.jsonl` when present. Verification parses plugin
 manifests as data and does not import or execute parser plugin modules.
 Source-truth docs
