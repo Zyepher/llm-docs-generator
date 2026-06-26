@@ -335,8 +335,9 @@ Current capabilities contract scope:
 - Planned/unsupported entries include additional `generate --preset` names,
   configured SDK refresh, discovery-report refresh, remote freshness refresh,
   broad official-docs behavior/API claim verification, broad website crawling,
-  automatic source selection or top-candidate generation, framework/route
-  understanding, behavior-level generation from source code, and
+  automatic source selection or automatic generation from first ordered
+  candidates, framework/route understanding, behavior-level generation from
+  source code, and
   `agent install codex`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
