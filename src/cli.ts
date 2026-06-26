@@ -473,10 +473,11 @@ const CAPABILITIES_CONTRACT = {
         'unmatched docs references',
       ],
       summary:
-        'deterministic local evidence comparing explicit docs references with observed source exported names',
+        'deterministic local evidence comparing explicit docs references with observed source exported names and emitting compact content-free source/docs file evidence index metadata',
       limitations: [
         'explicit local paths only',
         'Markdown/MDX-style text docs only',
+        'file evidence index metadata is content-free and derived only from the local report',
         'docs evidence limited to inline-code identifiers and empty call identifiers',
         'exact matches are lexical exported-name evidence only',
         'unmatched references are observations, not failures',
@@ -724,9 +725,10 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'source-verification-local-evidence manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'deterministic source-verification report integrity, provenance, report-path, manifest/report summary, report-body count, and sourceInspection.source consistency checks',
+        'deterministic source-verification report integrity, provenance, report-path, manifest/report summary, report-body count, sourceInspection.source consistency, and optional content-free file evidence index checks',
       limitations: [
         'source-verification-local-evidence manifest mode only',
+        'file evidence indexes are source/docs file metadata only',
         'verify does not refresh outputs or sources',
         'no additional source/docs inspection',
         'no broad official-docs claim checking',

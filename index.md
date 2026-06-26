@@ -234,13 +234,15 @@ The current `source-truth verify-docs --source --docs --output-dir` command
 accepts explicit local source and docs file/directory paths only, reuses
 `inspectSourceTruth` for source export facts, and extracts bounded Markdown/MDX
 inline-code identifier evidence from the explicit local docs path. It writes
-`source-verification-report.json` and a `manifest.json` on success, or
-`failure.json` plus the evidence report when no supported docs files or no
-inline-code identifier references are found. Exact matches are lexical matches
-against observed exported names; unmatched references are observations for
-agent review, not correctness failures. It does not fetch network resources,
-render JavaScript, select sources, infer routes/frameworks/runtime behavior,
-or perform broad official-docs behavior/API claim verification.
+`source-verification-report.json` and a `manifest.json` with compact
+content-free source/docs file evidence index metadata derived from the local
+report on success, or `failure.json` plus the evidence report when no supported
+docs files or no inline-code identifier references are found. Exact matches are
+lexical matches against observed exported names; unmatched references are
+observations for agent review, not correctness failures. It does not fetch
+network resources, render JavaScript, select sources, infer routes, frameworks,
+or runtime behavior, or perform broad official-docs behavior/API claim
+verification.
 
 The current `generate --source <local-file-or-directory>` command supports
 explicit local source docs generation only. It rejects URL-like inputs, missing
@@ -327,10 +329,11 @@ whether a candidate satisfies the task, or claim source truth.
 Source-verification manifest verification checks report file integrity and
 deterministic report-path, source/docs provenance, summary metadata, report
 body count, and `sourceInspection.source` consistency for
-`source-verification-report.json`; it does not refresh outputs or sources,
-inspect additional source/docs files, perform broad official-docs claim
-checking, validate source-code behavior, decide task fit/source truth/source
-selection, or prove docs correctness.
+`source-verification-report.json`, plus optional compact content-free
+source/docs file evidence index metadata rebuilt from that report; it does not
+refresh outputs or sources, inspect additional source/docs files, perform broad
+official-docs claim checking, validate source-code behavior, decide task
+fit/source truth/source selection, or prove docs correctness.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable

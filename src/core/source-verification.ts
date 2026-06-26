@@ -15,6 +15,10 @@ import {
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
+  buildSourceVerificationFileEvidenceIndex,
+  type SourceVerificationFileEvidenceIndex,
+} from './source-verification-file-evidence-index.js';
+import {
   inspectSourceTruth,
   type InspectSourceTruthOptions,
   type SourceTruthFact,
@@ -221,6 +225,7 @@ export interface SourceVerificationManifest {
       type: SourceVerificationInputType;
     };
     summary: SourceVerificationSummary;
+    fileEvidenceIndex?: SourceVerificationFileEvidenceIndex;
   };
   generatedOutputs: SourceVerificationGeneratedOutput[];
 }
@@ -980,6 +985,7 @@ function buildManifest(options: {
         type: options.report.docs.type,
       },
       summary: options.report.summary,
+      fileEvidenceIndex: buildSourceVerificationFileEvidenceIndex(options.report),
     },
     generatedOutputs: options.generatedOutputs,
   };
