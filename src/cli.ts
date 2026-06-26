@@ -441,7 +441,7 @@ const CAPABILITIES_CONTRACT = {
       ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic local source parsing through the registered parser and universal formatter, with opt-in semantic chunk JSONL export and a scoped swift-book preset',
+        'deterministic local source parsing through the registered parser and universal formatter, with opt-in semantic chunk JSONL export, compact chunk manifest indexes, and a scoped swift-book preset',
       limitations: [
         'local files and directories only',
         'no URL fetching',
@@ -450,6 +450,7 @@ const CAPABILITIES_CONTRACT = {
         'swift-book preset requires explicit --source and adds deterministic output defaults only',
         'no source selection decision',
         'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
+        'semantic chunk manifest indexes are source-docs JSONL metadata only',
       ],
     },
     {
@@ -538,7 +539,7 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'local-source-docs manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'source path, source file, generated output hash, byte-size, line-count, and estimated-token verification for local source docs manifests',
+        'source path, source file, generated output hash, byte-size, line-count, estimated-token, and optional semantic chunk index verification for local source docs manifests',
       limitations: [
         'local-source-docs manifest mode only',
         'verify does not refresh outputs',
@@ -573,7 +574,7 @@ const CAPABILITIES_CONTRACT = {
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic regeneration of local source docs from the manifest-recorded explicit local source path',
+        'deterministic regeneration of local source docs from the manifest-recorded explicit local source path, preserving opt-in chunk JSONL and chunk index metadata when the prior manifest recorded that output',
       limitations: [
         'local-source-docs manifests only',
         'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',

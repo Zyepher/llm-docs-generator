@@ -8,6 +8,13 @@ import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
+import {
+  buildSemanticChunkJsonlManifestIndex,
+  hashSemanticChunkManifestIndex,
+  semanticChunkManifestIndexesEqual,
+  type SemanticChunkManifestIndex,
+  type SemanticChunkManifestIndexChunk,
+} from './semantic-chunk-index.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 
 const HASH_PREFIX = 'sha256:';
@@ -38,6 +45,7 @@ const DISCOVERY_REPORT_MODE_BY_KIND = {
   url: 'website-bounded-inspection',
 } as const;
 const SOURCE_DOCS_GENERATED_OUTPUT_KINDS = new Set(['llm-docs', 'semantic-chunks-jsonl']);
+const SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND = 'semantic-chunks-jsonl';
 const SOURCE_DOCS_SOURCE_TYPES = new Set(['file', 'directory']);
 const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'auto',
@@ -49,6 +57,27 @@ const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'html',
 ]);
 const SOURCE_DOCS_RESOLVED_FORMATS = new Set(['markdown', 'openapi', 'openref', 'rst', 'html']);
+const SOURCE_DOCS_SEMANTIC_CHUNK_INDEX_KEYS = new Set([
+  'path',
+  'format',
+  'chunkCount',
+  'aggregateHash',
+  'warningCount',
+  'chunks',
+]);
+const SOURCE_DOCS_SEMANTIC_CHUNK_INDEX_CHUNK_KEYS = new Set([
+  'id',
+  'order',
+  'title',
+  'path',
+  'nodePath',
+  'contentHash',
+  'characterCount',
+  'estimatedTokenCount',
+  'sourceFormat',
+  'sourcePath',
+  'warningCount',
+]);
 export const SOURCE_DOCS_SWIFT_BOOK_PRESET_NAME = 'swift-book';
 export const SOURCE_DOCS_SWIFT_BOOK_PRESET_METADATA = {
   sourceSelection: 'explicit-local-source-required',
@@ -530,6 +559,7 @@ async function verifySourceDocsManifest(
   const source = manifest.source;
   const sourceFiles = manifest.sourceFiles;
   const generatedOutputs = manifest.generatedOutputs;
+  const semanticChunkIndexes = manifest.semanticChunkIndexes;
   const preset = manifest.preset;
 
   if (!isObjectRecord(source)) {
@@ -685,6 +715,12 @@ async function verifySourceDocsManifest(
     rejectSymlinks: true,
     allowedKinds: SOURCE_DOCS_GENERATED_OUTPUT_KINDS,
   });
+  const semanticChunkIndexEntries = validateSourceDocsSemanticChunkIndexes({
+    semanticChunkIndexes,
+    generatedOutputs: outputRecords,
+    manifestDir,
+    failures,
+  });
   validateSourceDocsPresetMetadata(preset, failures);
 
   if (failures.length === 0) {
@@ -693,7 +729,27 @@ async function verifySourceDocsManifest(
     }
   }
 
-  return runFileChecks(manifestPath, failures, fileChecks);
+  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
+
+  if (failures.length === 0) {
+    for (const check of fileChecks) {
+      await verifyFile(check, failures);
+    }
+  }
+
+  if (failures.length === 0) {
+    await verifySourceDocsSemanticChunkIndexes({
+      manifestDir,
+      semanticChunkIndexes: semanticChunkIndexEntries,
+      failures,
+    });
+  }
+
+  return {
+    manifestPath,
+    checkedFiles,
+    failures,
+  };
 }
 
 async function verifySourceTruthDocsManifest(
@@ -1170,6 +1226,346 @@ function validateGeneratedOutputs(options: {
       }
 
       fileChecks.push(fileCheck);
+    }
+  }
+}
+
+function validateSourceDocsSemanticChunkIndexes(options: {
+  semanticChunkIndexes: unknown;
+  generatedOutputs: unknown[];
+  manifestDir: string;
+  failures: string[];
+}): SemanticChunkManifestIndex[] {
+  const { semanticChunkIndexes, generatedOutputs, manifestDir, failures } = options;
+
+  if (semanticChunkIndexes === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(semanticChunkIndexes)) {
+    failures.push('malformed manifest: semanticChunkIndexes must be an array when present');
+    return [];
+  }
+
+  const expectedChunkOutputPaths = sourceDocsSemanticChunkOutputPaths(
+    generatedOutputs,
+    manifestDir
+  );
+  const entries: SemanticChunkManifestIndex[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const [index, chunkIndex] of semanticChunkIndexes.entries()) {
+    const label = `semanticChunkIndexes[${index}]`;
+
+    if (!isObjectRecord(chunkIndex)) {
+      failures.push(`malformed manifest: ${label} must be an object`);
+      continue;
+    }
+
+    validateAllowedKeys(chunkIndex, SOURCE_DOCS_SEMANTIC_CHUNK_INDEX_KEYS, label, failures);
+
+    const outputPath = chunkIndex.path;
+    const format = chunkIndex.format;
+    const chunkCount = chunkIndex.chunkCount;
+    const aggregateHash = chunkIndex.aggregateHash;
+    const warningCount = chunkIndex.warningCount;
+    const chunks = chunkIndex.chunks;
+    const chunkEntries: SemanticChunkManifestIndexChunk[] = [];
+
+    if (!isNonEmptyString(outputPath)) {
+      failures.push(`malformed manifest: ${label}.path must be a non-empty string`);
+    } else if (isAbsolute(outputPath)) {
+      failures.push(`malformed manifest: ${label}.path must be relative: ${outputPath}`);
+    } else if (!isInsideDirectory(manifestDir, resolve(manifestDir, outputPath))) {
+      failures.push(`malformed manifest: ${label}.path escapes manifest directory: ${outputPath}`);
+    } else if (!expectedChunkOutputPaths.has(outputPath)) {
+      failures.push(
+        `malformed manifest: ${label}.path must reference a semantic-chunks-jsonl generated output`
+      );
+    } else if (seenPaths.has(outputPath)) {
+      failures.push(`malformed manifest: duplicate semantic chunk index path: ${outputPath}`);
+    } else {
+      seenPaths.add(outputPath);
+    }
+
+    if (format !== 'jsonl') {
+      failures.push(`malformed manifest: ${label}.format must be jsonl`);
+    }
+
+    if (!isNonNegativeInteger(chunkCount)) {
+      failures.push(`malformed manifest: ${label}.chunkCount must be a non-negative integer`);
+    }
+
+    if (!isSha256Hash(aggregateHash)) {
+      failures.push(`malformed manifest: ${label}.aggregateHash must be a sha256 hash`);
+    }
+
+    if (!isNonNegativeInteger(warningCount)) {
+      failures.push(`malformed manifest: ${label}.warningCount must be a non-negative integer`);
+    }
+
+    if (!Array.isArray(chunks)) {
+      failures.push(`malformed manifest: ${label}.chunks must be an array`);
+    } else {
+      for (const [chunkEntryIndex, chunkEntry] of chunks.entries()) {
+        const chunkLabel = `${label}.chunks[${chunkEntryIndex}]`;
+        const normalizedChunk = validateSourceDocsSemanticChunkIndexChunk({
+          chunkEntry,
+          label: chunkLabel,
+          expectedOrder: chunkEntryIndex + 1,
+          failures,
+        });
+
+        if (normalizedChunk !== undefined) {
+          chunkEntries.push(normalizedChunk);
+        }
+      }
+    }
+
+    if (Array.isArray(chunks) && isNonNegativeInteger(chunkCount) && chunks.length !== chunkCount) {
+      failures.push(`malformed manifest: ${label}.chunkCount must match chunks length`);
+    }
+
+    if (
+      isNonNegativeInteger(warningCount) &&
+      Array.isArray(chunks) &&
+      chunkEntries.length === chunks.length
+    ) {
+      const actualWarningCount = chunkEntries.reduce(
+        (total, chunk) => total + chunk.warningCount,
+        0
+      );
+
+      if (warningCount !== actualWarningCount) {
+        failures.push(`malformed manifest: ${label}.warningCount must match chunk warning counts`);
+      }
+    }
+
+    if (
+      isNonEmptyString(outputPath) &&
+      !isAbsolute(outputPath) &&
+      isInsideDirectory(manifestDir, resolve(manifestDir, outputPath)) &&
+      format === 'jsonl' &&
+      isNonNegativeInteger(chunkCount) &&
+      isSha256Hash(aggregateHash) &&
+      isNonNegativeInteger(warningCount) &&
+      Array.isArray(chunks) &&
+      chunkEntries.length === chunks.length
+    ) {
+      const normalizedIndex: SemanticChunkManifestIndex = {
+        path: outputPath,
+        format,
+        chunkCount,
+        aggregateHash,
+        warningCount,
+        chunks: chunkEntries,
+      };
+      const actualAggregateHash = hashSemanticChunkManifestIndex({
+        path: normalizedIndex.path,
+        format: normalizedIndex.format,
+        chunkCount: normalizedIndex.chunkCount,
+        warningCount: normalizedIndex.warningCount,
+        chunks: normalizedIndex.chunks,
+      });
+
+      if (normalizedIndex.aggregateHash !== actualAggregateHash) {
+        failures.push(
+          `malformed manifest: ${label}.aggregateHash must match semantic chunk index metadata`
+        );
+      }
+
+      entries.push(normalizedIndex);
+    }
+  }
+
+  if (
+    semanticChunkIndexes.length === entries.length &&
+    expectedChunkOutputPaths.size !== entries.length
+  ) {
+    failures.push(
+      'malformed manifest: semanticChunkIndexes must contain one entry per semantic-chunks-jsonl generated output'
+    );
+  }
+
+  return entries;
+}
+
+function validateSourceDocsSemanticChunkIndexChunk(options: {
+  chunkEntry: unknown;
+  label: string;
+  expectedOrder: number;
+  failures: string[];
+}): SemanticChunkManifestIndexChunk | undefined {
+  const { chunkEntry, label, expectedOrder, failures } = options;
+
+  if (!isObjectRecord(chunkEntry)) {
+    failures.push(`malformed manifest: ${label} must be an object`);
+    return undefined;
+  }
+
+  validateAllowedKeys(chunkEntry, SOURCE_DOCS_SEMANTIC_CHUNK_INDEX_CHUNK_KEYS, label, failures);
+
+  const id = chunkEntry.id;
+  const order = chunkEntry.order;
+  const title = chunkEntry.title;
+  const path = chunkEntry.path;
+  const nodePath = chunkEntry.nodePath;
+  const contentHash = chunkEntry.contentHash;
+  const characterCount = chunkEntry.characterCount;
+  const estimatedTokenCount = chunkEntry.estimatedTokenCount;
+  const sourceFormat = chunkEntry.sourceFormat;
+  const sourcePath = chunkEntry.sourcePath;
+  const warningCount = chunkEntry.warningCount;
+
+  if (!isNonEmptyString(id)) {
+    failures.push(`malformed manifest: ${label}.id must be a non-empty string`);
+  }
+
+  if (!isPositiveInteger(order)) {
+    failures.push(`malformed manifest: ${label}.order must be a positive integer`);
+  } else if (order !== expectedOrder) {
+    failures.push(`malformed manifest: ${label}.order must match chunk index order`);
+  }
+
+  if (!isNonEmptyString(title)) {
+    failures.push(`malformed manifest: ${label}.title must be a non-empty string`);
+  }
+
+  if (!isStringArray(path)) {
+    failures.push(`malformed manifest: ${label}.path must be a string array`);
+  }
+
+  if (!isStringArray(nodePath)) {
+    failures.push(`malformed manifest: ${label}.nodePath must be a string array`);
+  }
+
+  if (!isUnprefixedSha256Hash(contentHash)) {
+    failures.push(`malformed manifest: ${label}.contentHash must be a sha256 hex digest`);
+  }
+
+  if (!isNonNegativeInteger(characterCount)) {
+    failures.push(`malformed manifest: ${label}.characterCount must be a non-negative integer`);
+  }
+
+  if (!isNonNegativeInteger(estimatedTokenCount)) {
+    failures.push(
+      `malformed manifest: ${label}.estimatedTokenCount must be a non-negative integer`
+    );
+  }
+
+  if ('sourceFormat' in chunkEntry && !isNonEmptyString(sourceFormat)) {
+    failures.push(`malformed manifest: ${label}.sourceFormat must be a non-empty string`);
+  }
+
+  if ('sourcePath' in chunkEntry && !isNonEmptyString(sourcePath)) {
+    failures.push(`malformed manifest: ${label}.sourcePath must be a non-empty string`);
+  }
+
+  if (!isNonNegativeInteger(warningCount)) {
+    failures.push(`malformed manifest: ${label}.warningCount must be a non-negative integer`);
+  }
+
+  if (
+    !isNonEmptyString(id) ||
+    !isPositiveInteger(order) ||
+    !isNonEmptyString(title) ||
+    !isStringArray(path) ||
+    !isStringArray(nodePath) ||
+    !isUnprefixedSha256Hash(contentHash) ||
+    !isNonNegativeInteger(characterCount) ||
+    !isNonNegativeInteger(estimatedTokenCount) ||
+    ('sourceFormat' in chunkEntry && !isNonEmptyString(sourceFormat)) ||
+    ('sourcePath' in chunkEntry && !isNonEmptyString(sourcePath)) ||
+    !isNonNegativeInteger(warningCount)
+  ) {
+    return undefined;
+  }
+
+  const normalizedChunk: SemanticChunkManifestIndexChunk = {
+    id,
+    order,
+    title,
+    path,
+    nodePath,
+    contentHash,
+    characterCount,
+    estimatedTokenCount,
+    warningCount,
+  };
+
+  if (typeof sourceFormat === 'string') {
+    normalizedChunk.sourceFormat = sourceFormat;
+  }
+
+  if (typeof sourcePath === 'string') {
+    normalizedChunk.sourcePath = sourcePath;
+  }
+
+  return normalizedChunk;
+}
+
+async function verifySourceDocsSemanticChunkIndexes(options: {
+  manifestDir: string;
+  semanticChunkIndexes: SemanticChunkManifestIndex[];
+  failures: string[];
+}): Promise<void> {
+  for (const semanticChunkIndex of options.semanticChunkIndexes) {
+    let actualIndex: SemanticChunkManifestIndex;
+
+    try {
+      actualIndex = await buildSemanticChunkJsonlManifestIndex({
+        manifestDir: options.manifestDir,
+        outputPath: semanticChunkIndex.path,
+      });
+    } catch (error) {
+      options.failures.push(
+        `semantic chunk index ${semanticChunkIndex.path}: ${errorMessage(error)}`
+      );
+      continue;
+    }
+
+    if (!semanticChunkManifestIndexesEqual(semanticChunkIndex, actualIndex)) {
+      options.failures.push(
+        `semantic chunk index ${semanticChunkIndex.path}: manifest metadata does not match JSONL records`
+      );
+    }
+  }
+}
+
+function sourceDocsSemanticChunkOutputPaths(
+  generatedOutputs: unknown[],
+  manifestDir: string
+): Set<string> {
+  const paths = new Set<string>();
+
+  for (const output of generatedOutputs) {
+    if (!isObjectRecord(output) || output.kind !== SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND) {
+      continue;
+    }
+
+    const outputPath = output.path;
+
+    if (
+      isNonEmptyString(outputPath) &&
+      !isAbsolute(outputPath) &&
+      isInsideDirectory(manifestDir, resolve(manifestDir, outputPath))
+    ) {
+      paths.add(outputPath);
+    }
+  }
+
+  return paths;
+}
+
+function validateAllowedKeys(
+  value: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>,
+  label: string,
+  failures: string[]
+): void {
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) {
+      failures.push(`malformed manifest: ${label}.${key} is not supported`);
     }
   }
 }
@@ -2488,6 +2884,14 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
 function isSha256Hash(value: unknown): value is string {

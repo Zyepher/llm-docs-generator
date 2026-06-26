@@ -70,7 +70,9 @@ Current implementation:
 - Can opt in to source-docs semantic chunk publication with
   `generate --source ... --chunks jsonl`. This writes
   `chunks/semantic-chunks.jsonl` from the already parsed DocNode tree. It does
-  not select sources, crawl, or infer authority.
+  not select sources, crawl, or infer authority. The `local-source-docs`
+  manifest records a compact `semanticChunkIndexes` entry for that JSONL file,
+  derived only from generated JSONL records and excluding chunk content.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks,
   including generated output hashes, byte sizes, line counts, and deterministic
@@ -82,7 +84,10 @@ Current implementation:
 - Verifies current `local-source-docs` manifests by checking source manifest
   shape, local source path existence, recorded source file byte sizes and
   SHA-256 hashes, generated output paths, byte sizes, hashes, line counts, and
-  deterministic estimated token counts.
+  deterministic estimated token counts. When optional source-docs semantic
+  chunk index metadata is present, verification rebuilds it from
+  `chunks/semantic-chunks.jsonl` and fails on malformed JSONL or stale index
+  facts.
 - Verifies current `source-truth-local-docs` manifests by checking conservative
   source-truth manifest shape, local source path existence/type, recorded
   source file byte sizes and SHA-256 hashes, generated output path containment,
@@ -142,11 +147,13 @@ Current implementation:
   and preset-incompatible explicit formats, and does not fetch, crawl, select
   candidates, infer task fit, or decide source selection. Successful source
   generation writes `manifest.json` plus generated docs under `llm-docs/`.
-  With `--chunks jsonl`, it also writes `chunks/semantic-chunks.jsonl`. The
-  manifest records source file hashes and byte sizes, a deterministic directory
+  With `--chunks jsonl`, it also writes `chunks/semantic-chunks.jsonl` and a
+  compact source-docs `semanticChunkIndexes` manifest entry. The manifest
+  records source file hashes and byte sizes, a deterministic directory
   aggregate hash when applicable, parser/formatter metadata, generated output
   hashes, byte sizes, line counts, deterministic estimated token counts,
-  output kind/name metadata, and warnings.
+  output kind/name metadata, per-chunk index facts without chunk content, and
+  warnings.
 - Can run `generate --source <explicit-local-docs-path> --preset swift-book
   --output-dir <dir>` for a deterministic Swift Programming Language output
   preset over explicit local Markdown/DocC-style sources. The preset supplies
@@ -161,13 +168,13 @@ Current implementation:
   absolute local `source.resolvedPath`, `source.formatHint`, preset metadata if
   present, and whether the previous manifest contained
   `semantic-chunks-jsonl`; it regenerates into the manifest directory through
-  the current local source docs generator. Source-truth refresh reads the
-  existing manifest and uses only the recorded absolute local source path, then
-  regenerates through the current source-truth docs generator. Refresh does not
-  support configured SDK manifests, discovery-report manifests, URLs, repo
-  freshness, broad website crawling, source selection, source-code
-  verification, behavior validation, remote network work, or source project
-  script execution.
+  the current local source docs generator, including refreshed chunk index
+  metadata. Source-truth refresh reads the existing manifest and uses only the
+  recorded absolute local source path, then regenerates through the current
+  source-truth docs generator. Refresh does not support configured SDK
+  manifests, discovery-report manifests, URLs, repo freshness, broad website
+  crawling, source selection, source-code verification, behavior validation,
+  remote network work, or source project script execution.
 - Can run `capabilities --json` to print a deterministic, machine-readable
   contract of implemented commands and planned/unsupported capabilities for
   agents. The contract has schema version `0.1.0`, package name/version
@@ -198,10 +205,10 @@ Current implementation:
   reports do not publish semantic chunk records. Current source docs,
   configured SDK, source-truth docs, and discovery-report manifests include
   partial generated-output RAG metadata only (`lineCount` and
-  `estimatedTokenCount`) plus the source-docs opt-in chunk JSONL file when
-  requested. Discovery modes are inspection foundations only; they do not
-  generate docs, choose sources, assign trust scores, infer authority, or claim
-  source truth.
+  `estimatedTokenCount`) plus source-docs opt-in chunk JSONL file metadata and
+  compact chunk indexes when requested. Discovery modes are inspection
+  foundations only; they do not generate docs, choose sources, assign trust
+  scores, infer authority, or claim source truth.
 - Local and repo discovery order candidates by deterministic evidence category
   and normalized path for agent review. Website discovery orders extracted
   candidate URLs by deterministic observation order and aggregates evidence from
@@ -595,7 +602,8 @@ parser/formatter metadata, source file paths, source file formats, hashes and
 byte sizes, a deterministic directory aggregate hash when applicable, generated
 file hashes, byte sizes, line counts, deterministic estimated token counts,
 output kind/name metadata, optional `chunks/semantic-chunks.jsonl` metadata when
-`--chunks jsonl` is requested, and warnings. The current
+`--chunks jsonl` is requested, optional compact semantic chunk manifest indexes
+derived from the JSONL records, and warnings. The current
 configured SDK generation path writes a scoped `manifest.json` with configured
 source details, hashes, parser and formatter metadata, generated file hashes,
 byte sizes, line counts, and deterministic estimated token counts. The current
@@ -610,7 +618,9 @@ byte sizes, and rejects malformed optional generated output line/token metadata
 when present; it does not recompute those optional counts. For source-mode
 manifests, it checks local source path shape and existence, source file hashes
 and byte sizes, generated output paths, hashes, byte sizes, line counts, and
-deterministic estimated token counts. For source-truth docs manifests, it
+deterministic estimated token counts; when optional semantic chunk manifest
+indexes are present, it also rebuilds them from source-docs JSONL records and
+checks for malformed or stale index data. For source-truth docs manifests, it
 checks source input/resolved path/type shape, local source path existence/type,
 source file path containment for directory sources, source file hashes and byte
 sizes, generated output path containment, allowed source-truth output kinds,
@@ -625,8 +635,9 @@ source truth resolution, or behavior validation. The current `refresh` command
 supports only `local-source-docs` and `source-truth-local-docs` manifests that
 already record an absolute local source path. It regenerates into the existing
 manifest directory, preserves source-docs chunk JSONL output only when the
-previous manifest recorded `semantic-chunks-jsonl`, and preserves source-docs
-preset metadata when present. It does not refresh configured SDK manifests,
+previous manifest recorded `semantic-chunks-jsonl`, regenerates source-docs
+chunk index metadata through the current source generator, and preserves
+source-docs preset metadata when present. It does not refresh configured SDK manifests,
 discovery reports, URLs, repos, websites, remote freshness, source-code
 verification, task-fit decisions, source truth resolution, or behavior
 validation. It performs no remote network work and runs no source project
