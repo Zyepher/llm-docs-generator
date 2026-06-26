@@ -100,9 +100,10 @@ Current implementation:
   facts.
 - Verifies current `source-truth-local-docs` manifests by checking conservative
   source-truth manifest shape, local source path existence/type, recorded
-  source file byte sizes and SHA-256 hashes, generated output path containment,
-  output kinds, byte sizes, hashes, line counts, deterministic estimated token
-  counts, symlink rejection, and count consistency with
+  source file byte sizes, SHA-256 hashes, and optional content-free line/token
+  metadata when present, generated output path containment, output kinds, byte
+  sizes, hashes, line counts, deterministic estimated token counts, symlink
+  rejection, and count consistency with
   `source-truth-report.json` when available.
 - Can run `discover --source <local-file-or-directory>` for explicit local,
   bounded inspection and write `discovery-report.json` plus a discovery-report
@@ -151,9 +152,10 @@ Current implementation:
 - Can run `source-truth generate --source <local-file-or-directory>
 --output-dir <dir>` to write an evidence-bound Markdown file, the raw
   evidence report, and a manifest with generated output hashes, byte sizes, line
-  counts, and deterministic estimated token counts. The command reuses
-  `inspectSourceTruth`, accepts only an explicit local source path, and fails
-  with `failure.json` referencing `source-truth-report.json` when no
+  counts, deterministic estimated token counts, and source-file content-free
+  line/token metadata. The command reuses `inspectSourceTruth`, accepts only an
+  explicit local source path, and fails with `failure.json` referencing
+  `source-truth-report.json` when no
   extractable export or package/config facts or path-based context facts are
   found. It rejects output directories that are the source path or inside the
   source path.
@@ -211,7 +213,8 @@ Current implementation:
   the current local source docs generator, including refreshed chunk index
   metadata. Source-truth refresh reads the existing manifest and uses only the
   recorded absolute local source path, then regenerates through the current
-  source-truth docs generator. Configured SDK refresh reads only the existing
+  source-truth docs generator, including current content-free source-file
+  line/token manifest metadata. Configured SDK refresh reads only the existing
   manifest, requires `source.resolvedSpecPath` to be an absolute local,
   existing, non-symlink OpenRef spec file outside the output directory,
   reparses that exact recorded path, rewrites
@@ -271,9 +274,10 @@ Current implementation:
   reports do not publish semantic chunk records. Current manifests include
   partial content-free line/token metadata only: generated/report file
   `lineCount` and `estimatedTokenCount` metadata where documented, plus
-  source-docs `sourceFiles[]` `lineCount` and `estimatedTokenCount` metadata,
-  source-docs opt-in chunk JSONL file metadata, compact chunk indexes when
-  requested, and compact content-free discovery candidate evidence indexes.
+  source-docs and source-truth docs `sourceFiles[]` `lineCount` and
+  `estimatedTokenCount` metadata, source-docs opt-in chunk JSONL file metadata,
+  compact chunk indexes when requested, and compact content-free discovery
+  candidate evidence indexes.
   Discovery modes are inspection foundations only;
   they do not generate docs, choose sources, assign trust or authority labels, infer
   authority, or claim source truth.
@@ -789,10 +793,11 @@ source-docs JSONL records and checks for malformed or stale index data. For
 source-truth docs
 manifests, it checks source input/resolved path/type shape, local source path
 existence/type, source file path containment for directory sources, source file
-hashes and byte sizes, generated output path containment, allowed source-truth
-output kinds, generated output hashes, byte sizes, line counts, deterministic
-estimated token counts, symlink rejection, inspection schema/mode/traversal
-shape, and count consistency with `source-truth-report.json` when available. For
+hashes, byte sizes, and optional content-free line/token metadata when present,
+generated output path containment, allowed source-truth output kinds, generated
+output hashes, byte sizes, line counts, deterministic estimated token counts,
+symlink rejection, inspection schema/mode/traversal shape, and count
+consistency with `source-truth-report.json` when available. For
 discovery-report manifests, it checks `discovery-report.json` existence, hash,
 byte size, line count, deterministic estimated token count, and basic report
 schema/mode/kind/count consistency. When optional candidate evidence index
@@ -818,7 +823,9 @@ manifests are not refreshable yet. Source-docs refresh regenerates into the
 existing manifest directory, preserves source-docs chunk JSONL output only when
 the previous manifest recorded `semantic-chunks-jsonl`, regenerates
 source-docs chunk index metadata through the current source generator, and
-preserves source-docs preset metadata when present. Configured SDK refresh
+preserves source-docs preset metadata when present. Source-truth docs refresh
+regenerates current content-free source-file line/token manifest metadata
+through the current source-truth docs generator. Configured SDK refresh
 requires `source.resolvedSpecPath` to be an absolute local, existing,
 non-symlink OpenRef spec file outside the output directory; it reparses exactly
 that recorded file and rewrites `parsed/<sdk>-<resolvedVersion>-spec.json`,

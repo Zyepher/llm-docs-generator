@@ -259,8 +259,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       compact content-free manifest file evidence index metadata derived from
       the local report
 - [x] Partial content-free line/token manifest metadata for generated/report
-      files and local source-docs source files (`lineCount` and deterministic
-      `estimatedTokenCount`)
+      files, local source-docs source files, and source-truth docs source files
+      (`lineCount` and deterministic `estimatedTokenCount`)
 - [x] RST parser foundation for explicit local Python-style documentation
 - [x] Static HTML parser foundation for explicit local rendered-HTML fallback
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
@@ -378,10 +378,10 @@ Current capabilities contract scope:
 - Manifest line/token metadata is currently partial and content-free: source
   docs, configured SDK, source-truth docs, and discovery-report manifests
   record `lineCount` and deterministic `estimatedTokenCount` for explicit
-  generated or report files, and local source-docs manifests additionally
-  record those fields for explicit `sourceFiles[]` entries. Discovery-report
-  manifests additionally record compact content-free candidate evidence indexes
-  derived only from
+  generated or report files, and local source-docs plus source-truth docs
+  manifests additionally record those fields for explicit `sourceFiles[]`
+  entries. Discovery-report manifests additionally record compact content-free
+  candidate evidence indexes derived only from
   `discovery-report.json`. Source docs can additionally publish opt-in
   `chunks/semantic-chunks.jsonl` records for explicit `generate --source`
   outputs plus compact manifest chunk indexes derived only from those JSONL
@@ -568,9 +568,10 @@ Current explicit local source docs generation scope:
   semantic chunk index is present, verification rebuilds it from the JSONL
   records and fails on malformed JSONL or stale index facts.
   Source-truth docs verification checks deterministic source-truth manifest
-  shape, source/source-file integrity, generated output integrity, symlink/path
-  containment, inspection basics, and raw report count consistency; it does not
-  infer behavior or perform broad source-code verification.
+  shape, source/source-file integrity including optional content-free
+  source-file line/token metadata when present, generated output integrity,
+  symlink/path containment, inspection basics, and raw report count consistency;
+  it does not infer behavior or perform broad source-code verification.
   Source-verification manifest checks verify `source-verification-report.json`
   file integrity, report path consistency, source/docs endpoint provenance
   against the report, manifest/report summary consistency, report summary
@@ -592,7 +593,8 @@ Current explicit local source docs generation scope:
   `semantic-chunks-jsonl` was previously present, then regenerates through the
   current source docs generator into the manifest directory. For source-truth
   docs it uses only the recorded absolute local source path and regenerates
-  through the current source-truth docs generator into the manifest directory.
+  through the current source-truth docs generator into the manifest directory,
+  including current content-free source-file line/token manifest metadata.
   For configured SDK manifests it requires `source.resolvedSpecPath` to be an
   absolute local, existing, non-symlink OpenRef spec file outside the output
   directory, reparses that exact path, rewrites

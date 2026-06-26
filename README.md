@@ -90,7 +90,9 @@ Current implemented capabilities include:
   source-truth docs, discovery-report, and source-verification manifest
   verification, including recorded generator/sdk/parser/formatter metadata
   checks for configured-SDK manifests and recorded generator/parser/formatter
-  metadata checks for local source-docs manifests
+  metadata checks for local source-docs manifests, plus deterministic
+  content-free source-file line/token metadata checks for source-truth docs
+  manifests when present
 - explicit-manifest refresh for built-in-parser local source docs, source-truth
   docs, and configured OpenRef SDK manifests that already record an absolute
   local source path, with post-refresh manifest integrity verification
@@ -294,10 +296,12 @@ semantic chunk indexes against
 manifests as data and does not import or execute parser plugin modules.
 Source-truth docs
 verification checks the conservative source-truth manifest shape, source file
-hashes and byte sizes, generated output hashes, byte sizes, line counts,
-deterministic estimated token counts, symlink/path containment, and count
-consistency with `source-truth-report.json` when available. Discovery-report
-verification checks `discovery-report.json` existence, hash, byte size, line
+hashes, byte sizes, optional content-free line counts and deterministic
+estimated token counts when present, generated output hashes, byte sizes, line
+counts, deterministic estimated token counts, symlink/path containment, and
+count consistency with `source-truth-report.json` when available.
+Discovery-report verification checks `discovery-report.json` existence, hash,
+byte size, line
 count, estimated token count, basic report schema/mode/kind/count consistency,
 and optional content-free candidate evidence index metadata against the report,
 including URL resource observed HTTP freshness evidence when present.
@@ -322,7 +326,8 @@ docs, refresh reads the manifest, uses the recorded absolute local source path,
 `source.formatHint`, preset metadata if present, and whether the prior manifest
 recorded `semantic-chunks-jsonl`, then regenerates into the same output
 directory. For source-truth docs, it uses only the recorded absolute local
-source path and regenerates into the same output directory. For
+source path and regenerates into the same output directory, including current
+content-free source-file line/token manifest metadata. For
 `configured-sdk` manifests, refresh requires `source.resolvedSpecPath` to be an
 absolute local, existing, non-symlink OpenRef spec file outside the output
 directory; it reparses that exact path, rewrites
