@@ -278,6 +278,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       crawling, configured SDK refresh, discovery-report refresh, and remote
       freshness refresh
 - [ ] Plugin system for custom parsers
+  - [x] Deterministic read-only parser plugin manifest validation for explicit
+        local JSON manifests, without loading or executing plugin code
+  - [ ] Parser plugin execution and custom parser generation
 - [x] OpenRef backward compatibility tests
 
 Current discovery scope:
@@ -336,7 +339,8 @@ Current capabilities contract scope:
   `discover --url`, `source-truth inspect --source`,
   `source-truth generate --source --output-dir`,
   `source-truth verify-docs --source --docs --output-dir`, read-only
-  `agent context`, read-only `agent doctor`,
+  `agent context`, read-only `agent doctor`, read-only
+  `plugins validate --manifest`,
   explicit local `generate --source` with parser hints and optional
   `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
@@ -348,7 +352,7 @@ Current capabilities contract scope:
   broad official-docs behavior/API claim verification, broad website crawling,
   documented automation-flag candidate handling, framework/route
   understanding, behavior-level generation from source code, and
-  `agent install codex`.
+  parser plugin execution/custom parser generation, and `agent install codex`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `source-verification-report.json`, `manifest.json`, `failure.json`, source

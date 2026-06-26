@@ -292,8 +292,9 @@ explicit-manifest source-docs/source-truth modes, source verification beyond
 the narrow explicit-local `source-truth verify-docs` evidence report,
 behavior-level source documentation, or manifest data beyond the current source
 docs, configured SDK, source-truth docs, discovery-report, and
-source-verification manifests, treat it as planned work unless source and tests
-prove it has been implemented.
+source-verification manifests, or parser plugin execution/custom parser
+generation beyond manifest validation, treat it as planned work unless source
+and tests prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -613,6 +614,8 @@ llm-docs agent context --json
 llm-docs agent doctor
 llm-docs agent doctor --json
 llm-docs capabilities --json
+llm-docs plugins validate --manifest ./parser-plugin.json
+llm-docs plugins validate --manifest ./parser-plugin.json --json
 ```
 
 Planned/unsupported helper commands:
@@ -647,6 +650,14 @@ Expected behavior:
 - `llm-docs capabilities --json` reports implemented modes so agents do not
   assume planned features exist. This command is currently implemented as a
   static deterministic contract and does not perform hidden environment probing.
+- `llm-docs plugins validate --manifest <path>` validates an explicit local
+  parser plugin JSON manifest and reports human output.
+- `llm-docs plugins validate --manifest <path> --json` prints deterministic
+  JSON with schema version, absolute manifest path, valid flag, manifest
+  metadata when valid, and errors/warnings arrays. The command does not load,
+  import, execute, or trust plugin code.
+- Parser plugin execution and custom parser generation remain
+  planned/unsupported.
 
 When an agent is in another directory and receives a prompt such as "Generate
 LLM docs for Tailwind CSS," the installed skill is what should tell the agent to

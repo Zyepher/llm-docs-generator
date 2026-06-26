@@ -174,6 +174,19 @@ directories, run network requests, or infer source truth or task fit. `agent
 install codex` remains planned/unsupported and is reported that way through
 `capabilities --json`.
 
+The current `plugins validate --manifest <path>` command validates explicit
+local parser plugin JSON manifests and prints human output or deterministic
+JSON with `--json`. Manifest schema `0.1.0` requires root
+`schemaVersion: "0.1.0"`, `kind: "parser-plugin"`, non-empty `name`,
+non-empty `version`, a relative local `module` path with no URL-like,
+absolute, empty-segment, or `..` traversal form, and a non-empty `formats`
+array. Format objects may contain only `id`, `displayName`, `extensions`,
+optional `mediaTypes`, and optional `directorySupport`; duplicate format ids,
+duplicate extensions anywhere in the manifest, and unsupported keys are
+rejected. The command does not load, import, execute, or trust plugin code.
+Parser plugin execution and custom parser generation remain
+planned/unsupported.
+
 The current `source-truth inspect --source` command accepts one explicit local
 file or directory and prints a deterministic JSON evidence report to stdout. It
 uses bounded traversal, skips common dependency/build directories, does not
@@ -448,6 +461,8 @@ agent intent/source/scope resolution
   - parser and formatter
   - generated files
   - warnings
+- Parser plugin execution and custom parser generation remain future work.
+  The current CLI validates explicit local parser plugin manifests only.
 
 ## Agent Crawl Order
 

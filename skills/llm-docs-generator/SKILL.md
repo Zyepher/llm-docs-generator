@@ -22,6 +22,10 @@ Use this skill when the task is about this repository or about calling the insta
   remote freshness refresh, crawling, and source-code verification remain
   unsupported unless the installed CLI says otherwise. Refresh must not fetch
   remote sources or run source project scripts.
+- Treat parser plugin support as manifest validation only unless
+  `capabilities --json` reports execution or custom parser generation as
+  implemented. `plugins validate` must not be described as loading, importing,
+  executing, trusting, or selecting plugin code.
 - Do not treat discovery reports as source-selection decisions. They are candidate evidence reports for agent review, and report order is not authority, source truth, freshness, or task-fit proof.
 - Reject unsupported candidate scoring, CLI source-selection, authority/source-truth, correctness, task-fit, or "top candidate" claims in docs or code review. Do not add numeric candidate scores; report ordering is readability only.
 
@@ -70,4 +74,4 @@ When modifying this repository:
 
 ## Current CLI Boundary
 
-Implemented modes may include local/repo/URL discovery evidence reports with integrity manifests, conservative source-truth evidence extraction/generation and source-truth docs manifest verification, local source docs generation with optional source-only chunk JSONL export and manifest verification, configured SDK generation and verification, discovery-report verification, explicit local-manifest refresh for current local source docs and source-truth docs manifests, `capabilities --json`, read-only `agent context` metadata, and read-only `agent doctor` diagnostics. Treat any broader lifecycle command as unavailable unless the installed CLI says otherwise.
+Implemented modes may include local/repo/URL discovery evidence reports with integrity manifests, conservative source-truth evidence extraction/generation and source-truth docs manifest verification, local source docs generation with optional source-only chunk JSONL export and manifest verification, configured SDK generation and verification, discovery-report verification, explicit local-manifest refresh for current local source docs and source-truth docs manifests, read-only parser plugin manifest validation, `capabilities --json`, read-only `agent context` metadata, and read-only `agent doctor` diagnostics. Treat parser plugin execution, custom parser generation, and any broader lifecycle command as unavailable unless the installed CLI says otherwise.
