@@ -50,7 +50,7 @@ const DISCOVERY_CANDIDATE_EVIDENCE_CONTEXT_KEYS_BY_KIND: Record<
 > = {
   source: new Set(['source']),
   repo: new Set(['repo', 'scope']),
-  url: new Set(['website', 'crawlPolicy']),
+  url: new Set(['website', 'crawlPolicy', 'resourceFreshness']),
 };
 const DISCOVERY_SOURCE_CONTEXT_KEYS = new Set(['input', 'resolvedPath', 'type']);
 const DISCOVERY_REPO_CONTEXT_KEYS = new Set(['input', 'normalizedInput', 'commit', 'dirty']);
@@ -61,6 +61,13 @@ const DISCOVERY_WEBSITE_CRAWL_POLICY_CONTEXT_KEYS = new Set([
   'renderedJavaScript',
   'inspectedResourceCount',
   'sameOriginWellKnownResourceCount',
+]);
+const DISCOVERY_WEBSITE_RESOURCE_FRESHNESS_KEYS = new Set([
+  'url',
+  'sourceRole',
+  'observedAt',
+  'etag',
+  'lastModified',
 ]);
 const DISCOVERY_PATH_CANDIDATE_EVIDENCE_INDEX_CANDIDATE_KEYS = new Set([
   'path',
@@ -282,6 +289,7 @@ type DiscoveryCandidateEvidenceContext =
         inspectedResourceCount: number;
         sameOriginWellKnownResourceCount: number;
       };
+      resourceFreshness: WebsiteResourceFreshnessIndexEntry[];
     };
 
 interface DiscoveryCandidateEvidenceIndexCandidate {
@@ -313,6 +321,14 @@ type DiscoveryCandidateEvidenceIndexHashData = Omit<
   DiscoveryCandidateEvidenceIndex,
   'aggregateHash'
 >;
+
+interface WebsiteResourceFreshnessIndexEntry {
+  url: string;
+  sourceRole: string;
+  observedAt: string;
+  etag: string | null;
+  lastModified: string | null;
+}
 
 export async function writeGenerationManifest(
   options: WriteGenerationManifestOptions
@@ -1455,6 +1471,10 @@ function buildDiscoveryCandidateEvidenceContext(
     );
   }
 
+  const resourceFreshness = inspectedResources.map((resource, index) =>
+    buildDiscoveryWebsiteResourceFreshnessIndexEntry(resource, index)
+  );
+
   return {
     website: {
       input: requiredStringField(website, 'input', 'discovery report website'),
@@ -1475,6 +1495,30 @@ function buildDiscoveryCandidateEvidenceContext(
       inspectedResourceCount: inspectedResources.length,
       sameOriginWellKnownResourceCount: sameOriginWellKnownResources.length,
     },
+    resourceFreshness,
+  };
+}
+
+function buildDiscoveryWebsiteResourceFreshnessIndexEntry(
+  resource: unknown,
+  resourceIndex: number
+): WebsiteResourceFreshnessIndexEntry {
+  if (!isObjectRecord(resource)) {
+    throw new Error(
+      `discovery report inspectedResources[${resourceIndex}] must be an object before writing candidate evidence index`
+    );
+  }
+
+  const resourceLabel = `discovery report inspectedResources[${resourceIndex}]`;
+  const freshness = requiredObjectField(resource, 'freshness', resourceLabel);
+  const freshnessLabel = `${resourceLabel}.freshness`;
+
+  return {
+    url: requiredStringField(resource, 'url', resourceLabel),
+    sourceRole: requiredStringField(resource, 'sourceRole', resourceLabel),
+    observedAt: requiredStringField(freshness, 'observedAt', freshnessLabel),
+    etag: optionalStringOrNullField(freshness, 'etag', freshnessLabel),
+    lastModified: optionalStringOrNullField(freshness, 'lastModified', freshnessLabel),
   };
 }
 
@@ -2685,6 +2729,7 @@ function validateDiscoveryWebsiteCandidateEvidenceContext(
 ): DiscoveryCandidateEvidenceContext | undefined {
   const website = context.website;
   const crawlPolicy = context.crawlPolicy;
+  const resourceFreshness = context.resourceFreshness;
 
   if (!isObjectRecord(website)) {
     failures.push('malformed manifest: candidateEvidenceIndex.context.website must be an object');
@@ -2708,6 +2753,11 @@ function validateDiscoveryWebsiteCandidateEvidenceContext(
     crawlPolicy,
     DISCOVERY_WEBSITE_CRAWL_POLICY_CONTEXT_KEYS,
     'candidateEvidenceIndex.context.crawlPolicy',
+    failures
+  );
+  const resourceFreshnessEntries = validateDiscoveryWebsiteResourceFreshnessIndex(
+    resourceFreshness,
+    'candidateEvidenceIndex.context.resourceFreshness',
     failures
   );
 
@@ -2746,6 +2796,10 @@ function validateDiscoveryWebsiteCandidateEvidenceContext(
     return undefined;
   }
 
+  if (resourceFreshnessEntries === undefined) {
+    return undefined;
+  }
+
   return {
     website: {
       input: website.input,
@@ -2758,7 +2812,84 @@ function validateDiscoveryWebsiteCandidateEvidenceContext(
       inspectedResourceCount: crawlPolicy.inspectedResourceCount,
       sameOriginWellKnownResourceCount: crawlPolicy.sameOriginWellKnownResourceCount,
     },
+    resourceFreshness: resourceFreshnessEntries,
   };
+}
+
+function validateDiscoveryWebsiteResourceFreshnessIndex(
+  value: unknown,
+  label: string,
+  failures: string[]
+): WebsiteResourceFreshnessIndexEntry[] | undefined {
+  if (!Array.isArray(value)) {
+    failures.push(`malformed manifest: ${label} must be an array`);
+    return undefined;
+  }
+
+  const entries: WebsiteResourceFreshnessIndexEntry[] = [];
+
+  for (const [index, entry] of value.entries()) {
+    const entryLabel = `${label}[${index}]`;
+
+    if (!isObjectRecord(entry)) {
+      failures.push(`malformed manifest: ${entryLabel} must be an object`);
+      return undefined;
+    }
+
+    validateAllowedKeys(entry, DISCOVERY_WEBSITE_RESOURCE_FRESHNESS_KEYS, entryLabel, failures);
+    const etag = entry.etag;
+    const lastModified = entry.lastModified;
+    const normalizedEtag =
+      etag === undefined || etag === null ? null : isNonEmptyString(etag) ? etag : undefined;
+    const normalizedLastModified =
+      lastModified === undefined || lastModified === null
+        ? null
+        : isNonEmptyString(lastModified)
+          ? lastModified
+          : undefined;
+
+    if (!isNonEmptyString(entry.url)) {
+      failures.push(`malformed manifest: ${entryLabel}.url must be a non-empty string`);
+    }
+
+    if (!isNonEmptyString(entry.sourceRole)) {
+      failures.push(`malformed manifest: ${entryLabel}.sourceRole must be a non-empty string`);
+    }
+
+    if (!isIsoTimestampString(entry.observedAt)) {
+      failures.push(`malformed manifest: ${entryLabel}.observedAt must be an ISO timestamp`);
+    }
+
+    if (normalizedEtag === undefined) {
+      failures.push(`malformed manifest: ${entryLabel}.etag must be a non-empty string or null`);
+    }
+
+    if (normalizedLastModified === undefined) {
+      failures.push(
+        `malformed manifest: ${entryLabel}.lastModified must be a non-empty string or null`
+      );
+    }
+
+    if (
+      !isNonEmptyString(entry.url) ||
+      !isNonEmptyString(entry.sourceRole) ||
+      !isIsoTimestampString(entry.observedAt) ||
+      normalizedEtag === undefined ||
+      normalizedLastModified === undefined
+    ) {
+      return undefined;
+    }
+
+    entries.push({
+      url: entry.url,
+      sourceRole: entry.sourceRole,
+      observedAt: entry.observedAt,
+      etag: normalizedEtag,
+      lastModified: normalizedLastModified,
+    });
+  }
+
+  return entries;
 }
 
 function validateDiscoveryCandidateEvidenceIndexCandidate(options: {
@@ -5166,6 +5297,16 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+function isIsoTimestampString(value: unknown): value is string {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const date = new Date(value);
+
+  return !Number.isNaN(date.valueOf()) && date.toISOString() === value;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

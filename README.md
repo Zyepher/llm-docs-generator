@@ -71,7 +71,8 @@ Current implemented capabilities include:
 - external repo caching under a stable cache directory instead of the active
   workspace
 - bounded website inspection from provided URLs, the same-origin `/llms.txt`,
-  and the same-origin `/sitemap.xml`
+  and the same-origin `/sitemap.xml`, including explicit observed HTTP
+  freshness evidence (`ETag`, `Last-Modified`) when returned
 - candidate evidence reports with deterministic evidence, warnings, skipped paths,
   discovery report integrity manifests, and compact content-free candidate
   evidence indexes
@@ -293,7 +294,8 @@ deterministic estimated token counts, symlink/path containment, and count
 consistency with `source-truth-report.json` when available. Discovery-report
 verification checks `discovery-report.json` existence, hash, byte size, line
 count, estimated token count, basic report schema/mode/kind/count consistency,
-and optional content-free candidate evidence index metadata against the report.
+and optional content-free candidate evidence index metadata against the report,
+including URL resource observed HTTP freshness evidence when present.
 Source-verification manifest checks cover `source-verification-report.json`
 existence, hash, byte size, line count, deterministic estimated token count,
 report schema/mode/output path consistency, source/docs endpoint provenance
@@ -301,9 +303,9 @@ against the report, manifest summary consistency with report metadata, report
 summary consistency with body arrays, and `sourceInspection.source`
 consistency. These checks do not refresh outputs or sources, inspect
 additional source/docs files, perform broad official-docs claim checking,
-validate source-code behavior or runtime behavior, decide candidate authority,
-task fit, source truth, or source selection, or prove that docs statements are
-correct.
+validate source-code behavior or runtime behavior, validate freshness, refresh
+remote resources, decide candidate authority, task fit, source truth, or source
+selection, or prove that docs statements are correct.
 
 Refresh currently supports existing built-in-parser `local-source-docs`,
 `source-truth-local-docs`, and configured OpenRef SDK manifests with recorded

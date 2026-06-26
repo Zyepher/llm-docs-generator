@@ -125,8 +125,9 @@ Current implementation:
   `/llms.txt`, and same-origin root `/sitemap.xml`; it does not fetch extracted
   candidate links, render JavaScript, or crawl arbitrary website paths. The
   report records inspected resources, response status/content type/byte counts,
-  crawl policy, extracted candidate URLs, source resource provenance, and
-  warnings. Successful repo and URL discovery also write discovery-report
+  explicit observed HTTP freshness evidence (`ETag`, `Last-Modified`) when
+  returned, crawl policy, extracted candidate URLs, source resource provenance,
+  and warnings. Successful repo and URL discovery also write discovery-report
   manifests beside `discovery-report.json` with compact content-free
   `candidateEvidenceIndex` metadata derived from the report.
 - Can run `source-truth inspect --source <local-file-or-directory>` for an
@@ -791,16 +792,18 @@ discovery-report manifests, it checks `discovery-report.json` existence, hash,
 byte size, line count, deterministic estimated token count, and basic report
 schema/mode/kind/count consistency. When optional candidate evidence index
 metadata is present, it rebuilds that metadata from `discovery-report.json` and
-fails on malformed or stale index data. For source-verification manifests, it
-checks `source-verification-report.json` existence, hash, byte size, line count,
+fails on malformed or stale index data, including URL resource observed HTTP
+freshness evidence when present. For source-verification manifests, it checks
+`source-verification-report.json` existence, hash, byte size, line count,
 deterministic estimated token count, report schema/mode/output path
 consistency, source/docs endpoint provenance against the report, manifest
 summary consistency with report metadata, report summary consistency with body
 arrays, and `sourceInspection.source` consistency. It does not perform refresh,
 inspect additional source/docs files, verify repo freshness, perform broad
-official-docs claim verification, validate source-code behavior, make
-candidate selection, task-fit judgments, source truth resolutions, or source
-selection decisions, or prove docs correctness. The current
+official-docs claim verification, validate source-code behavior, make candidate
+selection, validate HTTP freshness, refresh remote resources, make task-fit
+judgments, resolve source truth, make source selection decisions, or prove docs
+correctness. The current
 `refresh` command
 supports only built-in-parser `local-source-docs`,
 `source-truth-local-docs`, and configured OpenRef SDK manifests that already

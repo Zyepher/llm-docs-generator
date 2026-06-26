@@ -141,8 +141,9 @@ The current `discover --url` command performs bounded static inspection for one
 explicit HTTP(S) URL. It fetches only the explicit URL, same-origin root
 `/llms.txt`, and same-origin root `/sitemap.xml`; it does not render JavaScript
 or fetch linked candidates. It writes a website discovery report with inspected
-resources, response status/content type/byte counts, crawl policy, extracted
-candidate URLs, evidence/provenance, warnings, and a discovery-report
+resources, response status/content type/byte counts, explicit observed HTTP
+freshness evidence (`ETag`, `Last-Modified`) when returned, crawl policy,
+extracted candidate URLs, evidence/provenance, warnings, and a discovery-report
 `manifest.json` with a compact content-free `candidateEvidenceIndex` derived
 from `discovery-report.json`.
 
@@ -317,11 +318,12 @@ paths, hashes, byte sizes, line counts, deterministic estimated token counts,
 symlink/path containment, and count consistency with `source-truth-report.json`
 when available. Discovery-report verification checks report file integrity and
 basic schema/mode/kind/count consistency, and optional candidate evidence index
-metadata against `discovery-report.json`. Discovery reports are candidate
-evidence reports for agent review. They do not generate docs, choose sources,
-assign trust or authority labels, infer authority, decide task fit, decide
-correctness, decide source intent, decide whether a candidate satisfies the
-task, or claim source truth.
+metadata against `discovery-report.json`, including URL resource observed HTTP
+freshness evidence when present. Discovery reports are candidate evidence
+reports for agent review. They do not generate docs, choose sources, assign
+trust or authority labels, infer authority, validate freshness, refresh remote
+resources, decide task fit, decide correctness, decide source intent, decide
+whether a candidate satisfies the task, or claim source truth.
 Source-verification manifest verification checks report file integrity and
 deterministic report-path, source/docs provenance, summary metadata, report
 body count, and `sourceInspection.source` consistency for
