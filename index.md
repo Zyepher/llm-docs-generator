@@ -10,6 +10,9 @@ Read this file first, then follow the links for the task you are doing.
 LLM-friendly documentation from reliable source material. The agent resolves
 intent, source, scope, version, and path; the CLI performs deterministic,
 bounded inspection and conversion over explicit inputs.
+Discovery reports are candidate evidence for agent review only. Generation from
+discovery candidates requires an explicit agent/user-selected source or a
+documented automation flag, not CLI source selection.
 
 The next-generation direction is to make the project an agent-aware system that
 will be able to:
@@ -20,8 +23,8 @@ will be able to:
 4. Respect pinned versions.
 5. Verify generated docs against source provenance.
 6. Fact-check official docs against source code when requested and available.
-7. Generate source-truth codebase docs only when a dedicated generator mode
-   exists.
+7. Generate source-truth codebase docs only when that workflow is explicitly
+   selected and a dedicated generator mode exists.
 
 Important distribution note:
 

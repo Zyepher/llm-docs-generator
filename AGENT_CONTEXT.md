@@ -540,7 +540,8 @@ Reviewers must reject:
 - Candidate evidence reports framed as ratings, hidden preferred-source logic,
   hidden source-specific guessing, or anything other than factual evidence
   reports.
-- CLI selection of a discovery-report candidate, generation from a report's first
+- CLI selection of a discovery-report candidate, top-candidate or
+  leading-candidate auto-generation claims, generation from a report's first
   entry or implied leading entry, hidden preferred-source logic,
   authority/trust scoring or ratings, or unsupported discovery claims. Any
   generation from discovery candidates must require explicit user/agent
@@ -722,8 +723,9 @@ permission to decide source truth or task fit:
 2. First-party docs source: Markdown, MDX, RST, DocC.
 3. First-party `llms.txt` and linked markdown.
 4. First-party docs website via sitemap/canonical pages.
-5. Source-truth codebase docs generation, only when explicitly requested or
-   when no docs exist and the feature is implemented.
+5. Source-truth codebase docs generation, only when explicitly requested, or
+   after asking the user when no authoritative docs source exists and the
+   feature is implemented.
 
 Never prefer stale source hints over verified current sources.
 When official docs and source code disagree on implementation-verifiable facts,

@@ -433,7 +433,7 @@ no authoritative task source: agent investigates another explicit source or asks
     "apps/docs/spec",
     "apps/docs"
   ],
-  "preferredFormats": ["openref", "openapi", "markdown"]
+  "formatHints": ["openref", "openapi", "markdown"]
 }</code></pre>
           </article>
 
@@ -588,10 +588,11 @@ llm-docs diff supabase/supabase --since last</code></pre>
               <p>
                 Add a skill folder such as <code>skills/repo-docs-discovery/SKILL.md</code>.
                 It should instruct agents to cache repos, inspect local instructions, search with
-                <code>rg</code>, prefer source docs over rendered pages, and run the CLI.
+                <code>rg</code>, review candidate evidence reports, explicitly select sources,
+                and run the CLI.
               </p>
               <pre><code>name: repo-docs-discovery
-description: Discover current documentation sources for a repo, website, package, or product, then generate an AI-agent docs pack.
+description: Inspect candidate documentation evidence for a repo, website, package, or product, then generate only from an explicit agent/user-selected source or documented automation flag.
 
 Use this skill when the user asks to generate, refresh, verify, or inspect documentation for an external target.</code></pre>
             </article>
@@ -942,10 +943,11 @@ capabilities:
           <article class="edge">
             <h3>Monorepo With Many Products</h3>
             <p>
-              Use package metadata, docs nav structure, and user intent to narrow scope. Generate separate
+              The agent uses package metadata, docs nav structure, and user intent to choose explicit
+              scope. The CLI records factual metadata and explicit user-provided scope; generate separate
               manifests per product or SDK to avoid mixing unrelated docs.
             </p>
-            <div class="tag-row"><span class="pill">Scope detection</span><span class="pill">Separate outputs</span></div>
+            <div class="tag-row"><span class="pill">Explicit scope</span><span class="pill">Separate outputs</span></div>
           </article>
         </div>
       </div>
@@ -973,7 +975,7 @@ capabilities:
   },
   "discovery": {
     "startedAt": "2026-06-23T10:00:00Z",
-    "strategy": ["registry-hint", "repo-search", "spec-detection"],
+    "strategy": ["registry-hint", "bounded-repo-inspection", "spec-file-observation"],
     "repoCachePath": "~/.explore/repos/supabase__supabase",
     "commit": "abc123",
     "branch": "master",
@@ -1097,6 +1099,7 @@ failure:
               <li>Execute examples, package scripts, docs build scripts, or arbitrary repository commands.</li>
               <li>Bypass authentication, scrape private content without user-provided access, or store tokens.</li>
               <li>Claim a docs website is authoritative when only a noisy HTML extraction succeeded.</li>
+              <li>Frame candidate evidence as scoring, rating, source-selection, authority, source-truth, task-fit, correctness, source-intent, or task-satisfaction proof.</li>
               <li>Generate from a discovery report's first or leading candidate without explicit candidate input or a documented automation flag.</li>
               <li>Silently use stale cache content when current source verification fails.</li>
               <li>Mix unrelated SDKs or products in one output just because they share a monorepo.</li>
