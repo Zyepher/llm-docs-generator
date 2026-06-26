@@ -66,8 +66,8 @@ Current implemented capabilities include:
 - opt-in semantic chunk JSONL output for explicit local source generation
 - manifests with source or discovery provenance, content hashes, generated file
   hashes, parser/formatter metadata, and warnings
-- configured OpenRef SDK generation plus configured-SDK, source-docs, and
-  discovery-report manifest verification
+- configured OpenRef SDK generation plus configured-SDK, source-docs,
+  source-truth docs, and discovery-report manifest verification
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
 - read-only bundled agent context metadata
@@ -133,8 +133,8 @@ The CLI is responsible for:
 - preserving headings, examples, semantic structure, and stable IDs
 - writing Markdown packs, manifests, discovery reports, provenance metadata,
   and source-truth failure reports
-- verifying configured-SDK and source-docs generated outputs, plus
-  discovery-report files, against recorded metadata
+- verifying configured-SDK, source-docs, source-truth docs, and
+  discovery-report files against recorded metadata
 - failing clearly when a requested source, format, parser, permission, or mode
   cannot be used
 
@@ -155,26 +155,32 @@ The CLI records evidence; the agent owns the final source-selection judgment.
 
 ## Freshness And Verification
 
-Configured SDK, local source docs, and discovery-report outputs can be checked
-later:
+Configured SDK, local source docs, source-truth docs, and discovery-report
+outputs can be checked later:
 
 ```bash
 llm-docs verify --manifest ./output/swift/v2/manifest.json
 llm-docs verify --output-dir ./agent-docs
+llm-docs verify --output-dir ./reports/source-truth
 llm-docs verify --output-dir ./reports/local-docs
 ```
 
-Verification currently supports `configured-sdk`, `local-source-docs`, and
-`discovery-report` manifests. Configured SDK verification checks manifest shape,
-source path existence, source content hash and byte size, and generated file
-hashes and byte sizes. Source-docs verification checks local source path shape
-and existence, recorded source file hashes and byte sizes, generated output
-paths, hashes, byte sizes, line counts, and deterministic estimated token
-counts. Discovery-report verification checks `discovery-report.json` existence,
-hash, byte size, line count, estimated token count, and basic report
-schema/mode/kind/count consistency. It does not judge candidate authority, task
-fit, source truth, freshness, or source-code behavior. Refresh and source-code
-verification remain planned but are not implemented.
+Verification currently supports `configured-sdk`, `local-source-docs`,
+`source-truth-local-docs`, and `discovery-report` manifests. Configured SDK
+verification checks manifest shape, source path existence, source content hash
+and byte size, and generated file hashes and byte sizes. Source-docs
+verification checks local source path shape and existence, recorded source file
+hashes and byte sizes, generated output paths, hashes, byte sizes, line counts,
+and deterministic estimated token counts. Source-truth docs verification checks
+the conservative source-truth manifest shape, source file hashes and byte
+sizes, generated output hashes, byte sizes, line counts, deterministic
+estimated token counts, symlink/path containment, and count consistency with
+`source-truth-report.json` when available. Discovery-report verification checks
+`discovery-report.json` existence, hash, byte size, line count, estimated token
+count, and basic report schema/mode/kind/count consistency. It does not judge
+candidate authority, task fit, source truth, freshness, source-code behavior, or
+runtime behavior. Refresh and source-code verification remain planned but are
+not implemented.
 
 When `generate --source` is run with `--chunks jsonl`, it also writes
 `chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a

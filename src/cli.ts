@@ -547,6 +547,24 @@ const CAPABILITIES_CONTRACT = {
       ],
     },
     {
+      id: 'verify-source-truth-docs',
+      command: 'verify',
+      mode: 'verify --manifest or verify --output-dir',
+      status: 'implemented',
+      inputBoundary: 'source-truth-local-docs manifest.json',
+      outputFiles: ['stdout verification result'],
+      summary:
+        'deterministic integrity and schema consistency checks for source-truth docs manifests',
+      limitations: [
+        'source-truth-local-docs manifest mode only',
+        'local generated evidence docs only',
+        'no refresh',
+        'no repo freshness check',
+        'no source-code verification',
+        'no behavior inference',
+      ],
+    },
+    {
       id: 'list-sdks',
       command: 'list-sdks',
       mode: 'list-sdks',
@@ -1541,7 +1559,7 @@ program
 program
   .command('verify')
   .description(
-    'Verify an existing configured SDK, local source docs, or discovery report manifest by recorded file metadata'
+    'Verify an existing configured SDK, local source docs, source-truth docs, or discovery report manifest by recorded file metadata'
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')

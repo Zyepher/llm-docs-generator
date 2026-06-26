@@ -205,16 +205,21 @@ The current CLI still does not expose refresh or source-code verification. It
 also writes `manifest.json` for successful configured `generate --sdk` tasks and
 successful discovery tasks with generated output or report hashes, byte sizes,
 line counts, and deterministic estimated token counts. Current `verify`
-supports configured-SDK, source-mode, and discovery-report manifests.
+supports configured-SDK, source-mode, source-truth docs, and discovery-report
+manifests.
 Configured SDK verification checks source and output file hashes and byte sizes,
 and validates optional line/token metadata shape when present without
 recomputing those counts. Source-mode verification checks local source path
 shape and existence, recorded source file hashes and byte sizes, generated
 output paths, hashes, byte sizes, line counts, and deterministic estimated token
-counts. Discovery-report verification checks report file integrity and basic
-schema/mode/kind/count consistency only. Discovery reports do not generate
-docs, choose sources, assign trust scores, infer authority, or claim source
-truth.
+counts. Source-truth docs verification checks conservative source-truth
+manifest shape, source path existence/type, source file hashes and byte sizes,
+generated output paths, hashes, byte sizes, line counts, deterministic
+estimated token counts, symlink/path containment, and count consistency with
+`source-truth-report.json` when available. Discovery-report verification checks
+report file integrity and basic schema/mode/kind/count consistency only.
+Discovery reports do not generate docs, choose sources, assign trust scores,
+infer authority, or claim source truth.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable
@@ -322,9 +327,11 @@ agent intent/source/scope resolution
   also verifies `local-source-docs` manifests by checking local source path
   shape and existence, source file hashes and byte sizes, generated output
   paths, hashes, byte sizes, line counts, and deterministic estimated token
-  counts. It also verifies discovery-report manifests by checking
-  `discovery-report.json` existence, hashes, byte sizes, line counts,
-  deterministic estimated token counts, and basic report
+  counts. It verifies `source-truth-local-docs` manifests with deterministic
+  integrity/schema checks over source files, generated outputs, inspection
+  shape, and raw report count consistency. It also verifies discovery-report
+  manifests by checking `discovery-report.json` existence, hashes, byte sizes,
+  line counts, deterministic estimated token counts, and basic report
   schema/mode/kind/count consistency only. Local source docs generation is
   available through
   `generate --source <local-file-or-directory> --output-dir <dir>` for explicit

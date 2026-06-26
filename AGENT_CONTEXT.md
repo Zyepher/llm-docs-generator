@@ -83,6 +83,12 @@ Current implementation:
   shape, local source path existence, recorded source file byte sizes and
   SHA-256 hashes, generated output paths, byte sizes, hashes, line counts, and
   deterministic estimated token counts.
+- Verifies current `source-truth-local-docs` manifests by checking conservative
+  source-truth manifest shape, local source path existence/type, recorded
+  source file byte sizes and SHA-256 hashes, generated output path containment,
+  output kinds, byte sizes, hashes, line counts, deterministic estimated token
+  counts, symlink rejection, and count consistency with
+  `source-truth-report.json` when available.
 - Can run `discover --source <local-file-or-directory>` for explicit local,
   bounded inspection and write `discovery-report.json` plus a discovery-report
   `manifest.json` with candidate file hints, deterministic evidence categories
@@ -574,19 +580,26 @@ discovery commands write a scoped `manifest.json` beside `discovery-report.json`
 with discovery kind, report path, report schema/mode, factual counts, and
 report file hash, byte size, line count, and deterministic estimated token
 count. The current `verify` command supports `configured-sdk`,
-`local-source-docs`, and `discovery-report` manifests.
+`local-source-docs`, `source-truth-local-docs`, and `discovery-report`
+manifests.
 For configured SDK manifests, it checks source and generated output hashes and
 byte sizes, and rejects malformed optional generated output line/token metadata
 when present; it does not recompute those optional counts. For source-mode
 manifests, it checks local source path shape and existence, source file hashes
 and byte sizes, generated output paths, hashes, byte sizes, line counts, and
-deterministic estimated token counts. For discovery-report manifests, it checks
-`discovery-report.json` existence, hash, byte size, line count, deterministic
-estimated token count, and basic report schema/mode/kind/count consistency. It
-does not perform refresh, repo freshness verification, source-code
-verification, candidate selection, task-fit judgment, or source-truth
-validation. Future implementations should extend manifest coverage to the
-broader provenance fields above.
+deterministic estimated token counts. For source-truth docs manifests, it
+checks source input/resolved path/type shape, local source path existence/type,
+source file path containment for directory sources, source file hashes and byte
+sizes, generated output path containment, allowed source-truth output kinds,
+generated output hashes, byte sizes, line counts, deterministic estimated token
+counts, symlink rejection, inspection schema/mode/traversal shape, and count
+consistency with `source-truth-report.json` when available. For
+discovery-report manifests, it checks `discovery-report.json` existence, hash,
+byte size, line count, deterministic estimated token count, and basic report
+schema/mode/kind/count consistency. It does not perform refresh, repo freshness
+verification, source-code verification, candidate selection, task-fit judgment,
+source truth resolution, or behavior validation. Future implementations should
+extend manifest coverage to the broader provenance fields above.
 
 ## Clarifying Questions
 

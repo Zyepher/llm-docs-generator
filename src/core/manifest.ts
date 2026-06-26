@@ -5,7 +5,7 @@
 import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
@@ -16,6 +16,7 @@ export const MANIFEST_SCHEMA_VERSION = '0.1.0';
 export const CONFIGURED_SDK_MODE = 'configured-sdk';
 export const DISCOVERY_REPORT_MODE = 'discovery-report';
 const SOURCE_DOCS_MODE = 'local-source-docs';
+const SOURCE_TRUTH_DOCS_MODE = 'source-truth-local-docs';
 const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS = new Set<GeneratedOutputKind>([
   'parsed-spec-json',
   'llm-docs',
@@ -23,6 +24,14 @@ const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS = new Set<GeneratedOutputKind>([
 const DISCOVERY_REPORT_SCHEMA_VERSION = '0.2.0';
 const DISCOVERY_REPORT_OUTPUT_KIND = 'discovery-report';
 const DISCOVERY_REPORT_GENERATED_OUTPUT_KINDS = new Set([DISCOVERY_REPORT_OUTPUT_KIND]);
+const SOURCE_TRUTH_REPORT_SCHEMA_VERSION = '0.1.0';
+const SOURCE_TRUTH_INSPECTION_MODE = 'source-truth-local-evidence';
+const SOURCE_TRUTH_REPORT_OUTPUT_KIND = 'source-truth-report-json';
+const SOURCE_TRUTH_MARKDOWN_OUTPUT_KIND = 'source-truth-markdown';
+const SOURCE_TRUTH_GENERATED_OUTPUT_KINDS = new Set([
+  SOURCE_TRUTH_REPORT_OUTPUT_KIND,
+  SOURCE_TRUTH_MARKDOWN_OUTPUT_KIND,
+]);
 const DISCOVERY_REPORT_MODE_BY_KIND = {
   source: 'local-bounded-inspection',
   repo: 'repo-bounded-inspection',
@@ -268,6 +277,10 @@ export async function verifyManifestFile(
 
   if (mode === SOURCE_DOCS_MODE) {
     return verifySourceDocsManifest(manifestPath, manifest);
+  }
+
+  if (mode === SOURCE_TRUTH_DOCS_MODE) {
+    return verifySourceTruthDocsManifest(manifestPath, manifest);
   }
 
   if (mode === DISCOVERY_REPORT_MODE) {
@@ -683,6 +696,148 @@ async function verifySourceDocsManifest(
   return runFileChecks(manifestPath, failures, fileChecks);
 }
 
+async function verifySourceTruthDocsManifest(
+  manifestPath: string,
+  manifest: Record<string, unknown>
+): Promise<VerifyGenerationManifestResult> {
+  const failures: string[] = [];
+  const manifestDir = dirname(manifestPath);
+  const source = manifest.source;
+  const inspection = manifest.inspection;
+  const sourceFiles = manifest.sourceFiles;
+  const generatedOutputs = manifest.generatedOutputs;
+
+  if (!isObjectRecord(source)) {
+    failures.push('malformed manifest: missing source object');
+  }
+
+  if (!isObjectRecord(inspection)) {
+    failures.push('malformed manifest: missing inspection object');
+  }
+
+  if (!Array.isArray(sourceFiles)) {
+    failures.push('malformed manifest: missing sourceFiles array');
+  }
+
+  if (!Array.isArray(generatedOutputs)) {
+    failures.push('malformed manifest: missing generatedOutputs array');
+  }
+
+  if (failures.length > 0) {
+    return {
+      manifestPath,
+      checkedFiles: 0,
+      failures,
+    };
+  }
+
+  const fileChecks: FileCheck[] = [];
+  const pathTypeChecks: PathTypeCheck[] = [];
+  const sourceRecord = source as Record<string, unknown>;
+  const inspectionRecord = inspection as Record<string, unknown>;
+  const sourceFileRecords = sourceFiles as unknown[];
+  const outputRecords = generatedOutputs as unknown[];
+  const sourceInput = sourceRecord.input;
+  const sourcePath = sourceRecord.resolvedPath;
+  const sourceType = sourceRecord.type;
+
+  if (!isNonEmptyString(sourceInput)) {
+    failures.push('malformed manifest: source.input must be a non-empty string');
+  }
+
+  if (!isNonEmptyString(sourceType) || !isSourceTruthSourceType(sourceType)) {
+    failures.push('malformed manifest: source.type must be file or directory');
+  }
+
+  if (!isNonEmptyString(sourcePath)) {
+    failures.push('malformed manifest: source.resolvedPath must be a non-empty string');
+  } else if (!isAbsolute(sourcePath)) {
+    failures.push('malformed manifest: source.resolvedPath must be absolute');
+  }
+
+  if (
+    isNonEmptyString(sourcePath) &&
+    isAbsolute(sourcePath) &&
+    isSourceTruthSourceType(sourceType)
+  ) {
+    pathTypeChecks.push({
+      label: 'source',
+      path: sourcePath,
+      expectedType: sourceType,
+      rejectSymlinkAncestors: true,
+    });
+  }
+
+  validateSourceTruthInspection(inspectionRecord, failures);
+
+  const sourceFileEntries = validateSourceTruthSourceFiles({
+    sourceFiles: sourceFileRecords,
+    sourcePath,
+    sourceType,
+    failures,
+    fileChecks,
+  });
+
+  if (sourceType === 'file' && sourceFileEntries.length !== 1) {
+    failures.push(
+      'malformed manifest: file source-truth manifests must contain exactly one sourceFiles entry'
+    );
+  }
+
+  validateGeneratedOutputs({
+    generatedOutputs: outputRecords,
+    manifestDir,
+    failures,
+    fileChecks,
+    requireTextMetadata: true,
+    rejectSymlinks: true,
+    rejectSymlinkAncestors: true,
+    allowedKinds: SOURCE_TRUTH_GENERATED_OUTPUT_KINDS,
+  });
+
+  validateSourceTruthGeneratedOutputSet(outputRecords, failures);
+
+  if (failures.length === 0) {
+    for (const check of pathTypeChecks) {
+      await verifyPathType(check, failures);
+    }
+  }
+
+  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
+
+  if (failures.length === 0) {
+    for (const check of fileChecks) {
+      await verifyFile(check, failures);
+    }
+  }
+
+  if (failures.length === 0) {
+    const reportOutputPath = sourceTruthReportOutputPath(outputRecords);
+
+    if (reportOutputPath === undefined) {
+      failures.push(
+        `malformed manifest: source-truth manifests must include a ${SOURCE_TRUTH_REPORT_OUTPUT_KIND} output`
+      );
+    } else {
+      await verifySourceTruthReportFile({
+        reportPath: resolve(manifestDir, reportOutputPath),
+        expected: {
+          source: sourceRecord,
+          inspection: inspectionRecord,
+          sourceFiles: sourceFileEntries,
+        },
+        failures,
+      });
+    }
+  }
+
+  return {
+    manifestPath,
+    checkedFiles,
+    failures,
+  };
+}
+
 interface DiscoveryReportSummary {
   schemaVersion: string;
   mode: string;
@@ -903,6 +1058,7 @@ function validateGeneratedOutputs(options: {
   fileChecks: FileCheck[];
   requireTextMetadata: boolean;
   rejectSymlinks: boolean;
+  rejectSymlinkAncestors?: boolean;
   allowedKinds: ReadonlySet<string>;
 }): void {
   const {
@@ -912,6 +1068,7 @@ function validateGeneratedOutputs(options: {
     fileChecks,
     requireTextMetadata,
     rejectSymlinks,
+    rejectSymlinkAncestors,
     allowedKinds,
   } = options;
 
@@ -1001,6 +1158,7 @@ function validateGeneratedOutputs(options: {
       if (rejectSymlinks) {
         fileCheck.rejectSymlink = true;
         fileCheck.trustedRoot = manifestDir;
+        fileCheck.rejectSymlinkAncestors = rejectSymlinkAncestors === true;
       }
 
       if (expectedLineCount !== undefined) {
@@ -1154,6 +1312,19 @@ interface SourceFileEntry {
   format: string;
 }
 
+interface SourceTruthSourceFileEntry {
+  path: string;
+  resolvedPath: string;
+  byteSize: number;
+  hash: string;
+  factCount: number;
+  exportFactCount: number;
+  signatureFactCount?: number;
+  configFactCount: number;
+  contextFactCount: number;
+  parseDiagnosticCount: number;
+}
+
 function validateSourceFiles(options: {
   sourceFiles: unknown[];
   sourcePath: unknown;
@@ -1293,6 +1464,659 @@ function validateSourceFiles(options: {
   return sourceFileEntries;
 }
 
+function validateSourceTruthInspection(
+  inspection: Record<string, unknown>,
+  failures: string[]
+): void {
+  if (inspection.schemaVersion !== SOURCE_TRUTH_REPORT_SCHEMA_VERSION) {
+    failures.push(
+      `malformed manifest: inspection.schemaVersion must be ${SOURCE_TRUTH_REPORT_SCHEMA_VERSION}`
+    );
+  }
+
+  if (inspection.mode !== SOURCE_TRUTH_INSPECTION_MODE) {
+    failures.push(`malformed manifest: inspection.mode must be ${SOURCE_TRUTH_INSPECTION_MODE}`);
+  }
+
+  const traversal = inspection.traversal;
+  if (!isObjectRecord(traversal)) {
+    failures.push('malformed manifest: inspection.traversal must be an object');
+  } else {
+    validateSourceTruthTraversal(traversal, 'malformed manifest: inspection.traversal', failures);
+  }
+
+  const warnings = inspection.warnings;
+  if (!Array.isArray(warnings) || !warnings.every((warning) => typeof warning === 'string')) {
+    failures.push('malformed manifest: inspection.warnings must be an array of strings');
+  }
+}
+
+function validateSourceTruthTraversal(
+  traversal: Record<string, unknown>,
+  label: string,
+  failures: string[]
+): void {
+  if (traversal.followSymlinks !== false) {
+    failures.push(`${label}.followSymlinks must be false`);
+  }
+
+  for (const field of [
+    'maxDepth',
+    'maxEntries',
+    'maxFiles',
+    'maxFileBytes',
+    'visitedEntries',
+    'visitedFiles',
+    'inspectedFiles',
+    'skippedFiles',
+  ]) {
+    if (!isNonNegativeInteger(traversal[field])) {
+      failures.push(`${label}.${field} must be a non-negative integer`);
+    }
+  }
+
+  if (
+    !Array.isArray(traversal.skippedDirectoryNames) ||
+    !traversal.skippedDirectoryNames.every((entry) => typeof entry === 'string')
+  ) {
+    failures.push(`${label}.skippedDirectoryNames must be an array of strings`);
+  }
+
+  if (typeof traversal.truncated !== 'boolean') {
+    failures.push(`${label}.truncated must be a boolean`);
+  }
+}
+
+function validateSourceTruthSourceFiles(options: {
+  sourceFiles: unknown[];
+  sourcePath: unknown;
+  sourceType: unknown;
+  failures: string[];
+  fileChecks: FileCheck[];
+}): SourceTruthSourceFileEntry[] {
+  const { sourceFiles, sourcePath, sourceType, failures, fileChecks } = options;
+  const sourceFileEntries: SourceTruthSourceFileEntry[] = [];
+  const sourceRoot =
+    isNonEmptyString(sourcePath) && isAbsolute(sourcePath) ? sourcePath : undefined;
+  const trustedRoot =
+    sourceRoot === undefined
+      ? undefined
+      : sourceType === 'directory'
+        ? sourceRoot
+        : dirname(sourceRoot);
+
+  for (const [index, sourceFile] of sourceFiles.entries()) {
+    const label = `sourceFiles[${index}]`;
+
+    if (!isObjectRecord(sourceFile)) {
+      failures.push(`malformed manifest: ${label} must be an object`);
+      continue;
+    }
+
+    const sourceFilePath = sourceFile.path;
+    const sourceFileResolvedPath = sourceFile.resolvedPath;
+    const sourceFileByteSize = sourceFile.byteSize;
+    const sourceFileHash = sourceFile.hash;
+    const factCount = sourceFile.factCount;
+    const exportFactCount = sourceFile.exportFactCount;
+    const signatureFactCount = sourceFile.signatureFactCount;
+    const configFactCount = sourceFile.configFactCount;
+    const contextFactCount = sourceFile.contextFactCount;
+    const parseDiagnosticCount = sourceFile.parseDiagnosticCount;
+
+    if (!isNonEmptyString(sourceFilePath)) {
+      failures.push(`malformed manifest: ${label}.path must be a non-empty string`);
+    } else if (isAbsolute(sourceFilePath)) {
+      failures.push(`malformed manifest: ${label}.path must be relative: ${sourceFilePath}`);
+    } else if (
+      sourceRoot !== undefined &&
+      sourceType === 'directory' &&
+      !isInsideDirectory(sourceRoot, resolve(sourceRoot, sourceFilePath))
+    ) {
+      failures.push(`malformed manifest: ${label}.path escapes source root: ${sourceFilePath}`);
+    }
+
+    if (!isNonEmptyString(sourceFileResolvedPath)) {
+      failures.push(`malformed manifest: ${label}.resolvedPath must be a non-empty string`);
+    } else if (!isAbsolute(sourceFileResolvedPath)) {
+      failures.push(`malformed manifest: ${label}.resolvedPath must be absolute`);
+    } else if (
+      sourceRoot !== undefined &&
+      sourceType === 'directory' &&
+      !isInsideDirectory(sourceRoot, sourceFileResolvedPath)
+    ) {
+      failures.push(
+        `malformed manifest: ${label}.resolvedPath escapes source root: ${sourceFileResolvedPath}`
+      );
+    }
+
+    if (
+      sourceRoot !== undefined &&
+      isNonEmptyString(sourceFilePath) &&
+      !isAbsolute(sourceFilePath) &&
+      isNonEmptyString(sourceFileResolvedPath) &&
+      isAbsolute(sourceFileResolvedPath) &&
+      isSourceTruthSourceType(sourceType)
+    ) {
+      const expectedResolvedPath =
+        sourceType === 'directory'
+          ? resolve(sourceRoot, sourceFilePath)
+          : resolve(dirname(sourceRoot), sourceFilePath);
+
+      if (expectedResolvedPath !== sourceFileResolvedPath) {
+        failures.push(
+          `malformed manifest: ${label}.resolvedPath must match ${label}.path under source.resolvedPath`
+        );
+      }
+
+      if (sourceType === 'file' && sourceFileResolvedPath !== sourceRoot) {
+        failures.push(
+          `malformed manifest: ${label}.resolvedPath must match source.resolvedPath for file sources`
+        );
+      }
+    }
+
+    if (!isNonNegativeInteger(sourceFileByteSize)) {
+      failures.push(`malformed manifest: ${label}.byteSize must be a non-negative integer`);
+    }
+
+    if (!isSha256Hash(sourceFileHash)) {
+      failures.push(`malformed manifest: ${label}.hash must be a sha256 hash`);
+    }
+
+    if (!isNonNegativeInteger(factCount)) {
+      failures.push(`malformed manifest: ${label}.factCount must be a non-negative integer`);
+    }
+
+    if (!isNonNegativeInteger(exportFactCount)) {
+      failures.push(`malformed manifest: ${label}.exportFactCount must be a non-negative integer`);
+    }
+
+    if (
+      signatureFactCount !== undefined &&
+      !isNonNegativeInteger(signatureFactCount)
+    ) {
+      failures.push(
+        `malformed manifest: ${label}.signatureFactCount must be a non-negative integer when present`
+      );
+    }
+
+    if (!isNonNegativeInteger(configFactCount)) {
+      failures.push(`malformed manifest: ${label}.configFactCount must be a non-negative integer`);
+    }
+
+    if (!isNonNegativeInteger(contextFactCount)) {
+      failures.push(`malformed manifest: ${label}.contextFactCount must be a non-negative integer`);
+    }
+
+    if (!isNonNegativeInteger(parseDiagnosticCount)) {
+      failures.push(
+        `malformed manifest: ${label}.parseDiagnosticCount must be a non-negative integer`
+      );
+    }
+
+    if (
+      isNonNegativeInteger(factCount) &&
+      isNonNegativeInteger(exportFactCount) &&
+      isNonNegativeInteger(configFactCount) &&
+      isNonNegativeInteger(contextFactCount) &&
+      factCount !== exportFactCount + configFactCount + contextFactCount
+    ) {
+      failures.push(
+        `malformed manifest: ${label}.factCount must match export/config/context fact counts`
+      );
+    }
+
+    if (
+      isNonNegativeInteger(signatureFactCount) &&
+      isNonNegativeInteger(exportFactCount) &&
+      signatureFactCount > exportFactCount
+    ) {
+      failures.push(
+        `malformed manifest: ${label}.signatureFactCount must be less than or equal to exportFactCount`
+      );
+    }
+
+    if (
+      isNonEmptyString(sourceFilePath) &&
+      !isAbsolute(sourceFilePath) &&
+      isNonEmptyString(sourceFileResolvedPath) &&
+      isAbsolute(sourceFileResolvedPath) &&
+      isNonNegativeInteger(sourceFileByteSize) &&
+      isSha256Hash(sourceFileHash) &&
+      isNonNegativeInteger(factCount) &&
+      isNonNegativeInteger(exportFactCount) &&
+      (signatureFactCount === undefined || isNonNegativeInteger(signatureFactCount)) &&
+      isNonNegativeInteger(configFactCount) &&
+      isNonNegativeInteger(contextFactCount) &&
+      isNonNegativeInteger(parseDiagnosticCount)
+    ) {
+      sourceFileEntries.push({
+        path: sourceFilePath,
+        resolvedPath: sourceFileResolvedPath,
+        byteSize: sourceFileByteSize,
+        hash: sourceFileHash,
+        factCount,
+        exportFactCount,
+        ...(signatureFactCount === undefined ? {} : { signatureFactCount }),
+        configFactCount,
+        contextFactCount,
+        parseDiagnosticCount,
+      });
+      const fileCheck: FileCheck = {
+        label,
+        path: sourceFileResolvedPath,
+        expectedByteSize: sourceFileByteSize,
+        expectedHash: sourceFileHash,
+        rejectSymlink: true,
+        rejectSymlinkAncestors: true,
+      };
+
+      if (trustedRoot !== undefined) {
+        fileCheck.trustedRoot = trustedRoot;
+      }
+
+      fileChecks.push(fileCheck);
+    }
+  }
+
+  return sourceFileEntries;
+}
+
+function validateSourceTruthGeneratedOutputSet(
+  generatedOutputs: unknown[],
+  failures: string[]
+): void {
+  let reportOutputCount = 0;
+  let markdownOutputCount = 0;
+
+  for (const output of generatedOutputs) {
+    if (!isObjectRecord(output)) {
+      continue;
+    }
+
+    if (output.kind === SOURCE_TRUTH_REPORT_OUTPUT_KIND) {
+      reportOutputCount++;
+    }
+
+    if (output.kind === SOURCE_TRUTH_MARKDOWN_OUTPUT_KIND) {
+      markdownOutputCount++;
+    }
+  }
+
+  if (generatedOutputs.length !== 2 || reportOutputCount !== 1 || markdownOutputCount !== 1) {
+    failures.push(
+      `malformed manifest: source-truth manifests must contain exactly one ${SOURCE_TRUTH_REPORT_OUTPUT_KIND} output and one ${SOURCE_TRUTH_MARKDOWN_OUTPUT_KIND} output`
+    );
+  }
+}
+
+function sourceTruthReportOutputPath(generatedOutputs: unknown[]): string | undefined {
+  for (const output of generatedOutputs) {
+    if (
+      isObjectRecord(output) &&
+      output.kind === SOURCE_TRUTH_REPORT_OUTPUT_KIND &&
+      isNonEmptyString(output.path) &&
+      !isAbsolute(output.path)
+    ) {
+      return output.path;
+    }
+  }
+
+  return undefined;
+}
+
+async function verifySourceTruthReportFile(options: {
+  reportPath: string;
+  expected: {
+    source: Record<string, unknown>;
+    inspection: Record<string, unknown>;
+    sourceFiles: SourceTruthSourceFileEntry[];
+  };
+  failures: string[];
+}): Promise<void> {
+  const { reportPath, expected, failures } = options;
+  let report: unknown;
+
+  try {
+    report = JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+  } catch (error) {
+    failures.push(`source-truth report: malformed JSON: ${errorMessage(error)}`);
+    return;
+  }
+
+  if (!isObjectRecord(report)) {
+    failures.push('source-truth report: root must be an object');
+    return;
+  }
+
+  if (report.schemaVersion !== SOURCE_TRUTH_REPORT_SCHEMA_VERSION) {
+    failures.push(
+      `source-truth report: schemaVersion mismatch (expected ${SOURCE_TRUTH_REPORT_SCHEMA_VERSION}, actual ${String(
+        report.schemaVersion
+      )})`
+    );
+  }
+
+  if (report.mode !== SOURCE_TRUTH_INSPECTION_MODE) {
+    failures.push(
+      `source-truth report: mode mismatch (expected ${SOURCE_TRUTH_INSPECTION_MODE}, actual ${String(
+        report.mode
+      )})`
+    );
+  }
+
+  validateSourceTruthReportSource(report.source, expected.source, failures);
+  validateSourceTruthReportInspection(report, expected.inspection, failures);
+  validateSourceTruthReportCounts(report, expected.sourceFiles, failures);
+}
+
+function validateSourceTruthReportSource(
+  reportSource: unknown,
+  expectedSource: Record<string, unknown>,
+  failures: string[]
+): void {
+  if (!isObjectRecord(reportSource)) {
+    failures.push('source-truth report: missing source object');
+    return;
+  }
+
+  for (const field of ['input', 'resolvedPath', 'type']) {
+    if (reportSource[field] !== expectedSource[field]) {
+      failures.push(
+        `source-truth report: source.${field} mismatch (expected ${String(
+          expectedSource[field]
+        )}, actual ${String(reportSource[field])})`
+      );
+    }
+  }
+}
+
+function validateSourceTruthReportInspection(
+  report: Record<string, unknown>,
+  expectedInspection: Record<string, unknown>,
+  failures: string[]
+): void {
+  const reportTraversal = report.traversal;
+  const expectedTraversal = expectedInspection.traversal;
+
+  if (!isObjectRecord(reportTraversal)) {
+    failures.push('source-truth report: traversal must be an object');
+  } else {
+    validateSourceTruthTraversal(
+      reportTraversal,
+      'source-truth report: traversal',
+      failures
+    );
+
+    if (isObjectRecord(expectedTraversal)) {
+      compareSourceTruthTraversal(reportTraversal, expectedTraversal, failures);
+    }
+  }
+
+  const reportWarnings = report.warnings;
+  const expectedWarnings = expectedInspection.warnings;
+
+  if (!Array.isArray(reportWarnings)) {
+    failures.push('source-truth report: warnings must be an array');
+  } else if (Array.isArray(expectedWarnings) && reportWarnings.length !== expectedWarnings.length) {
+    failures.push(
+      `source-truth report: warning count mismatch (expected ${expectedWarnings.length}, actual ${reportWarnings.length})`
+    );
+  }
+}
+
+function compareSourceTruthTraversal(
+  reportTraversal: Record<string, unknown>,
+  expectedTraversal: Record<string, unknown>,
+  failures: string[]
+): void {
+  for (const field of [
+    'followSymlinks',
+    'maxDepth',
+    'maxEntries',
+    'maxFiles',
+    'maxFileBytes',
+    'visitedEntries',
+    'visitedFiles',
+    'inspectedFiles',
+    'skippedFiles',
+    'truncated',
+  ]) {
+    if (reportTraversal[field] !== expectedTraversal[field]) {
+      failures.push(
+        `source-truth report: traversal.${field} mismatch (expected ${String(
+          expectedTraversal[field]
+        )}, actual ${String(reportTraversal[field])})`
+      );
+    }
+  }
+
+  const reportSkippedDirectories = reportTraversal.skippedDirectoryNames;
+  const expectedSkippedDirectories = expectedTraversal.skippedDirectoryNames;
+
+  if (Array.isArray(reportSkippedDirectories) && Array.isArray(expectedSkippedDirectories)) {
+    if (reportSkippedDirectories.length !== expectedSkippedDirectories.length) {
+      failures.push(
+        `source-truth report: traversal.skippedDirectoryNames count mismatch (expected ${expectedSkippedDirectories.length}, actual ${reportSkippedDirectories.length})`
+      );
+    }
+  }
+}
+
+function validateSourceTruthReportCounts(
+  report: Record<string, unknown>,
+  expectedSourceFiles: SourceTruthSourceFileEntry[],
+  failures: string[]
+): void {
+  const reportFiles = report.files;
+  const reportFacts = report.facts;
+  const reportConfigFacts = report.configFacts;
+  const reportContextFacts = report.contextFacts;
+
+  if (!Array.isArray(reportFacts)) {
+    failures.push('source-truth report: facts must be an array');
+  }
+
+  if (!Array.isArray(reportConfigFacts)) {
+    failures.push('source-truth report: configFacts must be an array');
+  }
+
+  if (!Array.isArray(reportContextFacts)) {
+    failures.push('source-truth report: contextFacts must be an array');
+  }
+
+  if (!Array.isArray(reportFiles)) {
+    failures.push('source-truth report: files must be an array');
+    return;
+  }
+
+  const reportSourceFiles = summarizeSourceTruthReportFiles(reportFiles, failures);
+  const expectedExportFactCount = sumSourceTruthCount(
+    expectedSourceFiles,
+    (file) => file.exportFactCount
+  );
+  const expectedConfigFactCount = sumSourceTruthCount(
+    expectedSourceFiles,
+    (file) => file.configFactCount
+  );
+  const expectedContextFactCount = sumSourceTruthCount(
+    expectedSourceFiles,
+    (file) => file.contextFactCount
+  );
+
+  if (Array.isArray(reportFacts) && reportFacts.length !== expectedExportFactCount) {
+    failures.push(
+      `source-truth report: export fact count mismatch (expected ${expectedExportFactCount}, actual ${reportFacts.length})`
+    );
+  }
+
+  if (Array.isArray(reportConfigFacts) && reportConfigFacts.length !== expectedConfigFactCount) {
+    failures.push(
+      `source-truth report: config fact count mismatch (expected ${expectedConfigFactCount}, actual ${reportConfigFacts.length})`
+    );
+  }
+
+  if (Array.isArray(reportContextFacts) && reportContextFacts.length !== expectedContextFactCount) {
+    failures.push(
+      `source-truth report: context fact count mismatch (expected ${expectedContextFactCount}, actual ${reportContextFacts.length})`
+    );
+  }
+
+  if (reportSourceFiles.length !== expectedSourceFiles.length) {
+    failures.push(
+      `source-truth report: source file count mismatch (expected ${expectedSourceFiles.length}, actual ${reportSourceFiles.length})`
+    );
+  }
+
+  const reportFilesByPath = new Map(reportSourceFiles.map((file) => [file.path, file]));
+
+  for (const [index, expectedFile] of expectedSourceFiles.entries()) {
+    const reportFile = reportFilesByPath.get(expectedFile.path);
+    const label = `source-truth report: sourceFiles[${index}]`;
+
+    if (reportFile === undefined) {
+      failures.push(`${label} missing from report files: ${expectedFile.path}`);
+      continue;
+    }
+
+    compareSourceTruthReportFile(expectedFile, reportFile, label, failures);
+  }
+}
+
+function summarizeSourceTruthReportFiles(
+  reportFiles: unknown[],
+  failures: string[]
+): SourceTruthSourceFileEntry[] {
+  const sourceFiles: SourceTruthSourceFileEntry[] = [];
+
+  for (const [index, reportFile] of reportFiles.entries()) {
+    const label = `source-truth report: files[${index}]`;
+
+    if (!isObjectRecord(reportFile)) {
+      failures.push(`${label} must be an object`);
+      continue;
+    }
+
+    const facts = reportFile.facts;
+    const configFacts = reportFile.configFacts;
+    const contextFacts = reportFile.contextFacts;
+    const parseDiagnostics = reportFile.parseDiagnostics;
+
+    if (!Array.isArray(facts)) {
+      failures.push(`${label}.facts must be an array`);
+      continue;
+    }
+
+    if (!Array.isArray(configFacts)) {
+      failures.push(`${label}.configFacts must be an array`);
+      continue;
+    }
+
+    if (!Array.isArray(contextFacts)) {
+      failures.push(`${label}.contextFacts must be an array`);
+      continue;
+    }
+
+    if (
+      parseDiagnostics !== undefined &&
+      !Array.isArray(parseDiagnostics)
+    ) {
+      failures.push(`${label}.parseDiagnostics must be an array when present`);
+      continue;
+    }
+
+    if (facts.length === 0 && configFacts.length === 0 && contextFacts.length === 0) {
+      continue;
+    }
+
+    if (!isNonEmptyString(reportFile.path)) {
+      failures.push(`${label}.path must be a non-empty string`);
+      continue;
+    }
+
+    if (!isNonEmptyString(reportFile.resolvedPath)) {
+      failures.push(`${label}.resolvedPath must be a non-empty string`);
+      continue;
+    }
+
+    if (!isNonNegativeInteger(reportFile.byteSize)) {
+      failures.push(`${label}.byteSize must be a non-negative integer`);
+      continue;
+    }
+
+    if (!isUnprefixedSha256Hash(reportFile.sha256)) {
+      failures.push(`${label}.sha256 must be a sha256 hash`);
+      continue;
+    }
+
+    sourceFiles.push({
+      path: reportFile.path,
+      resolvedPath: reportFile.resolvedPath,
+      byteSize: reportFile.byteSize,
+      hash: `${HASH_PREFIX}${reportFile.sha256}`,
+      factCount: facts.length + configFacts.length + contextFacts.length,
+      exportFactCount: facts.length,
+      signatureFactCount: facts.filter(hasSourceTruthSignature).length,
+      configFactCount: configFacts.length,
+      contextFactCount: contextFacts.length,
+      parseDiagnosticCount: parseDiagnostics?.length ?? 0,
+    });
+  }
+
+  return sourceFiles;
+}
+
+function compareSourceTruthReportFile(
+  expectedFile: SourceTruthSourceFileEntry,
+  reportFile: SourceTruthSourceFileEntry,
+  label: string,
+  failures: string[]
+): void {
+  const fields: Array<keyof SourceTruthSourceFileEntry> = [
+    'resolvedPath',
+    'byteSize',
+    'hash',
+    'factCount',
+    'exportFactCount',
+    'configFactCount',
+    'contextFactCount',
+    'parseDiagnosticCount',
+  ];
+
+  for (const field of fields) {
+    if (reportFile[field] !== expectedFile[field]) {
+      failures.push(
+        `${label}.${field} mismatch (expected ${String(expectedFile[field])}, actual ${String(
+          reportFile[field]
+        )})`
+      );
+    }
+  }
+
+  if (
+    expectedFile.signatureFactCount !== undefined &&
+    reportFile.signatureFactCount !== expectedFile.signatureFactCount
+  ) {
+    failures.push(
+      `${label}.signatureFactCount mismatch (expected ${expectedFile.signatureFactCount}, actual ${String(
+        reportFile.signatureFactCount
+      )})`
+    );
+  }
+}
+
+function sumSourceTruthCount(
+  files: SourceTruthSourceFileEntry[],
+  select: (file: SourceTruthSourceFileEntry) => number
+): number {
+  return files.reduce((total, file) => total + select(file), 0);
+}
+
+function hasSourceTruthSignature(value: unknown): boolean {
+  return isObjectRecord(value) && value.signature !== undefined;
+}
+
 async function runFileChecks(
   manifestPath: string,
   failures: string[],
@@ -1369,6 +2193,7 @@ interface FileCheck {
   expectedLineCount?: number;
   expectedEstimatedTokenCount?: number;
   rejectSymlink?: boolean;
+  rejectSymlinkAncestors?: boolean;
   trustedRoot?: string;
 }
 
@@ -1376,6 +2201,7 @@ interface PathTypeCheck {
   label: string;
   path: string;
   expectedType: 'file' | 'directory';
+  rejectSymlinkAncestors?: boolean;
 }
 
 async function verifyFile(check: FileCheck, failures: string[]): Promise<void> {
@@ -1388,14 +2214,23 @@ async function verifyFile(check: FileCheck, failures: string[]): Promise<void> {
 
   try {
     if (check.rejectSymlink === true) {
-      const pathIsAllowed = await verifyNoSymlinkPathComponents(
-        {
-          label: check.label,
-          path: check.path,
-          trustedRoot: check.trustedRoot ?? dirname(check.path),
-        },
-        failures
-      );
+      const pathIsAllowed =
+        check.rejectSymlinkAncestors === true
+          ? await verifyNoSymlinkAbsolutePath({
+              label: check.label,
+              path: check.path,
+              trustedRoot: check.trustedRoot ?? dirname(check.path),
+              expectedType: 'file',
+              failures,
+            })
+          : await verifyNoSymlinkPathComponents(
+              {
+                label: check.label,
+                path: check.path,
+                trustedRoot: check.trustedRoot ?? dirname(check.path),
+              },
+              failures
+            );
 
       if (!pathIsAllowed) {
         return;
@@ -1493,14 +2328,65 @@ async function verifyNoSymlinkPathComponents(
   return true;
 }
 
+async function verifyNoSymlinkAbsolutePath(options: {
+  label: string;
+  path: string;
+  trustedRoot: string;
+  expectedType: 'file' | 'directory';
+  failures: string[];
+}): Promise<boolean> {
+  const trustedRoot = resolve(options.trustedRoot);
+  const targetPath = resolve(options.path);
+
+  if (!isInsideDirectory(trustedRoot, targetPath)) {
+    options.failures.push(`${options.label}: path escapes trusted root: ${targetPath}`);
+    return false;
+  }
+
+  const parsedPath = parse(targetPath);
+  const pathParts = targetPath.slice(parsedPath.root.length).split(sep).filter(Boolean);
+  let currentPath = parsedPath.root;
+
+  if (pathParts.length === 0) {
+    return verifyNoSymlinkPathComponent({
+      label: options.label,
+      path: currentPath,
+      targetPath,
+      isLeaf: true,
+      leafType: options.expectedType,
+      failures: options.failures,
+    });
+  }
+
+  for (const [index, pathPart] of pathParts.entries()) {
+    currentPath = resolve(currentPath, pathPart);
+
+    const pathIsAllowed = await verifyNoSymlinkPathComponent({
+      label: options.label,
+      path: currentPath,
+      targetPath,
+      isLeaf: index === pathParts.length - 1,
+      leafType: options.expectedType,
+      failures: options.failures,
+    });
+
+    if (!pathIsAllowed) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function verifyNoSymlinkPathComponent(options: {
   label: string;
   path: string;
   targetPath: string;
   isLeaf: boolean;
+  leafType?: 'file' | 'directory';
   failures: string[];
 }): Promise<boolean> {
-  const { label, path, targetPath, isLeaf, failures } = options;
+  const { label, path, targetPath, isLeaf, leafType = 'file', failures } = options;
   let stats;
 
   try {
@@ -1509,7 +2395,7 @@ async function verifyNoSymlinkPathComponent(options: {
     if (isFileNotFoundError(error)) {
       failures.push(
         isLeaf
-          ? `${label}: missing file at ${targetPath}`
+          ? `${label}: missing ${leafType} at ${targetPath}`
           : `${label}: missing path component at ${path}`
       );
       return false;
@@ -1524,8 +2410,13 @@ async function verifyNoSymlinkPathComponent(options: {
     return false;
   }
 
-  if (isLeaf && !stats.isFile()) {
+  if (isLeaf && leafType === 'file' && !stats.isFile()) {
     failures.push(`${label}: expected file at ${path}`);
+    return false;
+  }
+
+  if (isLeaf && leafType === 'directory' && !stats.isDirectory()) {
+    failures.push(`${label}: expected directory at ${path}`);
     return false;
   }
 
@@ -1538,6 +2429,17 @@ async function verifyNoSymlinkPathComponent(options: {
 }
 
 async function verifyPathType(check: PathTypeCheck, failures: string[]): Promise<void> {
+  if (check.rejectSymlinkAncestors === true) {
+    await verifyNoSymlinkAbsolutePath({
+      label: check.label,
+      path: check.path,
+      trustedRoot: check.expectedType === 'directory' ? check.path : dirname(check.path),
+      expectedType: check.expectedType,
+      failures,
+    });
+    return;
+  }
+
   let stats;
 
   try {
@@ -1592,6 +2494,10 @@ function isSha256Hash(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/.test(value);
 }
 
+function isUnprefixedSha256Hash(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+}
+
 function isAllowedOutputKind(value: unknown, allowedKinds: ReadonlySet<string>): value is string {
   return typeof value === 'string' && allowedKinds.has(value);
 }
@@ -1614,6 +2520,10 @@ function formatAllowedOutputKinds(allowedKinds: ReadonlySet<string>): string {
 }
 
 function isSourceDocsSourceType(value: unknown): value is 'file' | 'directory' {
+  return typeof value === 'string' && SOURCE_DOCS_SOURCE_TYPES.has(value);
+}
+
+function isSourceTruthSourceType(value: unknown): value is 'file' | 'directory' {
   return typeof value === 'string' && SOURCE_DOCS_SOURCE_TYPES.has(value);
 }
 
