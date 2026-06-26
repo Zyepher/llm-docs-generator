@@ -57,6 +57,7 @@ const AGENT_DOCTOR_SCHEMA_VERSION = '0.1.0';
 const EXPECTED_BINARY_NAME = 'llm-docs';
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIGURED_SDK_GENERATE_FORMATS = ['openref', 'openref-0.1'] as const;
+const CONFIGURED_SDK_CANONICAL_MANIFEST_FORMAT = 'openref-0.1';
 const SOURCE_GENERATE_FORMATS = [
   'auto',
   'markdown',
@@ -618,7 +619,7 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'configured-sdk manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'file hash, byte-size, and manifest-recorded line/token verification when present for configured SDK manifests',
+        'recorded generator/sdk/parser/formatter metadata, source file, generated output hash, byte-size, and manifest-recorded line/token verification when present for configured SDK manifests',
       limitations: [
         'configured-sdk manifest mode only',
         'only verifies existing source and generated output files recorded in the manifest',
@@ -1256,6 +1257,20 @@ function validateGenerateOptions(options: {
   }
 
   return 'configured-sdk';
+}
+
+function canonicalizeConfiguredSdkManifestFormat(format: string): string {
+  const normalizedFormat = format.trim().toLowerCase();
+
+  if (
+    CONFIGURED_SDK_GENERATE_FORMATS.some(
+      (supportedFormat) => supportedFormat === normalizedFormat
+    )
+  ) {
+    return CONFIGURED_SDK_CANONICAL_MANIFEST_FORMAT;
+  }
+
+  return format;
 }
 
 async function resolveSourceGeneratePreset(options: {
@@ -1933,6 +1948,9 @@ program
               options.force
             );
             const versionConfig = config.getSDKVersionConfig(sdkName, resolvedVersion);
+            const manifestSpecFormat = canonicalizeConfiguredSdkManifestFormat(
+              versionConfig.spec.format
+            );
 
             // Parse spec
             const parser = new OpenRefParser(specPath);
@@ -1970,12 +1988,12 @@ program
                 configuredUrl: versionConfig.spec.url,
                 configuredLocalPath: versionConfig.spec.localPath,
                 resolvedSpecPath: specPath,
-                format: versionConfig.spec.format,
+                format: manifestSpecFormat,
               },
               parser: {
                 name: 'OpenRefParser',
                 version: GENERATOR_VERSION,
-                format: versionConfig.spec.format,
+                format: manifestSpecFormat,
               },
               formatter: {
                 name: 'LLMFormatter',
@@ -2104,7 +2122,7 @@ program
 program
   .command('verify')
   .description(
-    'Verify an existing configured SDK, local source docs, source-truth docs, or discovery report manifest by recorded file metadata'
+    'Verify an existing configured SDK, local source docs, source-truth docs, discovery report, or source-verification manifest by recorded metadata'
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')

@@ -270,13 +270,13 @@ deterministic estimated token counts. Current `verify` supports configured-SDK,
 source-mode, source-truth docs, discovery-report, and source-verification
 manifests.
 Configured SDK verification checks source and output file hashes, byte sizes,
-and valid generated output line/token metadata when present, and rejects
-malformed optional line/token metadata before file checks. Source-mode
-verification checks local source path
-shape and existence, recorded source file hashes and byte sizes, generated
-output paths, hashes, byte sizes, line counts, and deterministic estimated token
-counts. When optional source-docs semantic chunk index metadata is present, it
-is rebuilt from `chunks/semantic-chunks.jsonl` and compared with the manifest.
+recorded generator/sdk/parser/formatter metadata, and valid generated output
+line/token metadata when present, and rejects malformed metadata before file
+checks. Source-mode verification checks local source path shape and existence,
+recorded source file hashes and byte sizes, generated output paths, hashes,
+byte sizes, line counts, and deterministic estimated token counts. When
+optional source-docs semantic chunk index metadata is present, it is rebuilt
+from `chunks/semantic-chunks.jsonl` and compared with the manifest.
 Source-truth docs verification checks conservative source-truth manifest shape,
 source path existence/type, source file hashes and byte sizes, generated output
 paths, hashes, byte sizes, line counts, deterministic estimated token counts,
@@ -397,12 +397,13 @@ agent intent/source/scope resolution
   silently upgrade.
 - If the user asks for latest, verify remote state before reusing a cached clone.
 - Successful configured SDK generation currently writes a scoped manifest with
-  source and output hashes, byte sizes, line counts, and deterministic
-  estimated token counts for generated outputs. Current `verify` checks
-  configured SDK manifest file hashes, byte sizes, and valid generated output
-  line/token metadata when present, while rejecting malformed optional
-  line/token metadata before file checks. It also verifies
-  `local-source-docs` manifests by checking recorded generator/parser/formatter
+  generator/sdk/parser/formatter metadata, source and output hashes, byte
+  sizes, line counts, and deterministic estimated token counts for generated
+  outputs. Current `verify` checks configured SDK manifest metadata, file
+  hashes, byte sizes, and valid generated output line/token metadata when
+  present, while rejecting malformed metadata before file checks. It also
+  verifies `local-source-docs` manifests by checking recorded
+  generator/parser/formatter
   metadata, local source path shape and existence, source file hashes and byte
   sizes, generated output paths, hashes, byte sizes, line counts,
   deterministic estimated token counts, and optional semantic chunk indexes
