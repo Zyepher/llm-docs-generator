@@ -25,7 +25,8 @@ agent-docs/
 
 The Markdown files are for the AI agent to read. The JSON and JSONL files are
 for trust: they record source paths, source file formats, content hashes,
-parser and formatter versions, warnings, and generated files.
+parser and formatter versions, warnings, generated files, and compact source-docs
+semantic chunk indexes when JSONL chunks are requested.
 
 ## Core Workflow
 
@@ -181,15 +182,16 @@ verification checks manifest shape, source path existence, source content hash
 and byte size, and generated file hashes and byte sizes. Source-docs
 verification checks local source path shape and existence, recorded source file
 hashes and byte sizes, generated output paths, hashes, byte sizes, line counts,
-and deterministic estimated token counts. Source-truth docs verification checks
-the conservative source-truth manifest shape, source file hashes and byte
-sizes, generated output hashes, byte sizes, line counts, deterministic
-estimated token counts, symlink/path containment, and count consistency with
-`source-truth-report.json` when available. Discovery-report verification checks
-`discovery-report.json` existence, hash, byte size, line count, estimated token
-count, and basic report schema/mode/kind/count consistency. It does not judge
-candidate authority, task fit, source truth, freshness, source-code behavior, or
-runtime behavior.
+deterministic estimated token counts, and optional semantic chunk indexes
+against `chunks/semantic-chunks.jsonl` when present. Source-truth docs
+verification checks the conservative source-truth manifest shape, source file
+hashes and byte sizes, generated output hashes, byte sizes, line counts,
+deterministic estimated token counts, symlink/path containment, and count
+consistency with `source-truth-report.json` when available. Discovery-report
+verification checks `discovery-report.json` existence, hash, byte size, line
+count, estimated token count, and basic report schema/mode/kind/count
+consistency. It does not judge candidate authority, task fit, source truth,
+freshness, source-code behavior, or runtime behavior.
 
 Refresh currently supports only existing `local-source-docs` and
 `source-truth-local-docs` manifests. For source docs, it reads the manifest,
@@ -205,7 +207,11 @@ remote network work, or source project script execution.
 When `generate --source` is run with `--chunks jsonl`, it also writes
 `chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a
 generated text output with kind `semantic-chunks-jsonl`, a bounded descriptive
-name, hash, byte size, line count, and deterministic estimated token count.
+name, hash, byte size, line count, deterministic estimated token count, and a
+compact `semanticChunkIndexes` entry derived only from the JSONL records. The
+index stores output path, format, chunk count, aggregate hash, per-chunk stable
+IDs, order, titles, paths, node paths, content hashes, counts, source metadata, and
+warning counts without embedding chunk content.
 
 When `generate --source <path> --preset swift-book` is used, the preset sets
 Markdown format defaults, `swift-book` output naming, the Swift Programming

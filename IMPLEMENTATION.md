@@ -85,9 +85,10 @@ llm-docs-generator/
      child/content shapes, and deep trees deterministically
    - Available as library support and as an opt-in JSONL export for explicit
      `generate --source` outputs only; source-docs refresh preserves that JSONL
-     output only when the existing manifest recorded it. Discovery reports,
-     configured SDK generation, source-truth docs, and broad RAG systems do not
-     consume semantic chunks
+     output only when the existing manifest recorded it. Source-docs manifests
+     record compact JSONL-derived chunk indexes without embedding chunk content.
+     Discovery reports, configured SDK generation, source-truth docs, and broad
+     RAG systems do not consume semantic chunks
 
 6. **Performance Optimizations**
    - O(1) Map-based lookups
@@ -262,6 +263,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Bundled package skill files for current CLI usage and repo/docs discovery
 - [x] Deterministic local explicit-manifest refresh for current
       `local-source-docs` and `source-truth-local-docs` manifests only
+- [x] Deterministic semantic chunk manifest-index metadata for opt-in
+      source-docs `chunks/semantic-chunks.jsonl` exports
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
 - [ ] Source-code verification, broad website crawling, configured SDK refresh,
       discovery-report refresh, remote freshness refresh, and refresh
@@ -326,10 +329,12 @@ Current capabilities contract scope:
   `lineCount` and deterministic `estimatedTokenCount` for explicit generated
   or report files. Source docs can additionally publish opt-in
   `chunks/semantic-chunks.jsonl` records for explicit `generate --source`
-  outputs, and source-docs refresh preserves that output when the existing
-  manifest recorded it. Capabilities output does not claim full manifest
-  expansion, configured SDK refresh, discovery-report refresh, remote freshness
-  refresh, source-code verification, or automatic source selection.
+  outputs plus compact manifest chunk indexes derived only from those JSONL
+  records. Source-docs refresh preserves that output and regenerates the index
+  when the existing manifest recorded it. Capabilities output does not claim
+  full RAG systems, configured SDK refresh, discovery-report refresh, remote
+  freshness refresh, source-code verification, broad crawling, or automatic
+  source selection.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
@@ -422,7 +427,10 @@ Current explicit local source docs generation scope:
   a stable directory aggregate hash when applicable, generated output hashes,
   byte sizes, line counts, deterministic estimated token counts, output
   kind/name metadata, and warnings. Opt-in chunk JSONL is recorded as a
-  generated text output with kind `semantic-chunks-jsonl`.
+  generated text output with kind `semantic-chunks-jsonl`, plus a compact
+  `semanticChunkIndexes` entry with output path, format, chunk count, aggregate
+  hash, per-chunk IDs/order/title/path/nodePath/content hash/counts/source
+  metadata, and warning counts without chunk content.
 - `verify` supports current `configured-sdk`, `local-source-docs`,
   `source-truth-local-docs`, and `discovery-report` manifests.
   Discovery-report verification checks `discovery-report.json` existence, hash,
@@ -430,7 +438,9 @@ Current explicit local source docs generation scope:
   schema/mode/kind/count consistency only; it does not choose candidates,
   validate task fit, claim source truth, refresh repos or websites, or perform
   source-code verification. Source-docs verification checks source files and
-  all generated text outputs, including opt-in chunk JSONL when present.
+  all generated text outputs, including opt-in chunk JSONL when present. When a
+  source-docs semantic chunk index is present, verification rebuilds it from the
+  JSONL records and fails on malformed JSONL or stale index facts.
   Source-truth docs verification checks deterministic source-truth manifest
   shape, source/source-file integrity, generated output integrity, symlink/path
   containment, inspection basics, and raw report count consistency; it does not
@@ -534,10 +544,13 @@ Current semantic chunking scope:
   traversal cycles, and deep trees deterministically.
 - The CLI writes JSONL only for explicit source-mode generation when
   `--chunks jsonl` is requested, and source-docs refresh writes it only when
-  the prior manifest already recorded `semantic-chunks-jsonl`. It does not
-  write chunk records for discovery, configured SDK generation, source-truth
-  docs, or any source selection workflow, and it does not select sources or
-  infer authority.
+  the prior manifest already recorded `semantic-chunks-jsonl`. New source-docs
+  manifests also record compact per-chunk index metadata for that JSONL artifact
+  and verify it in O(number of chunk records + JSONL bytes) without network
+  work, repo script execution, or unrelated file inspection. It does not write
+  chunk records for discovery, configured SDK generation, source-truth docs, or
+  any source selection workflow, and it does not select sources or infer
+  authority.
 
 ## Files Modified/Created
 

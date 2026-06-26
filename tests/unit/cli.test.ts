@@ -56,6 +56,27 @@ interface ManifestFileEntry {
   estimatedTokenCount?: number;
 }
 
+interface SemanticChunkManifestIndex {
+  path: string;
+  format: string;
+  chunkCount: number;
+  aggregateHash: string;
+  warningCount: number;
+  chunks: Array<{
+    id: string;
+    order: number;
+    title: string;
+    path: string[];
+    nodePath: string[];
+    contentHash: string;
+    characterCount: number;
+    estimatedTokenCount: number;
+    sourceFormat?: string;
+    sourcePath?: string;
+    warningCount: number;
+  }>;
+}
+
 interface GenerationManifest {
   schemaVersion: string;
   generatedAt: string;
@@ -130,6 +151,7 @@ interface SourceDocsManifest {
     format: string;
   };
   generatedOutputs: ManifestFileEntry[];
+  semanticChunkIndexes?: SemanticChunkManifestIndex[];
   preset?: {
     name: string;
     configPath: string;
@@ -608,6 +630,35 @@ function aggregateSourceFilesHashForTest(files: SourceDocsManifest['sourceFiles'
   return `sha256:${hash.digest('hex')}`;
 }
 
+function semanticChunkIndexAggregateHashForTest(index: SemanticChunkManifestIndex): string {
+  const hash = createHash('sha256');
+  hash.update('llm-docs-generator:source-docs-semantic-chunks-jsonl-index:v1\n');
+  hash.update(
+    JSON.stringify({
+      path: index.path,
+      format: index.format,
+      chunkCount: index.chunkCount,
+      warningCount: index.warningCount,
+      chunks: index.chunks.map((chunk) => ({
+        id: chunk.id,
+        order: chunk.order,
+        title: chunk.title,
+        path: chunk.path,
+        nodePath: chunk.nodePath,
+        contentHash: chunk.contentHash,
+        characterCount: chunk.characterCount,
+        estimatedTokenCount: chunk.estimatedTokenCount,
+        warningCount: chunk.warningCount,
+        ...(chunk.sourceFormat === undefined ? {} : { sourceFormat: chunk.sourceFormat }),
+        ...(chunk.sourcePath === undefined ? {} : { sourcePath: chunk.sourcePath }),
+      })),
+    })
+  );
+  hash.update('\n');
+
+  return `sha256:${hash.digest('hex')}`;
+}
+
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
@@ -864,6 +915,18 @@ async function refreshSourceTruthReportOutputMetadata(
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
   return manifest;
+}
+
+async function refreshGeneratedTextOutputMetadata(
+  outputPath: string,
+  output: ManifestFileEntry
+): Promise<void> {
+  const outputText = await readFile(outputPath, 'utf-8');
+
+  output.byteSize = await byteSize(outputPath);
+  output.hash = await sha256File(outputPath);
+  output.lineCount = countTextLines(outputText);
+  output.estimatedTokenCount = estimateTextTokens(outputText);
 }
 
 async function createSwiftBookSourceFixture(prefix = 'llm-docs-swift-book-'): Promise<{
@@ -4266,6 +4329,9 @@ describe('CLI compatibility behavior', () => {
 
     const manifestPath = join(outputDir, 'manifest.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+    const secondManifest = JSON.parse(
+      await readFile(join(secondOutputDir, 'manifest.json'), 'utf-8')
+    ) as SourceDocsManifest;
     const chunkOutput = manifest.generatedOutputs.find(
       (output) => output.kind === 'semantic-chunks-jsonl'
     );
@@ -4301,6 +4367,7 @@ describe('CLI compatibility behavior', () => {
     );
     const lines = chunkJsonl.trimEnd().split('\n');
     const records = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const semanticChunkIndex = manifest.semanticChunkIndexes?.[0];
 
     expect(chunkJsonl).toBe(secondChunkJsonl);
     expect(chunkJsonl.endsWith('\n')).toBe(true);
@@ -4349,6 +4416,60 @@ describe('CLI compatibility behavior', () => {
     expect(chunkOutput.hash).toBe(await sha256File(chunkPath));
     expect(chunkOutput.lineCount).toBe(records.length);
     expect(chunkOutput.estimatedTokenCount).toBe(estimateTextTokens(chunkJsonl));
+    expect(manifest.semanticChunkIndexes).toHaveLength(1);
+    expect(semanticChunkIndex).toMatchObject({
+      path: 'chunks/semantic-chunks.jsonl',
+      format: 'jsonl',
+      chunkCount: records.length,
+      warningCount: 1,
+      aggregateHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+    });
+    expect(semanticChunkIndex?.chunks).toEqual([
+      {
+        id: 'chunk-docs/chunk-docs',
+        order: 1,
+        title: 'Chunk Docs',
+        path: ['Chunk Docs', 'Chunk Docs'],
+        nodePath: ['chunk-docs', 'chunk-docs'],
+        contentHash: records[0]?.contentHash,
+        characterCount: records[0]?.characterCount,
+        estimatedTokenCount: records[0]?.estimatedTokenCount,
+        sourceFormat: 'markdown',
+        sourcePath,
+        warningCount: 0,
+      },
+      {
+        id: 'chunk-docs/chunk-docs/install',
+        order: 2,
+        title: 'Install',
+        path: ['Chunk Docs', 'Chunk Docs', 'Install'],
+        nodePath: ['chunk-docs', 'chunk-docs', 'install'],
+        contentHash: records[1]?.contentHash,
+        characterCount: records[1]?.characterCount,
+        estimatedTokenCount: records[1]?.estimatedTokenCount,
+        sourceFormat: 'markdown',
+        sourcePath,
+        warningCount: 0,
+      },
+      {
+        id: 'chunk-docs/chunk-docs/install~2',
+        order: 3,
+        title: 'Install',
+        path: ['Chunk Docs', 'Chunk Docs', 'Install'],
+        nodePath: ['chunk-docs', 'chunk-docs', 'install~2'],
+        contentHash: records[2]?.contentHash,
+        characterCount: records[2]?.characterCount,
+        estimatedTokenCount: records[2]?.estimatedTokenCount,
+        sourceFormat: 'markdown',
+        sourcePath,
+        warningCount: 1,
+      },
+    ]);
+    expect(semanticChunkIndex?.chunks[0]).not.toHaveProperty('content');
+    expect(secondManifest.semanticChunkIndexes?.[0]?.aggregateHash).toBe(
+      semanticChunkIndex?.aggregateHash
+    );
+    expect(secondManifest.semanticChunkIndexes?.[0]?.chunks).toEqual(semanticChunkIndex?.chunks);
 
     const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
 
@@ -4358,6 +4479,98 @@ describe('CLI compatibility behavior', () => {
     );
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('rejects stale semantic chunk manifest index metadata during verify', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-chunk-index-stale-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'indexed-docs.md');
+    const outputDir = join(dir, 'output');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await writeFile(
+      sourcePath,
+      ['# Indexed Docs', '', 'Stable chunk text.', '', '## Usage', '', 'Use it.', ''].join('\n'),
+      'utf-8'
+    );
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+    const semanticChunkIndex = manifest.semanticChunkIndexes?.[0];
+
+    if (semanticChunkIndex === undefined || semanticChunkIndex.chunks[0] === undefined) {
+      throw new Error('expected generated semantic chunk index');
+    }
+
+    semanticChunkIndex.chunks[0].title = 'Stale Title';
+    semanticChunkIndex.aggregateHash = semanticChunkIndexAggregateHashForTest(semanticChunkIndex);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain(
+      'semantic chunk index chunks/semantic-chunks.jsonl: manifest metadata does not match JSONL records'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects malformed semantic chunk JSONL when manifest output metadata is current', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-chunk-index-malformed-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'malformed-index-docs.md');
+    const outputDir = join(dir, 'output');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await writeFile(sourcePath, '# Malformed Index Docs\n\nStable chunk text.\n', 'utf-8');
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+    const chunkOutput = manifest.generatedOutputs.find(
+      (output) => output.kind === 'semantic-chunks-jsonl'
+    );
+
+    if (chunkOutput === undefined) {
+      throw new Error('expected semantic chunk output metadata');
+    }
+
+    const chunkPath = join(outputDir, chunkOutput.path);
+    await writeFile(chunkPath, 'not-json\n', 'utf-8');
+    await refreshGeneratedTextOutputMetadata(chunkPath, chunkOutput);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    );
+    expect(result.stderr).toContain('semantic chunk index chunks/semantic-chunks.jsonl');
+    expect(result.stderr).toContain('malformed JSON');
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it('rejects mixed-format directory source auto-detection before output work', async () => {
@@ -5615,6 +5828,12 @@ describe('CLI compatibility behavior', () => {
       '--output-dir',
       outputDir,
     ]);
+    const firstManifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+    const firstSemanticChunkIndex = firstManifest.semanticChunkIndexes?.[0];
+
+    if (firstSemanticChunkIndex === undefined) {
+      throw new Error('expected initial semantic chunk index');
+    }
 
     await writeFile(
       sourcePath,
@@ -5640,6 +5859,21 @@ describe('CLI compatibility behavior', () => {
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'chunks/semantic-chunks.jsonl',
       'llm-docs/chunk-docs-full-llms.txt',
+    ]);
+    expect(manifest.semanticChunkIndexes).toHaveLength(1);
+    expect(manifest.semanticChunkIndexes?.[0]).toMatchObject({
+      path: 'chunks/semantic-chunks.jsonl',
+      format: 'jsonl',
+      chunkCount: 2,
+      warningCount: 0,
+      aggregateHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+    });
+    expect(manifest.semanticChunkIndexes?.[0]?.aggregateHash).not.toBe(
+      firstSemanticChunkIndex.aggregateHash
+    );
+    expect(manifest.semanticChunkIndexes?.[0]?.chunks.map((chunk) => chunk.title)).toEqual([
+      'Chunk Docs',
+      'Added',
     ]);
     expect(chunkJsonl).toContain('Updated text');
     expect(chunkJsonl).toContain('Added');

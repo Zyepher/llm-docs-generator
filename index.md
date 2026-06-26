@@ -187,12 +187,13 @@ without `--source`. Its `--format` option is a parser hint supporting `auto`,
 Successful source generation writes `manifest.json` at the requested output
 root and generated LLM docs under `llm-docs/`. When `--chunks jsonl` is
 requested, it also writes `chunks/semantic-chunks.jsonl` from the parsed DocNode
-tree. The source manifest records the
+tree and a compact `semanticChunkIndexes` manifest entry derived from the JSONL
+records without embedding chunk content. The source manifest records the
 input path, resolved source type, format hint and resolved format, parser and
 formatter metadata, source file paths, formats, hashes and byte sizes,
 directory aggregate hash when applicable, generated output hashes, byte sizes,
 line counts, deterministic estimated token counts, output kind/name metadata,
-and warnings.
+per-chunk index facts for opt-in chunk JSONL, and warnings.
 
 `--preset swift-book` is implemented only as deterministic defaults for
 explicit local Markdown/DocC-style sources. It sets Markdown generation,
@@ -207,7 +208,8 @@ supports current `local-source-docs` and `source-truth-local-docs` manifests
 only. Source-docs refresh reads the existing manifest, uses only the recorded
 absolute local source path, `source.formatHint`, preset metadata if present,
 and whether `semantic-chunks-jsonl` was previously present, then regenerates
-through the current source docs generator into the manifest directory.
+through the current source docs generator into the manifest directory,
+including refreshed chunk index metadata.
 Source-truth refresh reads the existing manifest, uses only the recorded
 absolute local source path, and regenerates through the current source-truth
 docs generator into the manifest directory. Refresh does not support
@@ -226,22 +228,26 @@ and validates optional line/token metadata shape when present without
 recomputing those counts. Source-mode verification checks local source path
 shape and existence, recorded source file hashes and byte sizes, generated
 output paths, hashes, byte sizes, line counts, and deterministic estimated token
-counts. Source-truth docs verification checks conservative source-truth
-manifest shape, source path existence/type, source file hashes and byte sizes,
-generated output paths, hashes, byte sizes, line counts, deterministic
-estimated token counts, symlink/path containment, and count consistency with
-`source-truth-report.json` when available. Discovery-report verification checks
-report file integrity and basic schema/mode/kind/count consistency only.
-Discovery reports do not generate docs, choose sources, assign trust scores,
-infer authority, or claim source truth.
+counts. When optional source-docs semantic chunk index metadata is present, it
+is rebuilt from `chunks/semantic-chunks.jsonl` and compared with the manifest.
+Source-truth docs verification checks conservative source-truth manifest shape,
+source path existence/type, source file hashes and byte sizes, generated output
+paths, hashes, byte sizes, line counts, deterministic estimated token counts,
+symlink/path containment, and count consistency with `source-truth-report.json`
+when available. Discovery-report verification checks report file integrity and
+basic schema/mode/kind/count consistency only. Discovery reports do not
+generate docs, choose sources, assign trust scores, infer authority, or claim
+source truth.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable
 semantic chunk records with path-derived IDs, order, source metadata, hashes,
 sizes, token estimates, split metadata, and warnings. Discovery reports,
 configured SDK generation, source-truth docs, and source-selection workflows do
-not publish semantic chunks. Source-docs refresh preserves semantic chunk JSONL
-only when the existing manifest recorded it.
+not publish semantic chunks. New source-docs manifests with opt-in chunk JSONL
+also record compact semantic chunk indexes for the JSONL artifact. Source-docs
+refresh preserves semantic chunk JSONL and regenerates that index metadata only
+when the existing manifest recorded the `semantic-chunks-jsonl` output.
 
 The current CLI is implemented in:
 
@@ -342,18 +348,19 @@ agent intent/source/scope resolution
   line/token metadata shape when present without recomputing the counts. It
   also verifies `local-source-docs` manifests by checking local source path
   shape and existence, source file hashes and byte sizes, generated output
-  paths, hashes, byte sizes, line counts, and deterministic estimated token
-  counts. It verifies `source-truth-local-docs` manifests with deterministic
-  integrity/schema checks over source files, generated outputs, inspection
-  shape, and raw report count consistency. It also verifies discovery-report
-  manifests by checking `discovery-report.json` existence, hashes, byte sizes,
-  line counts, deterministic estimated token counts, and basic report
-  schema/mode/kind/count consistency only. Local source docs generation is
-  available through
+  paths, hashes, byte sizes, line counts, deterministic estimated token counts,
+  and optional semantic chunk indexes when present. It verifies
+  `source-truth-local-docs` manifests with deterministic integrity/schema
+  checks over source files, generated outputs, inspection shape, and raw report
+  count consistency. It also verifies discovery-report manifests by checking
+  `discovery-report.json` existence, hashes, byte sizes, line counts,
+  deterministic estimated token counts, and basic report schema/mode/kind/count
+  consistency only. Local source docs generation is available through
   `generate --source <local-file-or-directory> --output-dir <dir>` for explicit
   local Markdown/MDX, OpenAPI, OpenRef, RST, and static HTML inputs, with
-  optional `--chunks jsonl` semantic chunk JSONL publication. Local
-  bounded inspection reports are available through `discover --source`, and
+  optional `--chunks jsonl` semantic chunk JSONL publication and source-docs
+  chunk index metadata. Local bounded inspection reports are available through
+  `discover --source`, and
   repo cache/inspection reports are available through `discover --repo`.
   Bounded explicit URL inspection reports are available through `discover
   --url`; the implemented command surface is available through deterministic

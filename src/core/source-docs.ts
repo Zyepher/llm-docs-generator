@@ -7,6 +7,10 @@ import { chunkDocNode, type SemanticChunk, type SemanticChunkWarning } from './c
 import { detectFormat, getParserForFormat } from './detector.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import { createDocNode, DocNodeType, type DocNode } from './models.js';
+import {
+  buildSemanticChunkJsonlManifestIndex,
+  type SemanticChunkManifestIndex,
+} from './semantic-chunk-index.js';
 import { formatDocNode } from './universal-formatter.js';
 import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
@@ -136,6 +140,7 @@ export interface SourceDocsManifest {
     format: typeof SOURCE_DOCS_FORMATTER_FORMAT;
   };
   generatedOutputs: SourceDocsGeneratedOutput[];
+  semanticChunkIndexes?: SemanticChunkManifestIndex[];
   preset?: SourceDocsPresetMetadata;
   warnings: string[];
 }
@@ -218,9 +223,11 @@ export async function generateSourceDocs(
     const generatedOutputs = await describeGeneratedOutputs(outputDir, outputPaths);
     const chunkOutput =
       chunksFormat === 'jsonl' ? await writeSemanticChunksJsonl(outputDir, root) : undefined;
+    const semanticChunkIndexes: SemanticChunkManifestIndex[] = [];
     if (chunkOutput !== undefined) {
-      generatedOutputs.push(chunkOutput);
+      generatedOutputs.push(chunkOutput.output);
       generatedOutputs.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+      semanticChunkIndexes.push(chunkOutput.index);
     }
     const manifest = buildSourceDocsManifest({
       source,
@@ -230,6 +237,7 @@ export async function generateSourceDocs(
       generator: options.generator,
       sourceFiles: preparedSource.sourceFiles,
       generatedOutputs,
+      ...(semanticChunkIndexes.length === 0 ? {} : { semanticChunkIndexes }),
       ...(options.preset === undefined ? {} : { preset: options.preset }),
       warnings,
     });
@@ -711,7 +719,7 @@ async function describeGeneratedOutputs(
 async function writeSemanticChunksJsonl(
   outputDir: string,
   root: DocNode
-): Promise<SourceDocsGeneratedOutput> {
+): Promise<{ output: SourceDocsGeneratedOutput; index: SemanticChunkManifestIndex }> {
   const chunksDir = join(outputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
   const chunksPath = join(chunksDir, SOURCE_DOCS_CHUNKS_JSONL);
   const chunkResult = chunkDocNode(root);
@@ -724,15 +732,22 @@ async function writeSemanticChunksJsonl(
   await writeFile(chunksPath, jsonl, 'utf-8');
 
   const file = await describeGeneratedTextOutput(chunksPath);
+  const outputPath = relativeOutputPath(outputDir, chunksPath);
 
   return {
-    path: relativeOutputPath(outputDir, chunksPath),
-    kind: 'semantic-chunks-jsonl',
-    name: 'semantic chunks JSONL export',
-    byteSize: file.byteSize,
-    hash: file.hash,
-    lineCount: file.lineCount,
-    estimatedTokenCount: file.estimatedTokenCount,
+    output: {
+      path: outputPath,
+      kind: 'semantic-chunks-jsonl',
+      name: 'semantic chunks JSONL export',
+      byteSize: file.byteSize,
+      hash: file.hash,
+      lineCount: file.lineCount,
+      estimatedTokenCount: file.estimatedTokenCount,
+    },
+    index: await buildSemanticChunkJsonlManifestIndex({
+      manifestDir: outputDir,
+      outputPath,
+    }),
   };
 }
 
@@ -809,6 +824,7 @@ function buildSourceDocsManifest(options: {
   generator: SourceDocsGeneratorMetadata;
   sourceFiles: BoundedSourceFile[];
   generatedOutputs: SourceDocsGeneratedOutput[];
+  semanticChunkIndexes?: SemanticChunkManifestIndex[];
   preset?: SourceDocsPresetMetadata;
   warnings: string[];
 }): SourceDocsManifest {
@@ -854,6 +870,9 @@ function buildSourceDocsManifest(options: {
       format: SOURCE_DOCS_FORMATTER_FORMAT,
     },
     generatedOutputs: options.generatedOutputs,
+    ...(options.semanticChunkIndexes === undefined
+      ? {}
+      : { semanticChunkIndexes: options.semanticChunkIndexes }),
     ...(options.preset === undefined ? {} : { preset: options.preset }),
     warnings: [...new Set(options.warnings)].sort(compareStringsByCodeUnit),
   };
