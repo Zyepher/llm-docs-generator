@@ -1908,7 +1908,21 @@ describe('CLI compatibility behavior', () => {
         'no behavior inference',
       ]),
     });
-    expect(implemented.get('verify-source-verification')).toMatchObject({
+    const sourceVerificationVerify = implemented.get('verify-source-verification');
+    expect(sourceVerificationVerify?.summary).toEqual(
+      expect.stringContaining('report integrity')
+    );
+    expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('provenance'));
+    expect(sourceVerificationVerify?.summary).toEqual(
+      expect.stringContaining('manifest/report summary')
+    );
+    expect(sourceVerificationVerify?.summary).toEqual(
+      expect.stringContaining('report-body count')
+    );
+    expect(sourceVerificationVerify?.summary).toEqual(
+      expect.stringContaining('sourceInspection.source consistency')
+    );
+    expect(sourceVerificationVerify).toMatchObject({
       command: 'verify',
       mode: 'verify --manifest or verify --output-dir',
       status: 'implemented',
@@ -1916,10 +1930,12 @@ describe('CLI compatibility behavior', () => {
       outputFiles: ['stdout verification result'],
       limitations: expect.arrayContaining([
         'source-verification-local-evidence manifest mode only',
-        'verify does not refresh outputs',
+        'verify does not refresh outputs or sources',
         'no additional source/docs inspection',
         'no broad official-docs claim checking',
-        'no source selection',
+        'no source-code behavior validation',
+        'no task-fit, source-truth, or source-selection decision',
+        'no proof that docs statements are correct',
       ]),
     });
     expect(implemented.get('refresh-source-docs')).toMatchObject({

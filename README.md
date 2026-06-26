@@ -223,9 +223,15 @@ verification checks `discovery-report.json` existence, hash, byte size, line
 count, estimated token count, basic report schema/mode/kind/count consistency,
 and optional content-free candidate evidence index metadata against the report.
 Source-verification manifest checks cover `source-verification-report.json`
-file integrity and basic schema/count consistency. These checks do not judge
-candidate authority, task fit, source truth, freshness, source-code behavior,
-runtime behavior, or whether docs statements are correct.
+existence, hash, byte size, line count, deterministic estimated token count,
+report schema/mode/output path consistency, source/docs endpoint provenance
+against the report, manifest summary consistency with report metadata, report
+summary consistency with body arrays, and `sourceInspection.source`
+consistency. These checks do not refresh outputs or sources, inspect
+additional source/docs files, perform broad official-docs claim checking,
+validate source-code behavior or runtime behavior, decide candidate authority,
+task fit, source truth, or source selection, or prove that docs statements are
+correct.
 
 Refresh currently supports only existing `local-source-docs` and
 `source-truth-local-docs` manifests. For source docs, it reads the manifest,

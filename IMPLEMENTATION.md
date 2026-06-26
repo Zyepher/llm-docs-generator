@@ -472,7 +472,13 @@ Current source/docs evidence scope:
   references write `source-verification-report.json` plus `failure.json` and do
   not write a manifest.
   `source-verification-local-evidence` manifests are supported by `verify` for
-  report file integrity and basic schema/count consistency only.
+  deterministic report file integrity, report path consistency, source/docs
+  endpoint provenance against the report, manifest/report summary consistency,
+  report summary consistency with body arrays, and `sourceInspection.source`
+  consistency only. They do not refresh outputs or sources, inspect additional
+  source/docs files, perform broad official-docs claim checking, validate
+  source-code behavior, decide task fit/source truth/source selection, or prove
+  docs correctness.
 
 Current explicit local source docs generation scope:
 
@@ -530,9 +536,13 @@ Current explicit local source docs generation scope:
   containment, inspection basics, and raw report count consistency; it does not
   infer behavior or perform broad source-code verification.
   Source-verification manifest checks verify `source-verification-report.json`
-  file integrity and basic schema/count consistency only; they do not refresh
-  sources, inspect additional files, parse behavior claims, or decide whether
-  docs statements are correct.
+  file integrity, report path consistency, source/docs endpoint provenance
+  against the report, manifest/report summary consistency, report summary
+  consistency with body arrays, and `sourceInspection.source` consistency; they
+  do not refresh outputs or sources, inspect additional source/docs files,
+  parse behavior claims, perform broad official-docs claim checking, validate
+  source-code behavior, decide task fit/source truth/source selection, or prove
+  docs correctness.
 
 - `refresh --manifest <path>` / `refresh --output-dir <dir>` supports only
   current `local-source-docs` and `source-truth-local-docs` manifests. For

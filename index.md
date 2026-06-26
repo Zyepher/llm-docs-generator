@@ -287,8 +287,12 @@ metadata against `discovery-report.json`. Discovery reports do not generate
 docs, choose sources, assign trust or authority labels, infer authority, or
 claim source truth.
 Source-verification manifest verification checks report file integrity and
-basic schema/count consistency for `source-verification-report.json` only; it
-does not refresh sources, inspect additional files, or judge docs correctness.
+deterministic report-path, source/docs provenance, summary metadata, report
+body count, and `sourceInspection.source` consistency for
+`source-verification-report.json`; it does not refresh outputs or sources,
+inspect additional source/docs files, perform broad official-docs claim
+checking, validate source-code behavior, decide task fit/source truth/source
+selection, or prove docs correctness.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable
