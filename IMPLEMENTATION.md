@@ -527,10 +527,11 @@ Current explicit local source docs generation scope:
   metadata is present, verification rebuilds it from `discovery-report.json`
   and fails on malformed or stale index data; it does not choose candidates,
   validate task fit, claim source truth, refresh repos or websites, or perform
-  source-code verification. Source-docs verification checks source files and
-  all generated text outputs, including opt-in chunk JSONL when present. When a
-  source-docs semantic chunk index is present, verification rebuilds it from the
-  JSONL records and fails on malformed JSONL or stale index facts.
+  source-code verification. Source-docs verification checks recorded
+  generator/parser/formatter metadata, source files, and all generated text
+  outputs, including opt-in chunk JSONL when present. When a source-docs
+  semantic chunk index is present, verification rebuilds it from the JSONL
+  records and fails on malformed JSONL or stale index facts.
   Source-truth docs verification checks deterministic source-truth manifest
   shape, source/source-file integrity, generated output integrity, symlink/path
   containment, inspection basics, and raw report count consistency; it does not

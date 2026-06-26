@@ -1886,6 +1886,9 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('verify-source-docs')?.inputBoundary).toBe(
       'local-source-docs manifest.json'
     );
+    expect(implemented.get('verify-source-docs')?.summary).toContain(
+      'recorded generator/parser/formatter metadata'
+    );
     expect(implemented.get('verify-source-docs')?.limitations).toEqual(
       expect.arrayContaining([
         'local-source-docs manifest mode only',
@@ -7708,6 +7711,107 @@ describe('CLI compatibility behavior', () => {
     );
     expect(result.stderr).toContain('line count mismatch');
     expect(result.stderr).toContain('estimated token count mismatch');
+  });
+
+  it('rejects malformed local source docs generation metadata before file checks', async () => {
+    const { manifestPath, manifest } = await generateSourceDocsFixture();
+    const validManifest = structuredClone(manifest);
+    const scenarios: Array<{
+      name: string;
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void;
+      expectedFailures: string[];
+    }> = [
+      {
+        name: 'missing generator',
+        mutate(nextManifest): void {
+          delete (nextManifest as Partial<SourceDocsManifest>).generator;
+        },
+        expectedFailures: ['missing generator object'],
+      },
+      {
+        name: 'malformed generator',
+        mutate(nextManifest): void {
+          nextManifest.generator = {
+            name: '',
+            version: '',
+            cliName: '',
+          };
+        },
+        expectedFailures: [
+          'generator.name must be a non-empty string',
+          'generator.version must be a non-empty string',
+          'generator.cliName must be a non-empty string when present',
+        ],
+      },
+      {
+        name: 'missing parser',
+        mutate(nextManifest): void {
+          delete (nextManifest as Partial<SourceDocsManifest>).parser;
+        },
+        expectedFailures: ['missing parser object'],
+      },
+      {
+        name: 'malformed parser',
+        mutate(nextManifest): void {
+          nextManifest.parser = {
+            name: '',
+            version: '',
+            format: 'asciidoc',
+          };
+        },
+        expectedFailures: [
+          'parser.name must be a non-empty string',
+          'parser.version must be a non-empty string',
+          'parser.format must be a supported source format',
+        ],
+      },
+      {
+        name: 'parser format mismatch',
+        mutate(nextManifest): void {
+          nextManifest.parser.format = 'html';
+        },
+        expectedFailures: ['parser.format must match source.resolvedFormat'],
+      },
+      {
+        name: 'missing formatter',
+        mutate(nextManifest): void {
+          delete (nextManifest as Partial<SourceDocsManifest>).formatter;
+        },
+        expectedFailures: ['missing formatter object'],
+      },
+      {
+        name: 'malformed formatter',
+        mutate(nextManifest): void {
+          nextManifest.formatter = {
+            name: 'OtherFormatter',
+            version: '',
+            format: 'markdown',
+          };
+        },
+        expectedFailures: [
+          'formatter.name must be UniversalFormatter',
+          'formatter.version must be a non-empty string',
+          'formatter.format must be universal-llm-docs',
+        ],
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const nextManifest = structuredClone(validManifest) as SourceDocsManifest &
+        Record<string, unknown>;
+      scenario.mutate(nextManifest);
+      await writeFile(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+      expect(result.exitCode, scenario.name).toBe(1);
+      expect(result.stdout, scenario.name).toContain('Manifest verification');
+      expect(result.stdout, scenario.name).toContain('Checked files: 0');
+      for (const expectedFailure of scenario.expectedFailures) {
+        expect(result.stderr, scenario.name).toContain(expectedFailure);
+      }
+      expect(result.stderr, scenario.name).not.toContain('hash mismatch');
+    }
   });
 
   it('requires source docs generated output line and token metadata before file checks', async () => {
