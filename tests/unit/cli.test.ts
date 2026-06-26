@@ -463,6 +463,32 @@ interface AgentDoctorContract {
   limitations: string[];
 }
 
+interface ParserPluginManifestValidationResult {
+  schemaVersion: string;
+  manifestPath: string;
+  valid: boolean;
+  manifest?: {
+    schemaVersion: string;
+    kind: string;
+    name: string;
+    version: string;
+    module: string;
+    formats: Array<{
+      id: string;
+      displayName: string;
+      extensions: string[];
+      mediaTypes?: string[];
+      directorySupport?: boolean;
+    }>;
+  };
+  errors: Array<{
+    code: string;
+    path: string;
+    message: string;
+  }>;
+  warnings: string[];
+}
+
 interface CliResult {
   stdout: string;
   stderr: string;
@@ -1359,10 +1385,13 @@ describe('CLI compatibility behavior', () => {
     const agentHelp = await runCli(['agent', '--help']);
     const agentContextHelp = await runCli(['agent', 'context', '--help']);
     const agentDoctorHelp = await runCli(['agent', 'doctor', '--help']);
+    const pluginsHelp = await runCli(['plugins', '--help']);
+    const pluginsValidateHelp = await runCli(['plugins', 'validate', '--help']);
 
     expect(rootHelp.stdout).toContain('capabilities');
     expect(rootHelp.stdout).toContain('refresh');
     expect(rootHelp.stdout).toContain('agent');
+    expect(rootHelp.stdout).toContain('plugins');
     expect(rootHelp.stdout).toContain('Report implemented and planned CLI capabilities for');
     expect(rootHelp.stdout).toContain('agents');
     expect(capabilitiesHelp.stdout).toContain(
@@ -1390,6 +1419,13 @@ describe('CLI compatibility behavior', () => {
     expect(agentDoctorHelp.stdout).toContain(
       'Print deterministic machine-readable agent doctor diagnostics'
     );
+    expect(pluginsHelp.stdout).toContain('Validate explicit local parser plugin manifests');
+    expect(pluginsHelp.stdout).toContain('validate');
+    expect(pluginsValidateHelp.stdout).toContain(
+      'Validate an explicit local parser plugin manifest without loading plugin code'
+    );
+    expect(pluginsValidateHelp.stdout).toContain('--manifest <path>');
+    expect(pluginsValidateHelp.stdout).toContain('--json');
     expect(
       `${agentHelp.stdout}\n${agentContextHelp.stdout}\n${agentDoctorHelp.stdout}`
     ).not.toMatch(/\bagent install\b/i);
@@ -1754,6 +1790,7 @@ describe('CLI compatibility behavior', () => {
       'source-truth-verify-docs',
       'agent-context',
       'agent-doctor',
+      'parser-plugin-manifest-validate',
       'generate-source',
       'generate-preset-swift-book',
       'generate-sdk',
@@ -1775,6 +1812,7 @@ describe('CLI compatibility behavior', () => {
       'automatic-source-selection',
       'framework-route-understanding',
       'behavior-level-code-docs',
+      'parser-plugin-execution',
       'agent-install-codex',
     ]);
     expect(
@@ -1845,6 +1883,24 @@ describe('CLI compatibility behavior', () => {
         'PATH check is informational and may warn in development',
         'host skill installation check is skipped unless a future explicit option is implemented',
         'no source-selection or task-fit inference',
+      ]),
+    });
+    expect(implemented.get('parser-plugin-manifest-validate')).toMatchObject({
+      command: 'plugins validate',
+      mode: 'plugins validate --manifest',
+      status: 'implemented',
+      inputBoundary: 'explicit local JSON parser plugin manifest file',
+      options: ['--manifest <path>', '--json'],
+      outputFiles: ['stdout validation result', 'stdout JSON validation result'],
+      summary: expect.stringContaining('without loading plugin modules'),
+      limitations: expect.arrayContaining([
+        'manifest validation only',
+        'does not load, import, or execute plugin modules',
+        'does not enable custom parser execution',
+        'does not generate custom parsers',
+        'does not select plugin manifests or sources',
+        'no network',
+        'no file writes',
       ]),
     });
     expect(implemented.get('generate-source')?.outputFiles).toEqual([
@@ -1946,16 +2002,12 @@ describe('CLI compatibility behavior', () => {
       ]),
     });
     const sourceVerificationVerify = implemented.get('verify-source-verification');
-    expect(sourceVerificationVerify?.summary).toEqual(
-      expect.stringContaining('report integrity')
-    );
+    expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('report integrity'));
     expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('provenance'));
     expect(sourceVerificationVerify?.summary).toEqual(
       expect.stringContaining('manifest/report summary')
     );
-    expect(sourceVerificationVerify?.summary).toEqual(
-      expect.stringContaining('report-body count')
-    );
+    expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('report-body count'));
     expect(sourceVerificationVerify?.summary).toEqual(
       expect.stringContaining('sourceInspection.source consistency')
     );
@@ -2036,6 +2088,12 @@ describe('CLI compatibility behavior', () => {
     );
     expect(planned.get('source-code-verification')?.reason).toContain(
       'source-truth verify-docs is explicit-local lexical evidence only'
+    );
+    expect(planned.get('parser-plugin-execution')?.reason).toContain(
+      'validates explicit local parser plugin manifests only'
+    );
+    expect(planned.get('parser-plugin-execution')?.reason).toContain(
+      'loading, importing, executing parser plugins and generating docs with custom parsers remain planned/unsupported'
     );
     expect([...implemented.values()].map((capability) => capability.command)).not.toContain(
       'agent install codex'
@@ -2118,10 +2176,593 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 20');
-    expect(stdout).toContain('Planned or unsupported modes: 8');
+    expect(stdout).toContain('Implemented modes: 21');
+    expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
+
+  it('validates parser plugin manifests with human output without loading plugin code', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const manifestPath = join(dir, 'parser-plugin.json');
+    const sideEffectPath = join(dir, 'loaded.txt');
+
+    await writeFile(
+      join(dir, 'throwing-plugin.js'),
+      `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(sideEffectPath)}, 'loaded');\nthrow new Error('plugin code was loaded');\n`,
+      'utf-8'
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          kind: 'parser-plugin',
+          name: 'Fixture Parser',
+          version: '1.2.3',
+          module: 'throwing-plugin.js',
+          formats: [
+            {
+              id: 'fixture-docs',
+              displayName: 'Fixture Docs',
+              extensions: ['fixture', 'fixture-docs'],
+              mediaTypes: ['text/fixture'],
+              directorySupport: true,
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const { stdout } = await runCli(['plugins', 'validate', '--manifest', manifestPath]);
+
+    expect(stdout).toContain('Parser plugin manifest validation');
+    expect(stdout).toContain(`Manifest: ${manifestPath}`);
+    expect(stdout).toContain('Result: passed');
+    expect(stdout).toContain('Name: Fixture Parser');
+    expect(stdout).toContain('Version: 1.2.3');
+    expect(stdout).toContain('Formats: 1');
+    expect(stdout).toContain('fixture-docs: Fixture Docs (.fixture, .fixture-docs)');
+    expect(stdout).toContain('parser plugin execution is not implemented');
+    expect(await pathExists(sideEffectPath)).toBe(false);
+  }, 15000);
+
+  it('prints deterministic parser plugin manifest validation JSON', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const manifestPath = join(dir, 'parser-plugin.json');
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          kind: 'parser-plugin',
+          name: 'Fixture Parser',
+          version: '1.2.3',
+          module: './parser/index.js',
+          formats: [
+            {
+              id: 'fixture',
+              displayName: 'Fixture',
+              extensions: ['fixture'],
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const first = await runCli(['plugins', 'validate', '--manifest', manifestPath, '--json']);
+    const second = await runCli(['plugins', 'validate', '--manifest', manifestPath, '--json']);
+    const validation = JSON.parse(first.stdout) as ParserPluginManifestValidationResult;
+
+    expect(first.stdout).toBe(second.stdout);
+    expect(first.stdout.endsWith('\n')).toBe(true);
+    expect(first.stdout).not.toContain('generatedAt');
+    expect(validation).toEqual({
+      schemaVersion: '0.1.0',
+      manifestPath,
+      valid: true,
+      manifest: {
+        schemaVersion: '0.1.0',
+        kind: 'parser-plugin',
+        name: 'Fixture Parser',
+        version: '1.2.3',
+        module: './parser/index.js',
+        formats: [
+          {
+            id: 'fixture',
+            displayName: 'Fixture',
+            extensions: ['fixture'],
+          },
+        ],
+      },
+      errors: [],
+      warnings: [],
+    });
+  }, 15000);
+
+  it('reports parser plugin malformed root and field errors as JSON', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const rootArrayPath = join(dir, 'root-array.json');
+    const malformedFieldsPath = join(dir, 'malformed-fields.json');
+
+    await writeFile(rootArrayPath, '[]\n', 'utf-8');
+    await writeFile(
+      malformedFieldsPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.2.0',
+          kind: 'parser',
+          name: '',
+          version: ' ',
+          module: '',
+          formats: [
+            {
+              id: 'Fixture',
+              displayName: '',
+              extensions: ['.md', 'MD'],
+              mediaTypes: ['text/markdown', ''],
+              directorySupport: 'yes',
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const rootResult = await runCliWithExit([
+      'plugins',
+      'validate',
+      '--manifest',
+      rootArrayPath,
+      '--json',
+    ]);
+    const fieldResult = await runCliWithExit([
+      'plugins',
+      'validate',
+      '--manifest',
+      malformedFieldsPath,
+      '--json',
+    ]);
+    const rootValidation = JSON.parse(rootResult.stdout) as ParserPluginManifestValidationResult;
+    const fieldValidation = JSON.parse(fieldResult.stdout) as ParserPluginManifestValidationResult;
+
+    expect(rootResult.exitCode).toBe(1);
+    expect(rootValidation.valid).toBe(false);
+    expect(rootValidation.errors).toContainEqual({
+      code: 'root-object',
+      path: '$',
+      message: 'manifest root must be a JSON object.',
+    });
+    expect(fieldResult.exitCode).toBe(1);
+    expect(fieldValidation.valid).toBe(false);
+    expect(fieldValidation.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining([
+        'schemaVersion-invalid',
+        'kind-invalid',
+        'name-non-empty-string',
+        'version-non-empty-string',
+        'module-non-empty-string',
+        'format-id-invalid',
+        'displayName-non-empty-string',
+        'extension-invalid',
+        'media-type-non-empty-string',
+        'directory-support-boolean',
+      ])
+    );
+  }, 15000);
+
+  it('rejects URL-like absolute and traversal parser plugin module paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const cases = [
+      {
+        filename: 'url.json',
+        module: 'https://example.com/parser.js',
+        code: 'module-url-like',
+      },
+      {
+        filename: 'absolute.json',
+        module: '/tmp/parser.js',
+        code: 'module-absolute',
+      },
+      {
+        filename: 'traversal.json',
+        module: '../parser.js',
+        code: 'module-traversal',
+      },
+      {
+        filename: 'empty-segment.json',
+        module: 'src//parser.js',
+        code: 'module-empty-segment',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const manifestPath = join(dir, testCase.filename);
+      await writeFile(
+        manifestPath,
+        JSON.stringify(
+          {
+            schemaVersion: '0.1.0',
+            kind: 'parser-plugin',
+            name: 'Fixture Parser',
+            version: '1.0.0',
+            module: testCase.module,
+            formats: [
+              {
+                id: 'fixture',
+                displayName: 'Fixture',
+                extensions: ['fixture'],
+              },
+            ],
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const result = await runCliWithExit([
+        'plugins',
+        'validate',
+        '--manifest',
+        manifestPath,
+        '--json',
+      ]);
+      const validation = JSON.parse(result.stdout) as ParserPluginManifestValidationResult;
+
+      expect(result.exitCode).toBe(1);
+      expect(validation.valid).toBe(false);
+      expect(validation.errors.map((error) => error.code)).toContain(testCase.code);
+      expect(validation.errors.map((error) => error.path)).toContain('$.module');
+    }
+  }, 15000);
+
+  it('rejects Windows-style parser plugin module paths that are not relative safe paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const cases = [
+      {
+        filename: 'windows-absolute.json',
+        module: 'C:\\Users\\fixture\\parser.js',
+        codes: ['module-url-like', 'module-absolute'],
+      },
+      {
+        filename: 'windows-unc.json',
+        module: '\\\\server\\share\\parser.js',
+        codes: ['module-url-like', 'module-absolute'],
+      },
+      {
+        filename: 'windows-traversal.json',
+        module: 'src\\..\\parser.js',
+        codes: ['module-traversal'],
+      },
+      {
+        filename: 'windows-empty-segment.json',
+        module: 'src\\\\parser.js',
+        codes: ['module-empty-segment'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const manifestPath = join(dir, testCase.filename);
+      await writeFile(
+        manifestPath,
+        JSON.stringify(
+          {
+            schemaVersion: '0.1.0',
+            kind: 'parser-plugin',
+            name: 'Fixture Parser',
+            version: '1.0.0',
+            module: testCase.module,
+            formats: [
+              {
+                id: 'fixture',
+                displayName: 'Fixture',
+                extensions: ['fixture'],
+              },
+            ],
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const result = await runCliWithExit([
+        'plugins',
+        'validate',
+        '--manifest',
+        manifestPath,
+        '--json',
+      ]);
+      const validation = JSON.parse(result.stdout) as ParserPluginManifestValidationResult;
+      const errorCodes = validation.errors.map((error) => error.code);
+
+      expect(result.exitCode).toBe(1);
+      expect(validation.valid).toBe(false);
+      for (const expectedCode of testCase.codes) {
+        expect(errorCodes).toContain(expectedCode);
+      }
+      expect(validation.errors.map((error) => error.path)).toContain('$.module');
+    }
+  }, 15000);
+
+  it('rejects missing non-array and empty parser plugin formats', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const baseManifest = {
+      schemaVersion: '0.1.0',
+      kind: 'parser-plugin',
+      name: 'Fixture Parser',
+      version: '1.0.0',
+      module: 'parser.js',
+    };
+    const cases = [
+      {
+        filename: 'missing-formats.json',
+        manifest: baseManifest,
+      },
+      {
+        filename: 'non-array-formats.json',
+        manifest: { ...baseManifest, formats: { id: 'fixture' } },
+      },
+      {
+        filename: 'empty-formats.json',
+        manifest: { ...baseManifest, formats: [] },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const manifestPath = join(dir, testCase.filename);
+      await writeFile(manifestPath, JSON.stringify(testCase.manifest, null, 2), 'utf-8');
+
+      const result = await runCliWithExit([
+        'plugins',
+        'validate',
+        '--manifest',
+        manifestPath,
+        '--json',
+      ]);
+      const validation = JSON.parse(result.stdout) as ParserPluginManifestValidationResult;
+
+      expect(result.exitCode).toBe(1);
+      expect(validation.valid).toBe(false);
+      expect(validation.errors).toContainEqual({
+        code: 'formats-array',
+        path: '$.formats',
+        message: 'formats must be a non-empty array of format objects.',
+      });
+    }
+  }, 15000);
+
+  it('rejects duplicate parser plugin format ids and duplicate extensions', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const manifestPath = join(dir, 'duplicates.json');
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          kind: 'parser-plugin',
+          name: 'Fixture Parser',
+          version: '1.0.0',
+          module: 'parser.js',
+          formats: [
+            {
+              id: 'fixture',
+              displayName: 'Fixture',
+              extensions: ['fixture', 'fixture'],
+            },
+            {
+              id: 'fixture',
+              displayName: 'Fixture Duplicate',
+              extensions: ['fixture-2'],
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const result = await runCliWithExit([
+      'plugins',
+      'validate',
+      '--manifest',
+      manifestPath,
+      '--json',
+    ]);
+    const validation = JSON.parse(result.stdout) as ParserPluginManifestValidationResult;
+
+    expect(result.exitCode).toBe(1);
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toEqual(
+      expect.arrayContaining([
+        {
+          code: 'duplicate-extension',
+          path: '$.formats[0].extensions[1]',
+          message:
+            "duplicate extension 'fixture' in format 'fixture'; first declared at $.formats[0].extensions[0] in format 'fixture'.",
+        },
+        {
+          code: 'duplicate-format-id',
+          path: '$.formats[1].id',
+          message: "duplicate format id 'fixture'.",
+        },
+      ])
+    );
+  }, 15000);
+
+  it('rejects duplicate parser plugin extensions across separate formats', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const manifestPath = join(dir, 'duplicate-extension-across-formats.json');
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          kind: 'parser-plugin',
+          name: 'Fixture Parser',
+          version: '1.0.0',
+          module: 'parser.js',
+          formats: [
+            {
+              id: 'first',
+              displayName: 'First',
+              extensions: ['dup'],
+            },
+            {
+              id: 'second',
+              displayName: 'Second',
+              extensions: ['dup'],
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const result = await runCliWithExit([
+      'plugins',
+      'validate',
+      '--manifest',
+      manifestPath,
+      '--json',
+    ]);
+    const validation = JSON.parse(result.stdout) as ParserPluginManifestValidationResult;
+
+    expect(result.exitCode).toBe(1);
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toEqual([
+      {
+        code: 'duplicate-extension',
+        path: '$.formats[1].extensions[0]',
+        message:
+          "duplicate extension 'dup' in format 'second'; first declared at $.formats[0].extensions[0] in format 'first'.",
+      },
+    ]);
+  }, 15000);
+
+  it('rejects unsupported parser plugin manifest keys', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const manifestPath = join(dir, 'unsupported-keys.json');
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          kind: 'parser-plugin',
+          name: 'Fixture Parser',
+          version: '1.0.0',
+          module: 'parser.js',
+          trustScore: 100,
+          formats: [
+            {
+              id: 'fixture',
+              displayName: 'Fixture',
+              extensions: ['fixture'],
+              loader: 'default',
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const result = await runCliWithExit([
+      'plugins',
+      'validate',
+      '--manifest',
+      manifestPath,
+      '--json',
+    ]);
+    const validation = JSON.parse(result.stdout) as ParserPluginManifestValidationResult;
+
+    expect(result.exitCode).toBe(1);
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toEqual(
+      expect.arrayContaining([
+        {
+          code: 'unsupported-root-key',
+          path: '$.trustScore',
+          message: "unsupported root key 'trustScore'.",
+        },
+        {
+          code: 'unsupported-format-key',
+          path: '$.formats[0].loader',
+          message: "unsupported format key 'loader'.",
+        },
+      ])
+    );
+  }, 15000);
+
+  it('reports missing and malformed parser plugin manifest files with non-zero exits', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
+    tempDirs.push(dir);
+    const missingPath = join(dir, 'missing.json');
+    const malformedPath = join(dir, 'malformed.json');
+
+    await writeFile(malformedPath, '{ not json\n', 'utf-8');
+
+    const missingResult = await runCliWithExit([
+      'plugins',
+      'validate',
+      '--manifest',
+      missingPath,
+      '--json',
+    ]);
+    const malformedResult = await runCliWithExit([
+      'plugins',
+      'validate',
+      '--manifest',
+      malformedPath,
+    ]);
+    const missingValidation = JSON.parse(
+      missingResult.stdout
+    ) as ParserPluginManifestValidationResult;
+
+    expect(missingResult.exitCode).toBe(1);
+    expect(missingValidation).toMatchObject({
+      schemaVersion: '0.1.0',
+      manifestPath: missingPath,
+      valid: false,
+      errors: [
+        {
+          code: 'manifest-unreadable',
+          path: '$',
+          message: `manifest file could not be read (ENOENT): ${missingPath}`,
+        },
+      ],
+      warnings: [],
+    });
+    expect(malformedResult.exitCode).toBe(1);
+    expect(malformedResult.stdout).toContain('Parser plugin manifest validation');
+    expect(malformedResult.stdout).toContain('Result: failed');
+    expect(malformedResult.stderr).toContain('manifest file must contain valid JSON');
+  }, 15000);
 
   it('treats validate --version as the SDK version option', async () => {
     const configDir = await createTestConfig();
@@ -7640,26 +8281,23 @@ describe('CLI compatibility behavior', () => {
         delete output.estimatedTokenCount;
       },
     },
-  ])(
-    'accepts configured SDK generated outputs with $label present',
-    async ({ mutate }) => {
-      const { manifestPath } = await generateSwiftFixture();
-      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+  ])('accepts configured SDK generated outputs with $label present', async ({ mutate }) => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
 
-      for (const output of manifest.generatedOutputs) {
-        mutate(output);
-      }
-
-      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
-
-      const result = await runCli(['verify', '--manifest', manifestPath]);
-
-      expect(result.stdout).toContain('Manifest verification');
-      expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
-      expect(result.stdout).toContain('Failures: 0');
-      expect(result.stdout).toContain('Verification passed');
+    for (const output of manifest.generatedOutputs) {
+      mutate(output);
     }
-  );
+
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
+  });
 
   it('rejects mixed valid and invalid optional generated output metadata before file checks', async () => {
     const { manifestPath } = await generateSwiftFixture();
@@ -8060,9 +8698,7 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain('Checked files: 0');
     expect(result.stderr).toContain('output[0].lineCount must be a non-negative integer');
-    expect(result.stderr).toContain(
-      'output[0].estimatedTokenCount must be a non-negative integer'
-    );
+    expect(result.stderr).toContain('output[0].estimatedTokenCount must be a non-negative integer');
     expect(result.stderr).not.toContain('hash mismatch');
   });
 

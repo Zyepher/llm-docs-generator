@@ -50,8 +50,9 @@ explicit local file or directory selected by the agent.
 Common input patterns:
 
 - Repo URL: the agent chooses repo-docs versus source-truth intent, version/ref,
-  and repo-relative scope, then calls `llm-docs discover --repo <url> --scope
-  <scope>` before generating from a selected explicit local path.
+  and repo-relative scope, then calls
+  `llm-docs discover --repo <url> --scope <scope>` before generating from a
+  selected explicit local path.
 - Docs URL: the agent calls `llm-docs discover --url <url>` for bounded
   evidence. Current generation still needs an explicit local source path; the
   CLI does not generate directly from a remote URL or discovery report.
@@ -97,11 +98,14 @@ Current implemented capabilities include:
 - read-only bundled agent context metadata
 - read-only `agent doctor` diagnostics for packaged artifact hashes, expected
   binary metadata, PATH visibility, and skipped/not-configured host checks
+- read-only parser plugin manifest validation for explicit local JSON manifests
+  without loading, importing, or executing plugin modules
 
 Planned capabilities such as configured SDK refresh, discovery report refresh,
 remote freshness checks, diff, host install helpers, broad crawling, documented
 automation-flag candidate handling, broad official-docs behavior/API claim
-verification, and additional presets are not implemented in the current CLI.
+verification, additional presets, parser plugin execution, and custom parser
+generation are not implemented in the current CLI.
 
 ## Command Model
 
@@ -129,6 +133,9 @@ llm-docs source-truth verify-docs --source ./src --docs ./docs --output-dir ./re
 llm-docs refresh --output-dir ./agent-docs
 llm-docs refresh --manifest ./reports/source-truth/manifest.json
 
+llm-docs plugins validate --manifest ./parser-plugin.json
+llm-docs plugins validate --manifest ./parser-plugin.json --json
+
 llm-docs agent context
 llm-docs agent doctor
 llm-docs agent doctor --json
@@ -142,6 +149,36 @@ llm-docs generate --sdk swift --sdk-version v2 --output-dir ./output
 llm-docs verify --output-dir ./output/swift/v2
 llm-docs validate --sdk swift --version v2
 ```
+
+## Parser Plugin Manifests
+
+`llm-docs plugins validate --manifest <path>` validates an explicit local JSON
+manifest file only. The command is read-only: it does not load, import, execute,
+or trust the declared plugin module, and it does not enable custom parser
+generation.
+
+Manifest schema `0.1.0`:
+
+- root object with only `schemaVersion`, `kind`, `name`, `version`, `module`,
+  and `formats`
+- `schemaVersion` exactly `0.1.0`
+- `kind` exactly `parser-plugin`
+- `name` and `version` as non-empty strings
+- `module` as a non-empty relative local path string; URL-like paths, absolute
+  paths, empty path segments, and `..` traversal segments are rejected
+- `formats` as a non-empty array of format objects with only `id`,
+  `displayName`, `extensions`, optional `mediaTypes`, and optional
+  `directorySupport`
+- each format `id` as a lowercase identifier matching `^[a-z][a-z0-9-]*$`
+- each format `displayName` as a non-empty string
+- each format `extensions` as a non-empty array of lowercase extension strings
+  without a leading dot, matching `^[a-z0-9][a-z0-9-]*$`
+- optional `mediaTypes` as an array of non-empty strings
+- optional `directorySupport` as a boolean
+
+Duplicate format ids, duplicate extensions anywhere in the manifest, and
+unsupported root or format keys are rejected. Parser plugin execution and
+custom parser generation remain planned/unsupported.
 
 ## Agent Boundary
 
@@ -168,6 +205,7 @@ The CLI is responsible for:
   source-truth failure reports, and narrow local source/docs evidence reports
 - verifying configured-SDK, source-docs, source-truth docs, and
   discovery-report/source-verification files against recorded metadata
+- validating explicit local parser plugin manifests without loading plugin code
 - refreshing only existing `local-source-docs` and `source-truth-local-docs`
   manifests that already record explicit local source paths, then verifying the
   regenerated manifest outputs

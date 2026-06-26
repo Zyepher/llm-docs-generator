@@ -39,6 +39,7 @@ import {
   writeDiscoveryReportManifest,
   writeGenerationManifest,
 } from './core/manifest.js';
+import { validateParserPluginManifestFile } from './core/parser-plugin-manifest.js';
 import { fetchSpec } from './utils/fetcher.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
@@ -523,6 +524,26 @@ const CAPABILITIES_CONTRACT = {
       ],
     },
     {
+      id: 'parser-plugin-manifest-validate',
+      command: 'plugins validate',
+      mode: 'plugins validate --manifest',
+      status: 'implemented',
+      inputBoundary: 'explicit local JSON parser plugin manifest file',
+      options: ['--manifest <path>', '--json'],
+      outputFiles: ['stdout validation result', 'stdout JSON validation result'],
+      summary:
+        'deterministic read-only validation of parser plugin manifest metadata without loading plugin modules',
+      limitations: [
+        'manifest validation only',
+        'does not load, import, or execute plugin modules',
+        'does not enable custom parser execution',
+        'does not generate custom parsers',
+        'does not select plugin manifests or sources',
+        'no network',
+        'no file writes',
+      ],
+    },
+    {
       id: 'generate-source',
       command: 'generate',
       mode: 'generate --source',
@@ -821,6 +842,13 @@ const CAPABILITIES_CONTRACT = {
       status: 'planned-unsupported',
       reason:
         'source-truth generation is limited to observed export, signature, package/config, and path context facts',
+    },
+    {
+      id: 'parser-plugin-execution',
+      command: 'parser plugin execution and custom parser generation',
+      status: 'planned-unsupported',
+      reason:
+        'plugins validate validates explicit local parser plugin manifests only; loading, importing, executing parser plugins and generating docs with custom parsers remain planned/unsupported',
     },
     {
       id: 'agent-install-codex',
@@ -1263,9 +1291,7 @@ function canonicalizeConfiguredSdkManifestFormat(format: string): string {
   const normalizedFormat = format.trim().toLowerCase();
 
   if (
-    CONFIGURED_SDK_GENERATE_FORMATS.some(
-      (supportedFormat) => supportedFormat === normalizedFormat
-    )
+    CONFIGURED_SDK_GENERATE_FORMATS.some((supportedFormat) => supportedFormat === normalizedFormat)
   ) {
     return CONFIGURED_SDK_CANONICAL_MANIFEST_FORMAT;
   }
@@ -1518,6 +1544,63 @@ agentCommand
       console.error(chalk.red(`Agent doctor failed: ${errorMsg}`));
       process.exit(1);
     }
+  });
+
+// ============================================================================
+// PLUGINS COMMAND
+// ============================================================================
+
+const pluginsCommand = program
+  .command('plugins')
+  .description('Validate explicit local parser plugin manifests');
+
+pluginsCommand
+  .command('validate')
+  .description('Validate an explicit local parser plugin manifest without loading plugin code')
+  .requiredOption('--manifest <path>', 'Path to a local parser plugin manifest JSON file')
+  .option('--json', 'Print deterministic machine-readable validation result')
+  .action(async (options: { manifest: string; json?: boolean }) => {
+    const result = await validateParserPluginManifestFile({ manifestPath: options.manifest });
+
+    if (options.json === true) {
+      console.log(JSON.stringify(result, null, 2));
+
+      if (!result.valid) {
+        process.exit(1);
+      }
+
+      return;
+    }
+
+    console.log(chalk.bold('Parser plugin manifest validation'));
+    console.log(`  Manifest: ${result.manifestPath}`);
+    console.log(`  Result: ${result.valid ? 'passed' : 'failed'}`);
+
+    if (result.valid && result.manifest !== undefined) {
+      console.log(`  Name: ${result.manifest.name}`);
+      console.log(`  Version: ${result.manifest.version}`);
+      console.log(`  Module: ${result.manifest.module}`);
+      console.log(`  Formats: ${result.manifest.formats.length}`);
+
+      for (const format of result.manifest.formats) {
+        console.log(
+          `  - ${format.id}: ${format.displayName} (${format.extensions
+            .map((extension) => `.${extension}`)
+            .join(', ')})`
+        );
+      }
+
+      console.log('  Scope: validation only; parser plugin execution is not implemented.');
+      return;
+    }
+
+    console.error(chalk.red(`  Errors: ${result.errors.length}`));
+
+    for (const error of result.errors) {
+      console.error(chalk.red(`  - ${error.path}: ${error.message}`));
+    }
+
+    process.exit(1);
   });
 
 // ============================================================================
