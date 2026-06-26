@@ -617,10 +617,11 @@ const CAPABILITIES_CONTRACT = {
       status: 'implemented',
       inputBoundary: 'configured-sdk manifest.json',
       outputFiles: ['stdout verification result'],
-      summary: 'hash and byte-size verification for configured SDK manifests',
+      summary:
+        'file hash, byte-size, and manifest-recorded line/token verification when present for configured SDK manifests',
       limitations: [
         'configured-sdk manifest mode only',
-        'does not recompute optional generated output line or token metadata',
+        'only verifies existing source and generated output files recorded in the manifest',
         'verify does not refresh configured SDK outputs',
         'no repo freshness check',
         'no source-code verification',

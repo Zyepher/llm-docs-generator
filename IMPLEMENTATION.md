@@ -239,7 +239,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] OpenAPI 3.x / Swagger 2.0 parser foundation for explicit local JSON/YAML
       files
 - [x] Scoped manifest generation for configured OpenRef CLI output
-- [x] Scoped manifest hash/size verification for current configured SDK output
+- [x] Scoped manifest hash/size and valid line/token metadata verification for
+      current configured SDK output
 - [x] Explicit local `discover --source` bounded inspection report
 - [x] Explicit repo `discover --repo` cache and bounded inspection report
 - [x] Explicit website `discover --url` bounded inspection report

@@ -269,9 +269,10 @@ with generated output or report hashes, byte sizes, line counts, and
 deterministic estimated token counts. Current `verify` supports configured-SDK,
 source-mode, source-truth docs, discovery-report, and source-verification
 manifests.
-Configured SDK verification checks source and output file hashes and byte sizes,
-and validates optional line/token metadata shape when present without
-recomputing those counts. Source-mode verification checks local source path
+Configured SDK verification checks source and output file hashes, byte sizes,
+and valid generated output line/token metadata when present, and rejects
+malformed optional line/token metadata before file checks. Source-mode
+verification checks local source path
 shape and existence, recorded source file hashes and byte sizes, generated
 output paths, hashes, byte sizes, line counts, and deterministic estimated token
 counts. When optional source-docs semantic chunk index metadata is present, it
@@ -394,9 +395,10 @@ agent intent/source/scope resolution
 - Successful configured SDK generation currently writes a scoped manifest with
   source and output hashes, byte sizes, line counts, and deterministic
   estimated token counts for generated outputs. Current `verify` checks
-  configured SDK manifest file hashes and byte sizes, and validates optional
-  line/token metadata shape when present without recomputing the counts. It
-  also verifies `local-source-docs` manifests by checking local source path
+  configured SDK manifest file hashes, byte sizes, and valid generated output
+  line/token metadata when present, while rejecting malformed optional
+  line/token metadata before file checks. It also verifies
+  `local-source-docs` manifests by checking local source path
   shape and existence, source file hashes and byte sizes, generated output
   paths, hashes, byte sizes, line counts, deterministic estimated token counts,
   and optional semantic chunk indexes when present. It verifies
