@@ -142,6 +142,7 @@ export type {
   SourceTruthContextLineRangeGranularity,
   SourceTruthFact,
   SourceTruthFactKind,
+  SourceTruthFileContextFact,
   SourceTruthFileEvidence,
   SourceTruthFileStatus,
   SourceTruthInspectionReport,
@@ -155,6 +156,9 @@ export type {
   SourceTruthSkipReason,
   SourceTruthSourceType,
   SourceTruthSymbolKind,
+  SourceTruthTestCaseCall,
+  SourceTruthTestCaseContextFact,
+  SourceTruthTestCaseModifier,
   SourceTruthTraversalSettings,
   SourceTruthVariableDeclarationKind,
 } from './core/source-truth.js';

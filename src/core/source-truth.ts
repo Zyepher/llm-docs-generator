@@ -96,8 +96,10 @@ export type SourceTruthSignatureDeclarationKind =
 export type SourceTruthVariableDeclarationKind = 'const' | 'let' | 'var';
 export type SourceTruthConfigFileKind = 'package-json' | 'tsconfig-json';
 export type SourceTruthConfigLineRangeGranularity = 'field' | 'file';
-export type SourceTruthContextFactKind = 'test-file' | 'example-file';
-export type SourceTruthContextLineRangeGranularity = 'file';
+export type SourceTruthContextFactKind = 'test-file' | 'example-file' | 'test-case';
+export type SourceTruthContextLineRangeGranularity = 'file' | 'test-label';
+export type SourceTruthTestCaseCall = 'describe' | 'it' | 'test';
+export type SourceTruthTestCaseModifier = 'only' | 'skip';
 export type SourceTruthConfigFactKind =
   | 'package-name'
   | 'package-version'
@@ -176,16 +178,31 @@ export interface SourceTruthConfigFact {
   order: number;
 }
 
-export interface SourceTruthContextFact {
+export interface SourceTruthBaseContextFact {
   kind: SourceTruthContextFactKind;
   path: string;
-  evidenceSignals: string[];
-  byteSize: number;
-  sha256: string;
   provenance: SourceTruthProvenance;
   lineRangeGranularity: SourceTruthContextLineRangeGranularity;
   order: number;
 }
+
+export interface SourceTruthFileContextFact extends SourceTruthBaseContextFact {
+  kind: 'test-file' | 'example-file';
+  evidenceSignals: string[];
+  byteSize: number;
+  sha256: string;
+  lineRangeGranularity: 'file';
+}
+
+export interface SourceTruthTestCaseContextFact extends SourceTruthBaseContextFact {
+  kind: 'test-case';
+  name: string;
+  call: SourceTruthTestCaseCall;
+  modifiers: SourceTruthTestCaseModifier[];
+  lineRangeGranularity: 'test-label';
+}
+
+export type SourceTruthContextFact = SourceTruthFileContextFact | SourceTruthTestCaseContextFact;
 
 export interface SourceTruthParseDiagnostic {
   code: number;
@@ -598,7 +615,7 @@ async function inspectFile(options: {
       ? extractTypeScriptJavaScriptFacts(pathForReport, content)
       : { facts: [], parseDiagnostics: [] };
     const configExtraction = extractPackageConfigFacts(pathForReport, content);
-    const contextFacts = extractPathContextFacts({
+    const contextFacts = extractSourceContextFacts({
       path: pathForReport,
       byteSize: stats.size,
       sha256,
@@ -923,12 +940,28 @@ function extractPackageConfigFacts(
   return { facts: [], warnings: [] };
 }
 
-function extractPathContextFacts(options: {
+function extractSourceContextFacts(options: {
   path: string;
   byteSize: number;
   sha256: string;
   content: string;
 }): SourceTruthContextFact[] {
+  const pathContextFacts = extractPathContextFacts(options);
+  const isTestFile = pathContextFacts.some((fact) => fact.kind === 'test-file');
+
+  if (!isTestFile || !isSupportedSourceFile(options.path)) {
+    return pathContextFacts;
+  }
+
+  return [...pathContextFacts, ...extractTestCaseContextFacts(options.path, options.content)];
+}
+
+function extractPathContextFacts(options: {
+  path: string;
+  byteSize: number;
+  sha256: string;
+  content: string;
+}): SourceTruthFileContextFact[] {
   const testSignals = contextTestEvidenceSignals(options.path);
   const exampleSignals = contextExampleEvidenceSignals(options.path);
   const kind: SourceTruthContextFactKind | undefined =
@@ -956,6 +989,133 @@ function extractPathContextFacts(options: {
       order: 0,
     },
   ];
+}
+
+function extractTestCaseContextFacts(
+  path: string,
+  content: string
+): SourceTruthTestCaseContextFact[] {
+  const sourceFile = ts.createSourceFile(
+    path,
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindForPath(path)
+  );
+  const facts: SourceTruthTestCaseContextFact[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const invocation = testCaseInvocationForExpression(node.expression);
+      const name = stringLiteralLikeText(node.arguments[0]);
+
+      if (invocation !== undefined && name !== undefined) {
+        facts.push(
+          buildTestCaseContextFact({
+            path,
+            sourceFile,
+            labelNode: node.arguments[0] as ts.Expression,
+            name,
+            call: invocation.call,
+            modifiers: invocation.modifiers,
+          })
+        );
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(sourceFile, visit);
+
+  return facts;
+}
+
+function testCaseInvocationForExpression(expression: ts.Expression):
+  | {
+      call: SourceTruthTestCaseCall;
+      modifiers: SourceTruthTestCaseModifier[];
+    }
+  | undefined {
+  if (ts.isIdentifier(expression) && isSourceTruthTestCaseCall(expression.text)) {
+    return {
+      call: expression.text,
+      modifiers: [],
+    };
+  }
+
+  if (!ts.isPropertyAccessExpression(expression)) {
+    return undefined;
+  }
+
+  const modifier = expression.name.text;
+
+  if (!isSourceTruthTestCaseModifier(modifier)) {
+    return undefined;
+  }
+
+  if (
+    !ts.isIdentifier(expression.expression) ||
+    !isSourceTruthTestCaseCall(expression.expression.text)
+  ) {
+    return undefined;
+  }
+
+  return {
+    call: expression.expression.text,
+    modifiers: [modifier],
+  };
+}
+
+function isSourceTruthTestCaseCall(value: string): value is SourceTruthTestCaseCall {
+  return value === 'describe' || value === 'it' || value === 'test';
+}
+
+function isSourceTruthTestCaseModifier(value: string): value is SourceTruthTestCaseModifier {
+  return value === 'only' || value === 'skip';
+}
+
+function stringLiteralLikeText(node: ts.Node | undefined): string | undefined {
+  if (node === undefined) {
+    return undefined;
+  }
+
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
+  }
+
+  return undefined;
+}
+
+function buildTestCaseContextFact(options: {
+  path: string;
+  sourceFile: ts.SourceFile;
+  labelNode: ts.Expression;
+  name: string;
+  call: SourceTruthTestCaseCall;
+  modifiers: SourceTruthTestCaseModifier[];
+}): SourceTruthTestCaseContextFact {
+  const start = options.sourceFile.getLineAndCharacterOfPosition(
+    options.labelNode.getStart(options.sourceFile)
+  );
+  const end = options.sourceFile.getLineAndCharacterOfPosition(options.labelNode.getEnd());
+
+  return {
+    kind: 'test-case',
+    path: options.path,
+    name: options.name,
+    call: options.call,
+    modifiers: [...options.modifiers],
+    provenance: {
+      path: options.path,
+      lineRange: {
+        start: start.line + 1,
+        end: end.line + 1,
+      },
+    },
+    lineRangeGranularity: 'test-label',
+    order: 0,
+  };
 }
 
 function contextTestEvidenceSignals(path: string): string[] {
@@ -2310,7 +2470,9 @@ function bindingNameHasDefault(name: ts.BindingName): boolean {
   return bindingPatternHasDefault(name);
 }
 
-function bindingPatternHasDefault(pattern: ts.ObjectBindingPattern | ts.ArrayBindingPattern): boolean {
+function bindingPatternHasDefault(
+  pattern: ts.ObjectBindingPattern | ts.ArrayBindingPattern
+): boolean {
   if (ts.isObjectBindingPattern(pattern)) {
     return pattern.elements.some((element) => bindingElementHasDefault(element));
   }

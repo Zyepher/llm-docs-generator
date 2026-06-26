@@ -124,12 +124,16 @@ Current implementation:
   `tsconfig*.json` package/config facts with source file and line ranges. It
   also records path-based test/example context facts for inspected supported
   files whose normalized path or filename matches conservative test, spec,
-  example, demo, sample, or docs/examples signals. Directly exported top-level
+  example, demo, sample, or docs/examples signals. For files identified as
+  test files by that path/filename logic, it also records AST-observed
+  `describe`, `it`, and `test` label facts for direct calls and `.only` /
+  `.skip` forms when the first argument is a string literal or
+  no-substitution template literal. Directly exported top-level
   declarations may include compact AST signature evidence with bodies and
   initializer values omitted. Re-exports, export-all declarations, and export
-  assignments remain unresolved. It does not parse assertions, execute tests,
-  prove claims, infer behavior, infer framework identity, decide source
-  selection, or choose task fit.
+  assignments remain unresolved. It does not parse assertions, serialize test
+  bodies, execute tests, prove claims, infer behavior, infer framework
+  identity, decide source selection, or choose task fit.
 - Can run `source-truth generate --source <local-file-or-directory>
 --output-dir <dir>` to write an evidence-bound Markdown file, the raw
   evidence report, and a manifest with generated output hashes, byte sizes, line
@@ -403,8 +407,11 @@ code. `source-truth inspect` extracts conservative TypeScript/JavaScript export
 facts, optional direct-declaration AST signature evidence, and `package.json` /
 `tsconfig*.json` package/config facts from an explicit local source path. It
 also extracts file-level test/example context facts from explicit path and
-filename signals only. `source-truth generate` formats only those observed facts
-into Markdown and provenance files. `source-truth verify-docs` only compares
+filename signals plus AST-observed test-case label facts from files already
+identified as tests. Test-case names are labels only, not proof of behavior or
+correctness, and test bodies, assertion text, expected values, closures, and
+runtime-derived names are omitted. `source-truth generate` formats only those
+observed facts into Markdown and provenance files. `source-truth verify-docs` only compares
 Markdown/MDX inline-code identifier references from an explicit local docs path
 against observed exported names from the same conservative inspector. These
 modes do not parse assertions, execute tests, prove claims, summarize runtime
@@ -763,8 +770,9 @@ Do not ask when:
   agent has explicitly selected that candidate or a documented automation flag
   requires it.
 - Do not claim source-truth codebase docs go beyond observed export/signature,
-  package/config, and path/filename test/example context evidence unless the
-  implementation actually inspects and proves that broader evidence. These
+  package/config, path/filename test/example context evidence, and observed
+  test-case labels unless the implementation actually inspects and proves that
+  broader evidence. These
   facts must not be treated as behavior, correctness, authority, task fit, or
   source-selection proof.
 - Do not mark official docs as source-verified unless implementation files were

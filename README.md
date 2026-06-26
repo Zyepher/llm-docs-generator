@@ -260,11 +260,15 @@ When a user asks to document implementation behavior, the agent can choose the
 source-truth evidence workflow. In that mode, `llm-docs` extracts conservative
 observed facts from selected local TypeScript/JavaScript source files,
 `package.json`, and `tsconfig*.json`, then writes evidence docs with file-level
-provenance.
+provenance. For files already identified as tests by conservative path or
+filename signals, it can also report AST-observed `describe`, `it`, and `test`
+labels as local evidence.
 
 This mode is explicit. It is not used just because a repository has source code.
 It does not infer runtime behavior, routes, framework identity, or source-code
-verification confidence.
+verification confidence. Test-case labels are observed labels only, not proof
+of behavior or correctness, and test bodies, assertions, expected values,
+closures, and runtime-derived names are omitted.
 
 ## Local Source/Docs Evidence
 

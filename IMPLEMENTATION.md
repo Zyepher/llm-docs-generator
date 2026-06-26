@@ -248,7 +248,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Explicit `source-truth inspect --source` deterministic evidence report
       for conservative TypeScript/JavaScript export facts and `package.json` /
       `tsconfig*.json` package/config facts, plus path-based test/example
-      context facts for inspected supported files
+      context facts and observed test-case labels for inspected supported files
 - [x] Explicit `source-truth generate --source --output-dir` Markdown evidence
       facts with raw evidence report and provenance manifest
 - [x] Explicit `source-truth verify-docs --source --docs --output-dir`
@@ -412,8 +412,12 @@ Current source-truth evidence scope:
   TypeScript/JavaScript export facts, optional direct-declaration AST signature
   evidence, and package/config facts from `package.json` and `tsconfig*.json`
   only. It also reports file-level test/example context facts using explicit
-  normalized path and filename signals only; it does not parse assertions,
-  execute tests, or infer behavior.
+  normalized path and filename signals only. For files identified as tests by
+  that existing context logic, it reports AST-observed `describe`, `it`, and
+  `test` label facts for direct calls and `.only` / `.skip` forms when the
+  first argument is a string literal or no-substitution template literal. It
+  does not parse assertions, serialize test bodies, execute tests, prove test
+  behavior, or infer behavior.
 - `llm-docs source-truth generate --source <path> --output-dir <dir>` accepts
   the same explicit local source boundary, reuses the inspector, and writes
   `source-truth-report.json`, `source-truth.md`, and `manifest.json` on success.
@@ -434,9 +438,12 @@ Current source-truth evidence scope:
   files are reported as skipped with warnings.
 - Generated source-truth Markdown groups observed facts by normalized source
   file and lists export facts, optional signature evidence, and package/config
-  facts with line ranges and warnings/limitations. It does not prove existing
-  documentation claims, infer runtime behavior, decide task fit, select sources,
-  or summarize behavior beyond observed export and package/config facts.
+  facts with line ranges and warnings/limitations. It also lists observed
+  test/example context facts, including test-case labels when present, as local
+  evidence only; labels are not proof of behavior or correctness and test bodies
+  are omitted. It does not prove existing documentation claims, infer runtime
+  behavior, decide task fit, select sources, or summarize behavior beyond
+  observed export, package/config, and context facts.
 
 Current source/docs evidence scope:
 

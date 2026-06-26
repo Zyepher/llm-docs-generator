@@ -158,7 +158,9 @@ describe('source-truth docs generation', () => {
     expect(markdown).toContain('- No runtime behavior is inferred.');
     expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(markdown).not.toMatch(/\bofficial\b/i);
-    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(markdown).not.toMatch(/\bverified\b/i);
 
     expect(manifest).toMatchObject({
@@ -244,9 +246,7 @@ describe('source-truth docs generation', () => {
 
     expect(markdown).toContain('  - Signature evidence:');
     expect(markdown).toContain('    - Declaration kind: `function`');
-    expect(markdown).toContain(
-      "    - Text: `export function makeValue(input: string): number`"
-    );
+    expect(markdown).toContain('    - Text: `export function makeValue(input: string): number`');
     expect(markdown).toContain(
       '    - Parameters: `input: string` (optional: `true`, rest: `false`, default: `true`)'
     );
@@ -270,7 +270,9 @@ describe('source-truth docs generation', () => {
     expect(exportAllBlock).not.toContain('Signature evidence');
     expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(markdown).not.toMatch(/\bofficial\b/i);
-    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(markdown).not.toMatch(/\bverified\b/i);
   });
 
@@ -293,7 +295,9 @@ describe('source-truth docs generation', () => {
     expect(markdown).not.toContain('\\`/api/${string}\\`');
     expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(markdown).not.toMatch(/\bofficial\b/i);
-    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(markdown).not.toMatch(/\bverified\b/i);
   });
 
@@ -337,7 +341,9 @@ describe('source-truth docs generation', () => {
     expect(markdown).not.toContain('\\`name');
     expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(markdown).not.toMatch(/\bofficial\b/i);
-    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(markdown).not.toMatch(/\bverified\b/i);
   });
 
@@ -394,7 +400,9 @@ describe('source-truth docs generation', () => {
     );
     expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(markdown).not.toMatch(/\bofficial\b/i);
-    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(markdown).not.toMatch(/\bverified\b/i);
 
     expect(
@@ -471,7 +479,9 @@ describe('source-truth docs generation', () => {
     );
     expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
     expect(markdown).not.toMatch(/\bofficial\b/i);
-    expect(markdown).not.toMatch(/\bcorrect(?:ness)?\b/i);
+    expect(markdown).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
     expect(markdown).not.toMatch(/\bverified\b/i);
     expect(markdown).not.toMatch(/\bbehavior summary\b/i);
 
@@ -493,6 +503,125 @@ describe('source-truth docs generation', () => {
       'source-truth-report.json',
       'source-truth.md',
     ]);
+  });
+
+  it('renders test-case label evidence without test body text and counts context facts', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-test-cases-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+
+    const testSource = [
+      "describe('outer suite', () => {",
+      "  it.only('focused test', () => {",
+      "    expect(secretValue).toEqual('hidden expected value');",
+      '  });',
+      '  test.skip(`skipped template`, () => {});',
+      '  it(buildName(), () => {});',
+      '});',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'tests/cases.test.ts'), testSource, 'utf-8');
+
+    const result = await generateSourceTruthDocs({ source: sourceDir, outputDir });
+    const markdown = await readFile(join(outputDir, 'source-truth.md'), 'utf-8');
+    const manifest = await readJson<SourceTruthDocsManifest>(join(outputDir, 'manifest.json'));
+
+    expect(result.report.facts).toEqual([]);
+    expect(result.report.configFacts).toEqual([]);
+    expect(result.report.contextFacts.map((fact) => fact.kind)).toEqual([
+      'test-file',
+      'test-case',
+      'test-case',
+      'test-case',
+    ]);
+    expect(markdown).toContain('## Test And Example Context Facts');
+    expect(markdown).toContain('### `tests/cases.test.ts`');
+    expect(markdown).toContain('- `test-file`');
+    expect(markdown).toContain('- `test-case`');
+    expect(markdown).toContain('  - Name: `outer suite`');
+    expect(markdown).toContain('  - Call: `describe`');
+    expect(markdown).toContain('  - Modifiers: `none`');
+    expect(markdown).toContain('  - Name: `focused test`');
+    expect(markdown).toContain('  - Call: `it`');
+    expect(markdown).toContain('  - Modifiers: `only`');
+    expect(markdown).toContain('  - Name: `skipped template`');
+    expect(markdown).toContain('  - Call: `test`');
+    expect(markdown).toContain('  - Modifiers: `skip`');
+    expect(markdown).toContain('  - Line range granularity: `test-label`');
+    expect(markdown).toContain(
+      '- Test-case facts are observed `describe`, `it`, and `test` labels only; they omit test bodies, assertion text, expected values, closures, and runtime-derived names, and they are not proof of behavior or correctness.'
+    );
+    expect(markdown).not.toContain('secretValue');
+    expect(markdown).not.toContain('hidden expected value');
+    expect(markdown).not.toContain('buildName');
+    expect(markdown).not.toContain('expect(');
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
+    expect(markdown).not.toMatch(/\bverified\b/i);
+
+    expect(manifest.sourceFiles).toEqual([
+      {
+        path: 'tests/cases.test.ts',
+        resolvedPath: join(sourceDir, 'tests/cases.test.ts'),
+        byteSize: Buffer.byteLength(testSource),
+        hash: `sha256:${sha256(testSource)}`,
+        factCount: 4,
+        exportFactCount: 0,
+        signatureFactCount: 0,
+        configFactCount: 0,
+        contextFactCount: 4,
+        parseDiagnosticCount: 0,
+      },
+    ]);
+  });
+
+  it('renders test-case labels with backticks and newlines without leaking bodies', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-test-label-escaping-');
+    const sourceDir = join(dir, 'source');
+    await mkdir(join(sourceDir, 'tests'), { recursive: true });
+
+    const testSource = [
+      "describe('label escaping', () => {",
+      '  it("line one\\nline `two`", () => {',
+      '    expect(secretAssertion()).toEqual("hidden expected value");',
+      '  });',
+      '});',
+      '',
+    ].join('\n');
+    await writeFile(join(sourceDir, 'tests/labels.test.ts'), testSource, 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const markdown = formatSourceTruthMarkdown(report);
+
+    expect(report.contextFacts.filter((fact) => fact.kind === 'test-case')).toMatchObject([
+      {
+        name: 'label escaping',
+        call: 'describe',
+        modifiers: [],
+      },
+      {
+        name: 'line one\nline `two`',
+        call: 'it',
+        modifiers: [],
+      },
+    ]);
+    expect(markdown).toContain('  - Name: `label escaping`');
+    expect(markdown).toContain('  - Name: `` line one\nline `two` ``');
+    expect(markdown).toContain('  - Call: `it`');
+    expect(markdown).toContain('  - Line range granularity: `test-label`');
+    expect(markdown).not.toContain('secretAssertion');
+    expect(markdown).not.toContain('hidden expected value');
+    expect(markdown).not.toContain('expect(');
+    expect(markdown).not.toMatch(/\bauthorit(?:y|ative)\b/i);
+    expect(markdown).not.toMatch(/\bofficial\b/i);
+    expect(markdown).not.toMatch(
+      /\bclaims correctness\b|\bproves correctness\b|\bguarantees correctness\b/i
+    );
+    expect(markdown).not.toMatch(/\bverified\b/i);
   });
 
   it('includes inspector warnings and syntax limitations without adding behavior claims', async () => {
