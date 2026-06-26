@@ -753,7 +753,6 @@ const CAPABILITIES_CONTRACT = {
         'no crawling',
         'no source selection',
         'no discovery report refresh',
-        'no configured SDK refresh',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
@@ -778,11 +777,43 @@ const CAPABILITIES_CONTRACT = {
         'no crawling',
         'no source selection',
         'no discovery report refresh',
-        'no configured SDK refresh',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
         'no behavior inference',
+      ],
+    },
+    {
+      id: 'refresh-configured-sdk',
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for configured-sdk',
+      status: 'implemented',
+      inputBoundary:
+        'existing configured-sdk manifest.json with recorded absolute local source.resolvedSpecPath',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: [
+        'manifest.json',
+        'parsed/<sdk>-<resolved-version>-spec.json',
+        'llm-docs/*-llms.txt',
+      ],
+      summary:
+        'deterministic regeneration of configured OpenRef SDK docs from the manifest-recorded absolute local spec path followed by manifest integrity verification of regenerated outputs',
+      limitations: [
+        'configured-sdk manifests only',
+        'requires source.resolvedSpecPath to be an absolute local non-symlink file outside the output directory',
+        'uses only the recorded local spec path, SDK metadata, parser/formatter metadata, and manifest-recorded filename prefix',
+        'OpenRef parser and legacy LLM formatter only',
+        'no registry lookup',
+        'no URL fetching',
+        'no repo freshness check',
+        'no crawling',
+        'no source selection',
+        'no discovery report refresh',
+        'no candidate report consumption',
+        'no candidate auto-selection',
+        'no source-code verification',
+        'no remote network work',
+        'no source project script execution',
       ],
     },
     {
@@ -838,10 +869,10 @@ const CAPABILITIES_CONTRACT = {
     {
       id: 'refresh-unsupported-manifests',
       command:
-        'refresh for parser-plugin source-docs, configured SDK, discovery report, URL, repo, website, or freshness workflows',
+        'refresh for parser-plugin source-docs, discovery report, URL, repo, website, or freshness workflows',
       status: 'planned-unsupported',
       reason:
-        'only explicit built-in-parser local-source-docs and source-truth-local-docs manifest refresh is implemented; parser-plugin source-docs, configured SDK, discovery report, remote URL/repo, freshness, crawling, and source-code verification refresh remain planned',
+        'only explicit built-in-parser local-source-docs, source-truth-local-docs, and configured-sdk manifests with recorded absolute local spec paths can be refreshed; parser-plugin source-docs, discovery report, remote URL/repo, freshness, crawling, and source-code verification refresh remain planned',
     },
     {
       id: 'source-code-verification',
@@ -2234,7 +2265,7 @@ program
 program
   .command('refresh')
   .description(
-    'Refresh built-in local source docs or source-truth docs from an existing explicit local manifest'
+    'Refresh built-in local source docs, source-truth docs, or local configured SDK docs from an existing explicit local manifest'
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')

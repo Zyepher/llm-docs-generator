@@ -269,15 +269,15 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       expected binary metadata, PATH visibility, and skipped host-install checks
 - [x] Bundled package skill files for current CLI usage and repo/docs discovery
 - [x] Deterministic local explicit-manifest refresh for current
-      built-in-parser `local-source-docs` and `source-truth-local-docs`
-      manifests only, with post-refresh manifest integrity verification for
-      regenerated outputs
+      built-in-parser `local-source-docs`, `source-truth-local-docs`, and
+      configured OpenRef SDK manifests with recorded absolute local source
+      paths, with post-refresh manifest integrity verification for regenerated
+      outputs
 - [x] Deterministic semantic chunk manifest-index metadata for opt-in
       source-docs `chunks/semantic-chunks.jsonl` exports
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
 - [ ] Broad official-docs behavior/API claim verification, broad website
-      crawling, configured SDK refresh, discovery-report refresh, and remote
-      freshness refresh
+      crawling, discovery-report refresh, and remote freshness refresh
 - [ ] Plugin system for custom parsers
   - [x] Deterministic read-only parser plugin manifest validation for explicit
         local JSON manifests, without loading or executing plugin code
@@ -355,12 +355,12 @@ Current capabilities contract scope:
   `generate --sdk` with optional `--format openref` /
   `--format openref-0.1`, configured SDK, source-docs, source-truth docs, and
   discovery-report/source-verification `verify`, local explicit-manifest
-  built-in-parser source-docs/source-truth `refresh`, `list-sdks`, and
-  `validate --sdk`.
+  built-in-parser source-docs/source-truth/configured-SDK `refresh`,
+  `list-sdks`, and `validate --sdk`.
 - Planned/unsupported entries include additional `generate --preset` names,
-  configured SDK refresh, discovery-report refresh, remote freshness refresh,
-  broad official-docs behavior/API claim verification, broad website crawling,
-  documented automation-flag candidate handling, framework/route
+  discovery-report refresh, remote freshness refresh, broad official-docs
+  behavior/API claim verification, broad website crawling, documented
+  automation-flag candidate handling, framework/route
   understanding, behavior-level generation from source code, parser plugin
   discovery/install/package resolution/auto-selection/directory generation/
   sandboxing/broad custom parser workflows, and `agent install codex`.
@@ -379,9 +379,9 @@ Current capabilities contract scope:
   outputs plus compact manifest chunk indexes derived only from those JSONL
   records. Source-docs refresh preserves that output and regenerates the index
   when the existing manifest recorded it. Capabilities output does not claim
-  full RAG systems, configured SDK refresh, discovery-report refresh, remote
-  freshness refresh, broad official-docs behavior/API claim verification, broad
-  crawling, or CLI source selection without explicit candidate input.
+  full RAG systems, discovery-report refresh, remote freshness refresh, broad
+  official-docs behavior/API claim verification, broad crawling, or CLI source
+  selection without explicit candidate input.
 - The contract intentionally omits `generatedAt`. The command does not inspect
   sources, load config, write files, perform network work, or probe hidden
   environment state.
@@ -568,27 +568,34 @@ Current explicit local source docs generation scope:
   docs correctness.
 
 - `refresh --manifest <path>` / `refresh --output-dir <dir>` supports only
-  current built-in-parser `local-source-docs` and `source-truth-local-docs`
-  manifests. Parser-plugin `local-source-docs` manifests are intentionally not
-  refreshed in this slice; rerun the explicit parser-plugin generate command
-  instead. For source docs it reads the existing manifest and uses only the
+  current built-in-parser `local-source-docs`, `source-truth-local-docs`, and
+  configured OpenRef SDK manifests with recorded explicit local source paths.
+  Parser-plugin `local-source-docs` manifests are intentionally not refreshed
+  in this slice; rerun the explicit parser-plugin generate command instead.
+  For source docs it reads the existing manifest and uses only the
   recorded absolute local source path, `source.formatHint`, preset metadata if
   present, and whether
   `semantic-chunks-jsonl` was previously present, then regenerates through the
   current source docs generator into the manifest directory. For source-truth
   docs it uses only the recorded absolute local source path and regenerates
   through the current source-truth docs generator into the manifest directory.
+  For configured SDK manifests it requires `source.resolvedSpecPath` to be an
+  absolute local, existing, non-symlink OpenRef spec file outside the output
+  directory, reparses that exact path, rewrites
+  `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs in
+  the manifest directory, and rewrites `manifest.json`.
   After successful regeneration, it runs the existing manifest verifier over
   the newly written manifest outputs and reports the checked-file count. This
   post-refresh check is deterministic manifest/output integrity verification
   only; it does not claim freshness, source truth, source-code behavior, or
   runtime behavior. It rejects parser-plugin source-docs manifests,
-  configured-SDK manifests, discovery-report manifests, malformed/missing
-  manifests, URL-like or non-absolute recorded source paths, and unsupported
-  manifest modes. It does
-  not perform URL fetching, repo freshness checks, broad website crawling,
-  source selection, source-code verification, behavior validation, remote
-  network work, or source project script execution.
+  discovery-report manifests, malformed/missing manifests, URL-like,
+  non-absolute, missing, symlinked, directory, or inside-output configured SDK
+  `source.resolvedSpecPath` values, and unsupported manifest modes. It does not
+  perform URL fetching, repo freshness checks, broad website crawling, registry
+  lookup, candidate report consumption, candidate auto-selection, source
+  selection, source-code verification, behavior validation, remote network
+  work, or source project script execution.
 
 Current OpenAPI / Swagger parser scope:
 

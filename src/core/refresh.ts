@@ -1,13 +1,18 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
+import categoriesConfig from '../../config/categories.json';
+import type { CategoryConfig, SDKVersionConfig } from '../config/schemas.js';
 import { isUrlLikeInput } from './discovery.js';
+import { LLMFormatter, type LLMFormatterConfig } from './formatter.js';
+import type { SpecData } from './models.js';
 import {
   DISCOVERY_REPORT_MODE,
   CONFIGURED_SDK_MODE,
   MANIFEST_SCHEMA_VERSION,
   validateSourceDocsPresetContract,
   verifyGenerationManifest,
+  writeGenerationManifest,
   type VerifyGenerationManifestResult,
 } from './manifest.js';
 import {
@@ -17,6 +22,7 @@ import {
   type SourceDocsPresetMetadata,
 } from './source-docs.js';
 import { generateSourceTruthDocs, SOURCE_TRUTH_DOCS_MODE } from './source-truth-docs.js';
+import { OpenRefParser } from '../parsers/openref/parser.js';
 
 const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'auto',
@@ -28,6 +34,12 @@ const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'html',
 ]);
 const SOURCE_DOCS_CHUNKS_JSONL_KIND = 'semantic-chunks-jsonl';
+const CONFIGURED_SDK_PARSER_NAME = 'OpenRefParser';
+const CONFIGURED_SDK_FORMAT = 'openref-0.1';
+const CONFIGURED_SDK_FORMATTER_NAME = 'LLMFormatter';
+const CONFIGURED_SDK_FORMATTER_FORMAT = 'legacy-llm-docs';
+const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS = new Set(['parsed-spec-json', 'llm-docs']);
+const CONFIGURED_SDK_FULL_DOC_PATH_PATTERN = /^llm-docs\/(.+)-full-llms\.txt$/;
 
 export class RefreshManifestError extends Error {
   constructor(message: string) {
@@ -54,7 +66,7 @@ export interface RefreshManifestOptions {
 }
 
 export interface RefreshManifestResult {
-  mode: typeof SOURCE_DOCS_MODE | typeof SOURCE_TRUTH_DOCS_MODE;
+  mode: typeof CONFIGURED_SDK_MODE | typeof SOURCE_DOCS_MODE | typeof SOURCE_TRUTH_DOCS_MODE;
   manifestPath: string;
   outputDir: string;
   sourcePath: string;
@@ -87,9 +99,11 @@ export async function refreshGenerationManifest(
   }
 
   if (manifest.mode === CONFIGURED_SDK_MODE) {
-    throw new RefreshManifestError(
-      'refresh does not support configured-sdk manifests; only local-source-docs and source-truth-local-docs manifests with recorded local source paths are supported'
-    );
+    return refreshConfiguredSdkManifest({
+      manifestPath,
+      manifest,
+      generator: options.generator,
+    });
   }
 
   if (manifest.mode === DISCOVERY_REPORT_MODE) {
@@ -101,7 +115,7 @@ export async function refreshGenerationManifest(
   throw new RefreshManifestError(
     `unsupported refresh manifest mode: ${String(
       manifest.mode
-    )}; supported modes are local-source-docs and source-truth-local-docs`
+    )}; supported modes are local-source-docs, source-truth-local-docs, and configured-sdk with an explicit local source.resolvedSpecPath`
   );
 }
 
@@ -222,6 +236,85 @@ async function refreshSourceTruthDocsManifest(options: {
   });
 }
 
+async function refreshConfiguredSdkManifest(options: {
+  manifestPath: string;
+  manifest: Record<string, unknown>;
+  generator: SourceDocsGeneratorMetadata;
+}): Promise<RefreshManifestResult> {
+  const sdk = readConfiguredSdkMetadata(options.manifest.sdk);
+  const source = readConfiguredSdkSourceMetadata(options.manifest.source);
+  const parser = readConfiguredSdkParserMetadata(options.manifest.parser);
+  const formatter = readConfiguredSdkFormatterMetadata(options.manifest.formatter);
+  const generatedOutputs = requiredArray(options.manifest.generatedOutputs, 'generatedOutputs');
+  const outputDir = dirname(options.manifestPath);
+  const filenamePrefix = configuredSdkFilenamePrefixFromManifest(generatedOutputs, outputDir);
+
+  await assertExistingLocalOpenRefSpecFile(source.resolvedSpecPath);
+  await assertSourceOutsideRefreshOutput({ sourcePath: source.resolvedSpecPath, outputDir });
+
+  const openRefParser = new OpenRefParser(source.resolvedSpecPath);
+  const parsedData = await openRefParser.parse();
+  const parsedSpecPath = join(
+    outputDir,
+    'parsed',
+    `${sdk.name}-${sdk.resolvedVersion}-spec.json`
+  );
+  const llmDocsDir = join(outputDir, 'llm-docs');
+  const expectedLlmOutputPaths = configuredSdkLlmOutputPaths({
+    outputDir,
+    filenamePrefix,
+    parsedData,
+  });
+
+  await assertConfiguredSdkRefreshWriteTargets({
+    outputDir,
+    parsedSpecPath,
+    llmDocsDir,
+    llmOutputPaths: expectedLlmOutputPaths,
+  });
+
+  await openRefParser.saveJSON(parsedData, parsedSpecPath);
+
+  const refreshConfig = new ConfiguredSdkRefreshFormatterConfig({
+    sdkName: sdk.name,
+    displayName: sdk.displayName,
+    filenamePrefix,
+    source,
+  });
+  const llmFormatter = new LLMFormatter(
+    parsedData,
+    refreshConfig,
+    sdk.name,
+    sdk.resolvedVersion,
+    source.resolvedSpecPath
+  );
+  const llmOutputPaths = await llmFormatter.generateAll(outputDir);
+
+  await writeGenerationManifest({
+    manifestPath: options.manifestPath,
+    generatedAt: new Date(),
+    generator: options.generator,
+    sdk,
+    source,
+    parser,
+    formatter,
+    generatedOutputs: [
+      { path: parsedSpecPath, kind: 'parsed-spec-json' },
+      ...llmOutputPaths.map((path) => ({ path, kind: 'llm-docs' as const })),
+    ],
+    warnings: [],
+  });
+
+  return withPostRefreshVerification({
+    mode: CONFIGURED_SDK_MODE,
+    manifestPath: options.manifestPath,
+    outputDir,
+    sourcePath: source.resolvedSpecPath,
+    sourceFiles: 1,
+    generatedOutputs: llmOutputPaths.length + 1,
+  });
+}
+
 async function withPostRefreshVerification(
   result: Omit<RefreshManifestResult, 'postRefreshVerification'>
 ): Promise<RefreshManifestResult> {
@@ -254,6 +347,185 @@ function sourceDocsPresetFromManifest(preset: unknown): SourceDocsPresetMetadata
   return preset as SourceDocsPresetMetadata;
 }
 
+function readConfiguredSdkMetadata(value: unknown): {
+  name: string;
+  resolvedVersion: string;
+  displayName: string;
+} {
+  const sdk = requiredObject(value, 'sdk');
+
+  return {
+    name: requiredSafeFilenameComponent(sdk.name, 'sdk.name'),
+    resolvedVersion: requiredSafeFilenameComponent(sdk.resolvedVersion, 'sdk.resolvedVersion'),
+    displayName: requiredNonEmptyString(sdk.displayName, 'sdk.displayName'),
+  };
+}
+
+function readConfiguredSdkSourceMetadata(value: unknown): {
+  configuredUrl: string;
+  configuredLocalPath: string | null;
+  resolvedSpecPath: string;
+  format: string;
+} {
+  const source = requiredObject(value, 'source');
+  const format = requiredNonEmptyString(source.format, 'source.format');
+
+  if (format !== CONFIGURED_SDK_FORMAT) {
+    throw new RefreshManifestError(
+      `malformed manifest: source.format must be ${CONFIGURED_SDK_FORMAT}`
+    );
+  }
+
+  requiredNonNegativeInteger(source.byteSize, 'source.byteSize');
+  requiredSha256Hash(source.contentHash, 'source.contentHash');
+
+  return {
+    configuredUrl: requiredUrlString(source.configuredUrl, 'source.configuredUrl'),
+    configuredLocalPath: requiredNonEmptyStringOrNull(
+      source.configuredLocalPath,
+      'source.configuredLocalPath'
+    ),
+    resolvedSpecPath: requiredAbsoluteLocalPath(source.resolvedSpecPath, 'source.resolvedSpecPath'),
+    format,
+  };
+}
+
+function readConfiguredSdkParserMetadata(value: unknown): {
+  name: string;
+  version: string;
+  format: string;
+} {
+  const parser = requiredObject(value, 'parser');
+  const name = requiredNonEmptyString(parser.name, 'parser.name');
+  const version = requiredNonEmptyString(parser.version, 'parser.version');
+  const format = requiredNonEmptyString(parser.format, 'parser.format');
+
+  if (name !== CONFIGURED_SDK_PARSER_NAME) {
+    throw new RefreshManifestError(
+      `malformed manifest: parser.name must be ${CONFIGURED_SDK_PARSER_NAME}`
+    );
+  }
+
+  if (format !== CONFIGURED_SDK_FORMAT) {
+    throw new RefreshManifestError(
+      `malformed manifest: parser.format must be ${CONFIGURED_SDK_FORMAT}`
+    );
+  }
+
+  return { name, version, format };
+}
+
+function readConfiguredSdkFormatterMetadata(value: unknown): {
+  name: string;
+  version: string;
+  format: string;
+} {
+  const formatter = requiredObject(value, 'formatter');
+  const name = requiredNonEmptyString(formatter.name, 'formatter.name');
+  const version = requiredNonEmptyString(formatter.version, 'formatter.version');
+  const format = requiredNonEmptyString(formatter.format, 'formatter.format');
+
+  if (name !== CONFIGURED_SDK_FORMATTER_NAME) {
+    throw new RefreshManifestError(
+      `malformed manifest: formatter.name must be ${CONFIGURED_SDK_FORMATTER_NAME}`
+    );
+  }
+
+  if (format !== CONFIGURED_SDK_FORMATTER_FORMAT) {
+    throw new RefreshManifestError(
+      `malformed manifest: formatter.format must be ${CONFIGURED_SDK_FORMATTER_FORMAT}`
+    );
+  }
+
+  return { name, version, format };
+}
+
+function configuredSdkFilenamePrefixFromManifest(
+  generatedOutputs: unknown[],
+  outputDir: string
+): string {
+  const prefixes = new Set<string>();
+
+  generatedOutputs.forEach((output, index) => {
+    if (!isObjectRecord(output)) {
+      throw new RefreshManifestError(
+        `malformed manifest: generatedOutputs[${index}] must be an object`
+      );
+    }
+
+    const outputPath = requiredNonEmptyString(output.path, `generatedOutputs[${index}].path`);
+    const outputKind = requiredNonEmptyString(output.kind, `generatedOutputs[${index}].kind`);
+
+    if (!CONFIGURED_SDK_GENERATED_OUTPUT_KINDS.has(outputKind)) {
+      throw new RefreshManifestError(
+        'malformed manifest: generated output kind must be parsed-spec-json or llm-docs'
+      );
+    }
+
+    if (isAbsolute(outputPath)) {
+      throw new RefreshManifestError(
+        `malformed manifest: generatedOutputs[${index}].path must be relative`
+      );
+    }
+
+    if (outputPath.includes('\\')) {
+      throw new RefreshManifestError(
+        `malformed manifest: generatedOutputs[${index}].path must use forward slashes`
+      );
+    }
+
+    if (!isSameOrDescendant(outputDir, resolve(outputDir, outputPath))) {
+      throw new RefreshManifestError(
+        `malformed manifest: generatedOutputs[${index}].path escapes manifest directory`
+      );
+    }
+
+    if (outputKind === 'llm-docs') {
+      const match = CONFIGURED_SDK_FULL_DOC_PATH_PATTERN.exec(outputPath);
+
+      if (match !== null) {
+        prefixes.add(
+          requiredSafeFilenameComponent(
+            match[1],
+            `generatedOutputs[${index}] full-doc filename prefix`
+          )
+        );
+      }
+    }
+  });
+
+  if (prefixes.size !== 1) {
+    throw new RefreshManifestError(
+      'configured-sdk refresh requires exactly one llm-docs/*-full-llms.txt generated output to recover the manifest-recorded filename prefix'
+    );
+  }
+
+  return [...prefixes][0]!;
+}
+
+function configuredSdkLlmOutputPaths(options: {
+  outputDir: string;
+  filenamePrefix: string;
+  parsedData: SpecData;
+}): string[] {
+  const operationIds = new Set(options.parsedData.operations.map((operation) => operation.id));
+  const paths = [join(options.outputDir, 'llm-docs', `${options.filenamePrefix}-full-llms.txt`)];
+
+  for (const [categoryName, category] of Object.entries(categoriesConfig.categories).sort(
+    (a, b) => a[1].order - b[1].order
+  )) {
+    requiredSafeFilenameComponent(categoryName, `configured SDK category name ${categoryName}`);
+
+    if (category.operations.some((operationId) => operationIds.has(operationId))) {
+      paths.push(
+        join(options.outputDir, 'llm-docs', `${options.filenamePrefix}-${categoryName}-llms.txt`)
+      );
+    }
+  }
+
+  return paths;
+}
+
 function requiredObject(value: unknown, label: string): Record<string, unknown> {
   if (!isObjectRecord(value)) {
     throw new RefreshManifestError(`malformed manifest: missing ${label} object`);
@@ -278,6 +550,51 @@ function requiredNonEmptyString(value: unknown, label: string): string {
   return value;
 }
 
+function requiredSafeFilenameComponent(value: unknown, label: string): string {
+  const component = requiredNonEmptyString(value, label);
+
+  if (
+    component === '.' ||
+    component === '..' ||
+    component.includes('/') ||
+    component.includes('\\') ||
+    component.includes('\0') ||
+    !/^[A-Za-z0-9._-]+$/.test(component)
+  ) {
+    throw new RefreshManifestError(
+      `malformed manifest: ${label} must be a safe filename component`
+    );
+  }
+
+  return component;
+}
+
+function requiredUrlString(value: unknown, label: string): string {
+  const url = requiredNonEmptyString(value, label);
+
+  try {
+    new URL(url);
+  } catch {
+    throw new RefreshManifestError(`malformed manifest: ${label} must be a valid URL`);
+  }
+
+  return url;
+}
+
+function requiredNonEmptyStringOrNull(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new RefreshManifestError(
+      `malformed manifest: ${label} must be a non-empty string or null`
+    );
+  }
+
+  return value;
+}
+
 function requiredAbsoluteLocalPath(value: unknown, label: string): string {
   const path = requiredNonEmptyString(value, label);
 
@@ -290,6 +607,149 @@ function requiredAbsoluteLocalPath(value: unknown, label: string): string {
   }
 
   return path;
+}
+
+function requiredNonNegativeInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new RefreshManifestError(`malformed manifest: ${label} must be a non-negative integer`);
+  }
+
+  return value;
+}
+
+function requiredSha256Hash(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value)) {
+    throw new RefreshManifestError(`malformed manifest: ${label} must be a sha256 hash`);
+  }
+
+  return value;
+}
+
+async function assertExistingLocalOpenRefSpecFile(sourcePath: string): Promise<void> {
+  try {
+    const stats = await lstat(sourcePath);
+
+    if (stats.isSymbolicLink()) {
+      throw new RefreshManifestError(
+        `manifest source.resolvedSpecPath must not be a symbolic link: ${sourcePath}`
+      );
+    }
+
+    if (!stats.isFile()) {
+      throw new RefreshManifestError(
+        `manifest source.resolvedSpecPath must be an existing local OpenRef spec file: ${sourcePath}`
+      );
+    }
+
+    await assertNoSymlinkPathComponents(sourcePath);
+  } catch (error) {
+    if (error instanceof RefreshManifestError) {
+      throw error;
+    }
+
+    if (isFileNotFoundError(error)) {
+      throw new RefreshManifestError(
+        `manifest source.resolvedSpecPath not found: ${sourcePath}`
+      );
+    }
+
+    throw new RefreshManifestError(
+      `manifest source.resolvedSpecPath cannot be read: ${sourcePath}: ${errorMessage(error)}`
+    );
+  }
+}
+
+async function assertConfiguredSdkRefreshWriteTargets(options: {
+  outputDir: string;
+  parsedSpecPath: string;
+  llmDocsDir: string;
+  llmOutputPaths: string[];
+}): Promise<void> {
+  assertPathInsideDirectory(
+    options.outputDir,
+    options.parsedSpecPath,
+    'configured-sdk parsed output path'
+  );
+  await assertSafeRefreshWritePath({
+    path: options.parsedSpecPath,
+    label: 'configured-sdk parsed output path',
+    expectedType: 'file',
+  });
+
+  assertPathInsideDirectory(
+    options.outputDir,
+    options.llmDocsDir,
+    'configured-sdk llm-docs output directory'
+  );
+  await assertSafeRefreshWritePath({
+    path: options.llmDocsDir,
+    label: 'configured-sdk llm-docs output directory',
+    expectedType: 'directory',
+  });
+
+  for (const outputPath of options.llmOutputPaths) {
+    assertPathInsideDirectory(options.outputDir, outputPath, 'configured-sdk llm-docs output path');
+    await assertSafeRefreshWritePath({
+      path: outputPath,
+      label: 'configured-sdk llm-docs output path',
+      expectedType: 'file',
+    });
+  }
+}
+
+function assertPathInsideDirectory(parentDir: string, targetPath: string, label: string): void {
+  if (!isSameOrDescendant(parentDir, targetPath)) {
+    throw new RefreshManifestError(`${label} escapes manifest output directory: ${targetPath}`);
+  }
+}
+
+async function assertSafeRefreshWritePath(options: {
+  path: string;
+  label: string;
+  expectedType: 'directory' | 'file';
+}): Promise<void> {
+  const parsedPath = parse(options.path);
+  const parts = options.path.slice(parsedPath.root.length).split(sep).filter(Boolean);
+  let currentPath = parsedPath.root;
+
+  for (let index = 0; index < parts.length; index++) {
+    currentPath = join(currentPath, parts[index]!);
+
+    let stats;
+    try {
+      stats = await lstat(currentPath);
+    } catch (error) {
+      if (isFileNotFoundError(error)) {
+        return;
+      }
+
+      throw new RefreshManifestError(
+        `${options.label} cannot be checked: ${currentPath}: ${errorMessage(error)}`
+      );
+    }
+
+    if (stats.isSymbolicLink()) {
+      throw new RefreshManifestError(
+        `${options.label}: symbolic links are not allowed in path: ${currentPath}`
+      );
+    }
+
+    const isTarget = index === parts.length - 1;
+
+    if (isTarget) {
+      if (options.expectedType === 'directory' && !stats.isDirectory()) {
+        throw new RefreshManifestError(`${options.label} must be a directory: ${currentPath}`);
+      }
+
+      if (options.expectedType === 'file' && !stats.isFile()) {
+        throw new RefreshManifestError(`${options.label} must be a regular file: ${currentPath}`);
+      }
+    } else if (!stats.isDirectory()) {
+      throw new RefreshManifestError(
+        `${options.label} parent path must be a directory: ${currentPath}`
+      );
+    }
+  }
 }
 
 async function assertExistingLocalSourcePath(sourcePath: string): Promise<void> {
@@ -419,4 +879,61 @@ function isFileNotFoundError(error: unknown): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+class ConfiguredSdkRefreshFormatterConfig implements LLMFormatterConfig {
+  private readonly versionConfig: SDKVersionConfig;
+  private readonly categories: Map<string, CategoryConfig>;
+  private readonly sortedCategories: [string, CategoryConfig][];
+
+  constructor(options: {
+    sdkName: string;
+    displayName: string;
+    filenamePrefix: string;
+    source: {
+      configuredUrl: string;
+      configuredLocalPath: string | null;
+      resolvedSpecPath: string;
+      format: string;
+    };
+  }) {
+    this.versionConfig = {
+      displayName: options.displayName,
+      spec: {
+        url: options.source.configuredUrl,
+        localPath: options.source.configuredLocalPath,
+        format: options.source.format,
+      },
+      output: {
+        baseDir: options.sdkName,
+        filenamePrefix: options.filenamePrefix,
+      },
+    };
+    this.categories = new Map(Object.entries(categoriesConfig.categories));
+    this.sortedCategories = Array.from(this.categories.entries()).sort(
+      (a, b) => a[1].order - b[1].order
+    );
+  }
+
+  getSDKVersionConfig(_sdkName: string, _version: string): SDKVersionConfig {
+    return this.versionConfig;
+  }
+
+  getCategories(): ReadonlyMap<string, CategoryConfig> {
+    return this.categories;
+  }
+
+  getCategory(name: string): CategoryConfig {
+    const category = this.categories.get(name);
+
+    if (category === undefined) {
+      throw new RefreshManifestError(`configured SDK category '${name}' not found`);
+    }
+
+    return category;
+  }
+
+  getSortedCategories(): ReadonlyArray<[string, CategoryConfig]> {
+    return this.sortedCategories;
+  }
 }
