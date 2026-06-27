@@ -65,6 +65,66 @@ interface ManifestFileEntry {
   estimatedTokenCount?: number;
 }
 
+interface RefreshProvenance {
+  refreshedAt: string;
+  sourceManifestMode: string;
+  strategy: string;
+  inputBoundary: string;
+  limitations: string[];
+}
+
+const refreshProvenanceExpectations = {
+  'local-source-docs': {
+    strategy: 'explicit-local-source-docs',
+    inputBoundary:
+      'Existing built-in-parser local-source-docs manifest with recorded local source path.',
+    limitations: [
+      'Records refresh provenance only; it does not validate freshness or source truth.',
+      'Uses only the manifest-recorded local source path, format hint, preset metadata, and prior chunk output presence.',
+      'Does not refresh parser-plugin manifests, fetch URLs, crawl, select sources, or verify source-code behavior.',
+    ],
+  },
+  'source-truth-local-docs': {
+    strategy: 'explicit-local-source-truth-docs',
+    inputBoundary: 'Existing source-truth-local-docs manifest with recorded local source path.',
+    limitations: [
+      'Records refresh provenance only; it does not prove source truth or validate freshness.',
+      'Uses only the manifest-recorded local source path.',
+      'Does not fetch URLs, crawl, select sources, run source project scripts, verify broad official-docs claims, or validate runtime behavior.',
+    ],
+  },
+  'configured-sdk': {
+    strategy: 'configured-sdk-local-openref',
+    inputBoundary:
+      'Existing configured-sdk manifest with recorded absolute local OpenRef spec path.',
+    limitations: [
+      'Records refresh provenance only; it does not validate freshness or source truth.',
+      'Uses only the manifest-recorded local spec path, SDK metadata, parser/formatter metadata, and filename prefix.',
+      'Does not fetch URLs, query registries, crawl, select candidates, refresh remote freshness, or verify source-code behavior.',
+    ],
+  },
+  'discovery-report': {
+    strategy: 'local-source-discovery-report',
+    inputBoundary:
+      'Existing discovery-report manifest whose report is local-bounded source discovery.',
+    limitations: [
+      'Records refresh provenance only; candidate evidence remains for agent review.',
+      'Uses only the local report source path and traversal bounds from discovery-report.json.',
+      'Does not generate docs, select sources, consume candidates, refresh repo or URL reports, validate freshness, crawl, or access the network.',
+    ],
+  },
+  'source-verification-local-evidence': {
+    strategy: 'local-source-verification-evidence',
+    inputBoundary:
+      'Existing source-verification-local-evidence manifest with local source-verification report paths.',
+    limitations: [
+      'Records refresh provenance only; local source/docs evidence is not source-truth proof.',
+      'Uses only the local report source/docs paths and docs traversal bounds from source-verification-report.json.',
+      'Does not perform broad official-docs claim verification, source-code behavior validation, freshness validation, crawling, source selection, or network access.',
+    ],
+  },
+} as const;
+
 interface SemanticChunkManifestIndex {
   path: string;
   format: string;
@@ -147,6 +207,7 @@ interface GenerationManifest {
   };
   generatedOutputs: ManifestFileEntry[];
   warnings: string[];
+  refresh?: RefreshProvenance;
 }
 
 interface SourceDocsManifest {
@@ -231,6 +292,7 @@ interface SourceDocsManifest {
     limitations: string[];
   };
   warnings: string[];
+  refresh?: RefreshProvenance;
 }
 
 interface DiscoveryCandidate {
@@ -388,6 +450,7 @@ interface DiscoveryReportManifest {
   };
   candidateEvidenceIndex?: CandidateEvidenceManifestIndex;
   generatedOutputs: ManifestFileEntry[];
+  refresh?: RefreshProvenance;
 }
 
 interface CandidateEvidenceManifestIndex {
@@ -1118,6 +1181,31 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function expectRefreshProvenance(
+  manifest: { mode: string; refresh?: RefreshProvenance },
+  mode: keyof typeof refreshProvenanceExpectations
+): void {
+  const expected = refreshProvenanceExpectations[mode];
+  const refresh = manifest.refresh;
+
+  expect(manifest.mode).toBe(mode);
+  expect(refresh).toBeDefined();
+
+  if (refresh === undefined) {
+    throw new Error('expected refresh provenance');
+  }
+
+  expect(new Date(refresh.refreshedAt).toISOString()).toBe(refresh.refreshedAt);
+  expect(refresh).toEqual({
+    refreshedAt: refresh.refreshedAt,
+    sourceManifestMode: mode,
+    strategy: expected.strategy,
+    inputBoundary: expected.inputBoundary,
+    limitations: [...expected.limitations],
+  });
+  expect(JSON.stringify(refresh)).not.toMatch(/authority|confidence/i);
 }
 
 async function git(args: string[], cwd: string): Promise<void> {
@@ -2432,6 +2520,9 @@ describe('CLI compatibility behavior', () => {
       'optional content-free source line/token metadata'
     );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain('when present');
+    expect(implemented.get('verify-configured-sdk')?.summary).toContain(
+      'refresh provenance validation'
+    );
     expect(implemented.get('verify-configured-sdk')?.limitations).toContain(
       'source line/token metadata is deterministic content-free text metadata only'
     );
@@ -2450,6 +2541,9 @@ describe('CLI compatibility behavior', () => {
         'no source-code verification',
       ]),
     });
+    expect(implemented.get('verify-discovery-report')?.summary).toContain(
+      'refresh provenance validation'
+    );
     expect(implemented.get('verify-source-docs')?.inputBoundary).toBe(
       'local-source-docs manifest.json'
     );
@@ -2458,6 +2552,9 @@ describe('CLI compatibility behavior', () => {
     );
     expect(implemented.get('verify-source-docs')?.summary).toContain(
       'source file hash, byte-size, line-count, estimated-token'
+    );
+    expect(implemented.get('verify-source-docs')?.summary).toContain(
+      'refresh provenance validation'
     );
     expect(implemented.get('verify-source-docs')?.limitations).toEqual(
       expect.arrayContaining([
@@ -2483,6 +2580,9 @@ describe('CLI compatibility behavior', () => {
         'no behavior inference',
       ]),
     });
+    expect(implemented.get('verify-source-truth-docs')?.summary).toContain(
+      'refresh provenance validation'
+    );
     const sourceVerificationVerify = implemented.get('verify-source-verification');
     expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('report integrity'));
     expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('provenance'));
@@ -2495,6 +2595,9 @@ describe('CLI compatibility behavior', () => {
     );
     expect(sourceVerificationVerify?.summary).toEqual(
       expect.stringContaining('file evidence index')
+    );
+    expect(sourceVerificationVerify?.summary).toEqual(
+      expect.stringContaining('refresh provenance validation')
     );
     expect(sourceVerificationVerify).toMatchObject({
       command: 'verify',
@@ -2536,6 +2639,9 @@ describe('CLI compatibility behavior', () => {
         'no source project script execution',
       ]),
     });
+    expect(implemented.get('refresh-source-docs')?.summary).toContain(
+      'recording verified refresh provenance metadata'
+    );
     expect(implemented.get('refresh-source-truth-docs')).toMatchObject({
       command: 'refresh',
       mode: 'refresh --manifest or refresh --output-dir for source-truth-local-docs',
@@ -2559,6 +2665,9 @@ describe('CLI compatibility behavior', () => {
         'no behavior inference',
       ]),
     });
+    expect(implemented.get('refresh-source-truth-docs')?.summary).toContain(
+      'recording verified refresh provenance metadata'
+    );
     expect(implemented.get('refresh-configured-sdk')).toMatchObject({
       command: 'refresh',
       mode: 'refresh --manifest or refresh --output-dir for configured-sdk',
@@ -2585,6 +2694,9 @@ describe('CLI compatibility behavior', () => {
         'no remote network work',
       ]),
     });
+    expect(implemented.get('refresh-configured-sdk')?.summary).toContain(
+      'recording verified refresh provenance metadata'
+    );
     expect(implemented.get('refresh-source-discovery-report')).toMatchObject({
       command: 'refresh',
       mode: 'refresh --manifest or refresh --output-dir for discovery-report source',
@@ -2610,6 +2722,9 @@ describe('CLI compatibility behavior', () => {
         'no network access',
       ]),
     });
+    expect(implemented.get('refresh-source-discovery-report')?.summary).toContain(
+      'recording verified refresh provenance metadata'
+    );
     expect(implemented.get('refresh-source-verification-local-evidence')).toMatchObject({
       command: 'refresh',
       mode: 'refresh --manifest or refresh --output-dir for source-verification-local-evidence',
@@ -2635,6 +2750,9 @@ describe('CLI compatibility behavior', () => {
         'no network access',
       ]),
     });
+    expect(implemented.get('refresh-source-verification-local-evidence')?.summary).toContain(
+      'recording verified refresh provenance metadata'
+    );
     expect(planned.has('generate-source')).toBe(false);
     expect(planned.get('generate-preset-additional')?.reason).toBe(
       'only --preset swift-book over an explicit local --source path is implemented; additional presets remain planned'
@@ -2772,6 +2890,7 @@ describe('CLI compatibility behavior', () => {
       expect(doc.text, doc.path).toMatch(
         /source-code behavior validation|source-code verification/i
       );
+      expect(doc.text, doc.path).toMatch(/verified refresh provenance/i);
       expect(doc.text, doc.path).toMatch(/planned|unsupported|not implemented|does not support/i);
       expect(doc.text, doc.path).not.toMatch(/source-verification refresh remains planned/i);
     }
@@ -6488,6 +6607,73 @@ describe('CLI compatibility behavior', () => {
     expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
   });
 
+  it('verify accepts parser plugin manifests without refresh and rejects forged refresh provenance', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-forged-refresh-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'source.fixture');
+    const outputDir = join(dir, 'output');
+
+    await writeFile(sourcePath, 'Custom source payload\n', 'utf-8');
+    const {
+      manifestPath: pluginManifestPath,
+      modulePath,
+      sideEffectPath,
+      formatId,
+    } = await createParserPluginFixture({ dir });
+
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--parser-plugin-manifest',
+      pluginManifestPath,
+      '--format',
+      formatId,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+
+    expect(manifest.parser.plugin).toBeDefined();
+    expect(manifest.refresh).toBeUndefined();
+
+    await writeFile(
+      modulePath,
+      [
+        "import { appendFileSync } from 'node:fs';",
+        `appendFileSync(${JSON.stringify(sideEffectPath)}, 'verify-import\\n');`,
+        "throw new Error('verify imported plugin code');",
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const legacyVerifyResult = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(legacyVerifyResult.stdout).toContain('Failures: 0');
+    expect(legacyVerifyResult.stdout).toContain('Verification passed');
+    expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
+
+    manifest.refresh = {
+      refreshedAt: '2026-06-27T00:00:00.000Z',
+      sourceManifestMode: 'local-source-docs',
+      strategy: refreshProvenanceExpectations['local-source-docs'].strategy,
+      inputBoundary: refreshProvenanceExpectations['local-source-docs'].inputBoundary,
+      limitations: [...refreshProvenanceExpectations['local-source-docs'].limitations],
+    };
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const forgedVerifyResult = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(forgedVerifyResult.exitCode).toBe(1);
+    expect(forgedVerifyResult.stderr).toContain(
+      'refresh is supported for local-source-docs manifests only when generated by the built-in parser'
+    );
+    expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
+  }, 15000);
+
   it('generates docs from an explicit directory parser plugin when the selected format supports directories', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-dir-generate-'));
     tempDirs.push(dir);
@@ -9154,6 +9340,7 @@ describe('CLI compatibility behavior', () => {
 
     expect(refreshResult.stdout).toContain('Manifest refresh');
     expect(refreshResult.stdout).toContain('Mode: local-source-docs');
+    expect(refreshResult.stdout).toContain('Refresh provenance: recorded');
     expect(refreshResult.stdout).toContain('Post-refresh verification: passed');
     expect(refreshResult.stdout).toContain(`Checked files: ${expectedRefreshCheckedFiles}`);
     expect(refreshResult.stdout).toContain('Refresh complete');
@@ -9164,6 +9351,7 @@ describe('CLI compatibility behavior', () => {
     expect(refreshedSourceFile.byteSize).toBe(await byteSize(refreshedSourcePath));
     expect(refreshedSourceFile.lineCount).toBe(countTextLines(refreshedSourceText));
     expect(refreshedSourceFile.estimatedTokenCount).toBe(estimateTextTokens(refreshedSourceText));
+    expectRefreshProvenance(refreshedManifest, 'local-source-docs');
     expect(refreshedText).toContain('refreshed local docs');
     expect(refreshedText).not.toContain('tampered output');
     expect(verifyResult.stdout).toContain('Failures: 0');
@@ -9368,6 +9556,10 @@ describe('CLI compatibility behavior', () => {
     );
     expect(markdown).toContain('run');
     expect(markdown).not.toContain('# Tampered');
+    expectRefreshProvenance(
+      refreshedManifest as SourceTruthDocsManifest & { refresh?: RefreshProvenance },
+      'source-truth-local-docs'
+    );
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
   });
@@ -9422,6 +9614,10 @@ describe('CLI compatibility behavior', () => {
     expect(report.docs.resolvedPath).toBe(docsDir);
     expect(manifest.sourceVerification.summary).toEqual(report.summary);
     expect(manifest.generatedOutputs[0]?.hash).toBe(await sha256File(reportPath));
+    expectRefreshProvenance(
+      manifest as SourceVerificationManifest & { refresh?: RefreshProvenance },
+      'source-verification-local-evidence'
+    );
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
   });
@@ -9833,6 +10029,7 @@ describe('CLI compatibility behavior', () => {
       'llm-docs/supabase-swift-v2-full-llms.txt',
       'parsed/swift-v2-spec.json',
     ]);
+    expectRefreshProvenance(refreshedManifest, 'configured-sdk');
     expect(parsedSpec.operations[0]).toMatchObject({
       title: 'Select refreshed data',
       description: 'Read refreshed rows',
@@ -10378,6 +10575,7 @@ describe('CLI compatibility behavior', () => {
       'Scope: candidate evidence only; no source selection or generation'
     );
     expect(refreshResult.stdout).not.toContain('Generated files:');
+    expect(refreshResult.stdout).toContain('Refresh provenance: recorded');
     expect(refreshResult.stdout).toContain('Post-refresh verification: passed');
     expect(refreshResult.stdout).toContain('Checked files: 1');
     expect(refreshResult.stdout).toContain('Refresh complete');
@@ -10392,6 +10590,7 @@ describe('CLI compatibility behavior', () => {
       warningCount: report.warnings.length,
     });
     expect(manifest.candidateEvidenceIndex?.candidateCount).toBe(1);
+    expectRefreshProvenance(manifest, 'discovery-report');
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
   });
@@ -10481,7 +10680,7 @@ describe('CLI compatibility behavior', () => {
     expect(linkedReportStats.isSymbolicLink()).toBe(true);
     expect(await readFile(outsideFixture.reportPath, 'utf-8')).toBe(outsideReportText);
     expect(await readFile(insideFixture.manifestPath, 'utf-8')).toBe(originalManifestText);
-  });
+  }, 15000);
 
   it('refresh rejects repo and URL discovery-report manifests', async () => {
     const repoDir = await createLocalGitRepo();
@@ -10514,7 +10713,7 @@ describe('CLI compatibility behavior', () => {
       'refresh supports discovery-report manifests only for discovery.kind source'
     );
     expect(urlResult.stderr).toContain('url discovery-report refresh is not supported');
-  });
+  }, 15000);
 
   it('refresh rejects missing or malformed source discovery reports and bad local source paths', async () => {
     const missingFixture = await createSourceDiscoveryVerifyFixture(
@@ -10708,8 +10907,12 @@ describe('CLI compatibility behavior', () => {
     expect(invalidLocalManifestResult.stderr).toContain('source.resolvedPath must be absolute');
     expect(missingSourceResult.exitCode).toBe(1);
     expect(missingSourceResult.stderr).toContain('manifest source path not found');
+    expect(
+      (JSON.parse(await readFile(missingSourceManifestPath, 'utf-8')) as Record<string, unknown>)
+        .refresh
+    ).toBeUndefined();
     expect(await readFile(missingSourceOutputPath, 'utf-8')).toBe('preserve on refresh failure\n');
-  });
+  }, 15000);
 
   it('verifies a generated configured SDK manifest by output directory', async () => {
     const { outputDir } = await generateSwiftFixture();
@@ -10734,6 +10937,95 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).toContain('Failures: 0');
     expect(result.stdout).toContain('Verification passed');
   });
+
+  it('accepts older generated manifests without refresh provenance', async () => {
+    const { outputDir, manifestPath } = await generateSourceDocsFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+
+    expect(manifest.refresh).toBeUndefined();
+
+    const result = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
+  });
+
+  it.each([
+    {
+      name: 'bad refreshedAt',
+      mutate: (refresh: Record<string, unknown>) => {
+        refresh.refreshedAt = 'not-an-iso-date';
+      },
+      expected: 'refresh.refreshedAt must be an ISO datetime string',
+    },
+    {
+      name: 'bad sourceManifestMode',
+      mutate: (refresh: Record<string, unknown>) => {
+        refresh.sourceManifestMode = 'configured-sdk';
+      },
+      expected: 'refresh.sourceManifestMode must match manifest mode local-source-docs',
+    },
+    {
+      name: 'unknown strategy',
+      mutate: (refresh: Record<string, unknown>) => {
+        refresh.strategy = 'unknown-strategy';
+      },
+      expected: 'refresh.strategy must be explicit-local-source-docs for local-source-docs',
+    },
+    {
+      name: 'missing limitations',
+      mutate: (refresh: Record<string, unknown>) => {
+        delete refresh.limitations;
+      },
+      expected: 'refresh.limitations must be a non-empty array',
+    },
+    {
+      name: 'empty limitations',
+      mutate: (refresh: Record<string, unknown>) => {
+        refresh.limitations = [];
+      },
+      expected: 'refresh.limitations must be a non-empty array',
+    },
+    {
+      name: 'non-string limitations',
+      mutate: (refresh: Record<string, unknown>) => {
+        refresh.limitations = ['records provenance only', 1];
+      },
+      expected: 'refresh.limitations must contain only non-empty strings',
+    },
+    {
+      name: 'unsupported extra key',
+      mutate: (refresh: Record<string, unknown>) => {
+        refresh.confidence = 1;
+      },
+      expected: 'refresh.confidence is not supported',
+    },
+  ])(
+    'rejects malformed refresh provenance: $name',
+    async (testCase) => {
+      const { manifestPath } = await generateSourceDocsFixture();
+
+      await runCli(['refresh', '--manifest', manifestPath]);
+
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+
+      if (manifest.refresh === undefined) {
+        throw new Error('expected refresh provenance before tampering');
+      }
+
+      const tamperedManifest = manifest as SourceDocsManifest & {
+        refresh: Record<string, unknown>;
+      };
+      testCase.mutate(tamperedManifest.refresh);
+      await writeFile(manifestPath, `${JSON.stringify(tamperedManifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(testCase.expected);
+    },
+    15000
+  );
 
   it('verifies a generated source-truth docs manifest by output directory and manifest path', async () => {
     const { outputDir, manifestPath, manifest } = await generateSourceTruthDocsFixture();
@@ -11111,6 +11403,78 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('discovery report: mode mismatch');
     expect(result.stderr).not.toContain('hash mismatch');
   });
+
+  it('rejects forged refresh provenance on repo and URL discovery manifests', async () => {
+    const repoDir = await createLocalGitRepo();
+    const repoFixtureDir = await mkdtemp(
+      join(await realpath(tmpdir()), 'llm-docs-discovery-forged-refresh-repo-')
+    );
+    tempDirs.push(repoFixtureDir);
+    const repoOutputDir = join(repoFixtureDir, 'reports');
+    const repoManifestPath = join(repoOutputDir, 'manifest.json');
+    const websiteFixture = await createWebsiteDiscoveryVerifyFixture(
+      'llm-docs-discovery-forged-refresh-url-'
+    );
+    const forgedRefresh: RefreshProvenance = {
+      refreshedAt: '2026-06-27T00:00:00.000Z',
+      sourceManifestMode: 'discovery-report',
+      strategy: refreshProvenanceExpectations['discovery-report'].strategy,
+      inputBoundary: refreshProvenanceExpectations['discovery-report'].inputBoundary,
+      limitations: [...refreshProvenanceExpectations['discovery-report'].limitations],
+    };
+
+    await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      join(repoFixtureDir, 'cache'),
+      '--output-dir',
+      repoOutputDir,
+    ]);
+
+    const repoBackcompatResult = await runCli(['verify', '--manifest', repoManifestPath]);
+    const urlBackcompatResult = await runCli(['verify', '--manifest', websiteFixture.manifestPath]);
+
+    expect(repoBackcompatResult.stdout).toContain('Failures: 0');
+    expect(repoBackcompatResult.stdout).toContain('Verification passed');
+    expect(urlBackcompatResult.stdout).toContain('Failures: 0');
+    expect(urlBackcompatResult.stdout).toContain('Verification passed');
+
+    const repoManifest = JSON.parse(
+      await readFile(repoManifestPath, 'utf-8')
+    ) as DiscoveryReportManifest;
+    const urlManifest = JSON.parse(
+      await readFile(websiteFixture.manifestPath, 'utf-8')
+    ) as DiscoveryReportManifest;
+
+    expect(repoManifest.discovery.kind).toBe('repo');
+    expect(urlManifest.discovery.kind).toBe('url');
+    repoManifest.refresh = forgedRefresh;
+    urlManifest.refresh = forgedRefresh;
+    await writeFile(repoManifestPath, `${JSON.stringify(repoManifest, null, 2)}\n`, 'utf-8');
+    await writeFile(
+      websiteFixture.manifestPath,
+      `${JSON.stringify(urlManifest, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const repoForgedResult = await runCliWithExit(['verify', '--manifest', repoManifestPath]);
+    const urlForgedResult = await runCliWithExit([
+      'verify',
+      '--manifest',
+      websiteFixture.manifestPath,
+    ]);
+
+    expect(repoForgedResult.exitCode).toBe(1);
+    expect(repoForgedResult.stderr).toContain(
+      'refresh is supported for discovery-report manifests only when discovery.kind is source'
+    );
+    expect(urlForgedResult.exitCode).toBe(1);
+    expect(urlForgedResult.stderr).toContain(
+      'refresh is supported for discovery-report manifests only when discovery.kind is source'
+    );
+  }, 15000);
 
   it('rejects discovery manifest and report count/path consistency drift', async () => {
     const countFixture = await createSourceDiscoveryVerifyFixture('llm-docs-discovery-count-');
