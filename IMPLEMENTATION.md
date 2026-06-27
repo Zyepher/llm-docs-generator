@@ -294,6 +294,10 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
   - [x] Descriptive top-level `manifestContract` metadata for currently
         verified manifest modes, with deterministic CLI/agent boundary arrays
         validated by `verify` when present
+  - [x] Content-free top-level `artifactSummary` metadata for currently
+        verified manifest modes, with generated-output totals, source-file
+        totals where already represented, warning counts, compact index
+        counters, and aggregate hashes validated by `verify` when present
 - [ ] Broad official-docs behavior/API claim verification, broad website
       crawling, repo/URL discovery-report refresh, source-code behavior
       validation, and remote freshness refresh
@@ -421,6 +425,12 @@ Current capabilities contract scope:
   authority, prove source truth, validate freshness, or select sources. The
   verifier accepts older manifests without it and validates supported keys,
   schema, mode, artifact role, and static arrays when it is present.
+- New successful manifests for those same modes include a top-level
+  `artifactSummary` block. This is deterministic content-free validation
+  metadata only: generated-output counts/kinds/totals/aggregate hashes,
+  source-file totals where already represented, warning counts, and compact
+  index counters. The verifier accepts older manifests without it and validates
+  supported keys, mode, counts, totals, and aggregate hashes when present.
 - The capabilities contract intentionally omits `generatedAt`. The command
   does not inspect sources, load config, write files, perform network work, or
   probe hidden environment state.
@@ -607,15 +617,19 @@ Current explicit local source docs generation scope:
   source-file line/token metadata when present, generated output integrity,
   symlink/path containment, inspection basics, and raw report count consistency;
   it does not infer behavior or perform broad source-code verification.
-  Source-verification manifest checks verify `source-verification-report.json`
-  file integrity, report path consistency, source/docs endpoint provenance
-  against the report, manifest/report summary consistency, report summary
-  consistency with body arrays, `sourceInspection.source` consistency, and
-  optional compact content-free source/docs file evidence index metadata rebuilt
-  from the report; they do not refresh outputs or sources, inspect additional
-  source/docs files, parse behavior claims, perform broad official-docs claim
-  checking, validate source-code behavior, decide task fit/source truth/source
-  selection, or prove docs correctness.
+Source-verification manifest checks verify `source-verification-report.json`
+file integrity, report path consistency, source/docs endpoint provenance
+against the report, manifest/report summary consistency, report summary
+consistency with body arrays, `sourceInspection.source` consistency, and
+optional compact content-free source/docs file evidence index metadata rebuilt
+from the report; they do not refresh outputs or sources, inspect additional
+source/docs files, parse behavior claims, perform broad official-docs claim
+checking, validate source-code behavior, decide task fit/source truth/source
+selection, or prove docs correctness.
+When optional top-level `artifactSummary` metadata is present, verification
+rebuilds it from existing manifest metadata and validates supported keys,
+mode, counts, totals, aggregate hashes, warning counts, and compact index
+counters before file checks.
   When optional top-level `refresh` provenance metadata is present on any
   supported manifest mode, verification checks its timestamp, source manifest
   mode, static strategy, deterministic input boundary, non-empty limitations,

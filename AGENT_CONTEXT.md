@@ -90,6 +90,14 @@ Current implementation:
   block is descriptive validation metadata for the deterministic CLI/agent
   boundary only; it does not score candidates, prove authority, prove source
   truth, validate freshness, or select sources.
+- Writes a top-level `artifactSummary` block on new successful manifests for
+  those same modes. This block is deterministic content-free manifest metadata:
+  generated-output counts, kinds, byte/line/token totals where present,
+  aggregate hashes over existing manifest file metadata, warning counts,
+  source-file totals where already represented, and compact index counters.
+  It does not include raw content, excerpts, new paths, scores, ranking,
+  authority, task-fit, freshness proof, source-truth proof, or source-selection
+  judgment.
 - Verifies current `configured-sdk` manifests by checking the recorded
   generator metadata, sdk name/resolvedVersion/displayName, OpenRef parser
   metadata, legacy formatter metadata, configured source hash and byte size,
@@ -890,7 +898,11 @@ resources, make task-fit judgments, resolve source truth, make source selection
 decisions, or prove docs correctness.
 When a top-level `manifestContract` block is present, verification validates
 its schema, manifest mode, artifact role, static arrays, and unsupported keys.
-Older manifests without the block remain valid for backward compatibility.
+When a top-level `artifactSummary` block is present, verification validates
+supported keys, manifest mode, generated-output counts/kinds/totals/aggregate
+hashes, source-file counts/formats/totals/aggregate hashes where represented,
+warning counts, and compact index counters. Older manifests without either
+block remain valid for backward compatibility.
 The current `refresh` command
 supports only built-in-parser `local-source-docs`, `source-truth-local-docs`,
 configured OpenRef SDK manifests that already record explicit absolute local
@@ -908,12 +920,13 @@ requires `source.resolvedSpecPath` to be an absolute local, existing,
 non-symlink OpenRef spec file outside the output directory; it reparses exactly
 that recorded file and rewrites `parsed/<sdk>-<resolvedVersion>-spec.json`,
 legacy LLM docs, and `manifest.json`, including current deterministic
-content-free source spec line/token metadata. After successful regeneration,
-refresh records a top-level verified refresh provenance block, then runs the
-existing manifest verifier over the newly written manifest outputs and reports
-the checked-file count. This is deterministic manifest/output integrity
-verification only, not freshness, source truth, source-code behavior, or
-runtime behavior verification. Source discovery-report
+content-free source spec line/token and artifact summary metadata. After
+successful regeneration, refresh records a top-level verified refresh provenance
+block, then runs the existing manifest verifier over the newly written
+manifest outputs and reports the checked-file count. This is
+deterministic manifest/output integrity verification only, not freshness,
+source truth, source-code behavior, or runtime behavior verification. Source
+discovery-report
 refresh reads the local report path from `manifest.discovery.reportPath`, uses
 only `report.source.resolvedPath`, preserves valid prior traversal bounds, and
 rewrites candidate evidence only. Source-verification local evidence refresh

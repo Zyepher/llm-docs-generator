@@ -82,6 +82,37 @@ interface ManifestContract {
   unsupportedAutomation: string[];
 }
 
+interface ArtifactSummary {
+  schema: string;
+  manifestMode: string;
+  generatedOutputs: {
+    count: number;
+    kinds: string[];
+    totalByteSize: number;
+    totalLineCount?: number;
+    totalEstimatedTokenCount?: number;
+    aggregateHash: string;
+  };
+  sourceFiles?: {
+    count: number;
+    formats?: string[];
+    totalByteSize: number;
+    totalLineCount?: number;
+    totalEstimatedTokenCount?: number;
+    aggregateHash: string;
+  };
+  warnings: {
+    count: number;
+  };
+  indexes?: {
+    semanticChunkIndexCount?: number;
+    semanticChunkCount?: number;
+    candidateEvidenceCandidateCount?: number;
+    sourceVerificationSourceFileCount?: number;
+    sourceVerificationDocsFileCount?: number;
+  };
+}
+
 const manifestContractExpectations = {
   'configured-sdk': {
     artifactRole: 'generated-docs',
@@ -295,6 +326,7 @@ interface GenerationManifest {
   generatedOutputs: ManifestFileEntry[];
   warnings: string[];
   manifestContract?: ManifestContract;
+  artifactSummary?: ArtifactSummary;
   refresh?: RefreshProvenance;
 }
 
@@ -381,6 +413,7 @@ interface SourceDocsManifest {
   };
   warnings: string[];
   manifestContract?: ManifestContract;
+  artifactSummary?: ArtifactSummary;
   refresh?: RefreshProvenance;
 }
 
@@ -540,6 +573,7 @@ interface DiscoveryReportManifest {
   candidateEvidenceIndex?: CandidateEvidenceManifestIndex;
   generatedOutputs: ManifestFileEntry[];
   manifestContract?: ManifestContract;
+  artifactSummary?: ArtifactSummary;
   refresh?: RefreshProvenance;
 }
 
@@ -1323,6 +1357,270 @@ function expectManifestContract(
   expect(JSON.stringify(contract)).not.toMatch(/confidence|score|sha256:|rawText|contentHash/i);
 }
 
+function expectArtifactSummary(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): void {
+  const summary = manifest.artifactSummary;
+
+  expect(summary).toBeDefined();
+
+  if (summary === undefined) {
+    throw new Error('expected artifact summary');
+  }
+
+  expect(summary.schema).toBe('llm-docs-generator.artifact-summary.v1');
+  expect(summary.manifestMode).toBe(manifest.mode);
+  expect(summary.generatedOutputs).toEqual(expectedGeneratedArtifactSummary(manifest));
+  expect(summary.sourceFiles).toEqual(expectedSourceArtifactSummary(manifest));
+  expect(summary.warnings).toEqual({ count: expectedArtifactWarningCount(manifest) });
+  expect(summary.indexes).toEqual(expectedArtifactIndexSummary(manifest));
+  expect(JSON.stringify(summary)).not.toMatch(
+    /authority|confidence|score|rank|taskFit|freshness|proof|rawText/i
+  );
+}
+
+function expectedGeneratedArtifactSummary(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): ArtifactSummary['generatedOutputs'] {
+  const entries = manifest.generatedOutputs.map((output) => ({
+    byteSize: output.byteSize,
+    hash: output.hash,
+    path: output.path,
+    kind: output.kind,
+    ...('lineCount' in output ? { lineCount: output.lineCount } : {}),
+    ...('estimatedTokenCount' in output ? { estimatedTokenCount: output.estimatedTokenCount } : {}),
+  }));
+
+  return {
+    count: entries.length,
+    kinds: uniqueSortedStringsForTest(entries.map((entry) => entry.kind)),
+    ...artifactFileSummaryTotalsForTest('generatedOutputs', entries),
+  };
+}
+
+function expectedSourceArtifactSummary(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): ArtifactSummary['sourceFiles'] {
+  if (manifest.mode === 'configured-sdk') {
+    const configuredManifest = manifest as GenerationManifest;
+    const entries = [
+      {
+        byteSize: configuredManifest.source.byteSize,
+        hash: configuredManifest.source.contentHash,
+        path: configuredManifest.source.resolvedSpecPath,
+        resolvedPath: configuredManifest.source.resolvedSpecPath,
+        format: configuredManifest.source.format,
+        ...('lineCount' in configuredManifest.source
+          ? { lineCount: configuredManifest.source.lineCount }
+          : {}),
+        ...('estimatedTokenCount' in configuredManifest.source
+          ? { estimatedTokenCount: configuredManifest.source.estimatedTokenCount }
+          : {}),
+      },
+    ];
+
+    return {
+      count: entries.length,
+      formats: uniqueSortedStringsForTest(entries.map((entry) => entry.format)),
+      ...artifactFileSummaryTotalsForTest('sourceFiles', entries),
+    };
+  }
+
+  if (manifest.mode === 'local-source-docs' || manifest.mode === 'source-truth-local-docs') {
+    const sourceFiles = (manifest as SourceDocsManifest | SourceTruthDocsManifest).sourceFiles;
+    const entries = sourceFiles.map((sourceFile) => ({
+      byteSize: sourceFile.byteSize,
+      hash: sourceFile.hash,
+      path: sourceFile.path,
+      resolvedPath: sourceFile.resolvedPath,
+      ...('format' in sourceFile ? { format: sourceFile.format } : {}),
+      ...('lineCount' in sourceFile ? { lineCount: sourceFile.lineCount } : {}),
+      ...('estimatedTokenCount' in sourceFile
+        ? { estimatedTokenCount: sourceFile.estimatedTokenCount }
+        : {}),
+    }));
+    const formats = uniqueSortedStringsForTest(
+      entries.map((entry) => ('format' in entry ? entry.format : undefined)).filter(isString)
+    );
+
+    return {
+      count: entries.length,
+      ...(formats.length === 0 ? {} : { formats }),
+      ...artifactFileSummaryTotalsForTest('sourceFiles', entries),
+    };
+  }
+
+  return undefined;
+}
+
+function expectedArtifactWarningCount(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): number {
+  if (manifest.mode === 'configured-sdk' || manifest.mode === 'local-source-docs') {
+    return (manifest as GenerationManifest | SourceDocsManifest).warnings.length;
+  }
+
+  if (manifest.mode === 'source-truth-local-docs') {
+    return (manifest as SourceTruthDocsManifest).inspection.warnings.length;
+  }
+
+  if (manifest.mode === 'discovery-report') {
+    return (manifest as DiscoveryReportManifest).discovery.warningCount;
+  }
+
+  return (manifest as SourceVerificationManifest).sourceVerification.summary.warningCount;
+}
+
+function expectedArtifactIndexSummary(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): ArtifactSummary['indexes'] {
+  if (manifest.mode === 'local-source-docs') {
+    const semanticChunkIndexes = (manifest as SourceDocsManifest).semanticChunkIndexes;
+
+    if (semanticChunkIndexes === undefined) {
+      return undefined;
+    }
+
+    return {
+      semanticChunkIndexCount: semanticChunkIndexes.length,
+      semanticChunkCount: semanticChunkIndexes.reduce(
+        (total, semanticChunkIndex) => total + semanticChunkIndex.chunkCount,
+        0
+      ),
+    };
+  }
+
+  if (manifest.mode === 'discovery-report') {
+    const candidateEvidenceIndex = (manifest as DiscoveryReportManifest).candidateEvidenceIndex;
+
+    if (candidateEvidenceIndex === undefined) {
+      return undefined;
+    }
+
+    return {
+      candidateEvidenceCandidateCount: candidateEvidenceIndex.candidateCount,
+    };
+  }
+
+  if (manifest.mode === 'source-verification-local-evidence') {
+    const fileEvidenceIndex = (manifest as SourceVerificationManifest).sourceVerification
+      .fileEvidenceIndex;
+
+    if (fileEvidenceIndex === undefined) {
+      return undefined;
+    }
+
+    return {
+      sourceVerificationSourceFileCount: fileEvidenceIndex.sourceFileCount,
+      sourceVerificationDocsFileCount: fileEvidenceIndex.docsFileCount,
+    };
+  }
+
+  return undefined;
+}
+
+function refreshArtifactSummaryForTest(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): void {
+  const sourceFiles = expectedSourceArtifactSummary(manifest);
+  const indexes = expectedArtifactIndexSummary(manifest);
+
+  manifest.artifactSummary = {
+    schema: 'llm-docs-generator.artifact-summary.v1',
+    manifestMode: manifest.mode,
+    generatedOutputs: expectedGeneratedArtifactSummary(manifest),
+    ...(sourceFiles === undefined ? {} : { sourceFiles }),
+    warnings: { count: expectedArtifactWarningCount(manifest) },
+    ...(indexes === undefined ? {} : { indexes }),
+  };
+}
+
+interface ArtifactFileSummaryEntryForTest {
+  path?: string;
+  resolvedPath?: string;
+  kind?: string;
+  format?: string;
+  byteSize: number;
+  hash: string;
+  lineCount?: number;
+  estimatedTokenCount?: number;
+}
+
+function artifactFileSummaryTotalsForTest(
+  section: 'generatedOutputs' | 'sourceFiles',
+  entries: ArtifactFileSummaryEntryForTest[]
+): Pick<
+  ArtifactSummary['generatedOutputs'],
+  'totalByteSize' | 'totalLineCount' | 'totalEstimatedTokenCount' | 'aggregateHash'
+> {
+  const totalLineCount = entries.every((entry) => entry.lineCount !== undefined)
+    ? entries.reduce((total, entry) => total + (entry.lineCount ?? 0), 0)
+    : undefined;
+  const totalEstimatedTokenCount = entries.every((entry) => entry.estimatedTokenCount !== undefined)
+    ? entries.reduce((total, entry) => total + (entry.estimatedTokenCount ?? 0), 0)
+    : undefined;
+
+  return {
+    totalByteSize: entries.reduce((total, entry) => total + entry.byteSize, 0),
+    ...(totalLineCount === undefined ? {} : { totalLineCount }),
+    ...(totalEstimatedTokenCount === undefined ? {} : { totalEstimatedTokenCount }),
+    aggregateHash: artifactSummaryAggregateHashForTest(section, entries),
+  };
+}
+
+function artifactSummaryAggregateHashForTest(
+  section: 'generatedOutputs' | 'sourceFiles',
+  entries: ArtifactFileSummaryEntryForTest[]
+): string {
+  const hash = createHash('sha256');
+
+  hash.update('llm-docs-generator:artifact-summary:v1\n');
+  hash.update(section);
+  hash.update('\n');
+  hash.update(JSON.stringify(entries));
+  hash.update('\n');
+
+  return `sha256:${hash.digest('hex')}`;
+}
+
+function uniqueSortedStringsForTest(values: string[]): string[] {
+  return [...new Set(values)].sort(compareStringsByCodeUnit);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
 async function git(args: string[], cwd: string): Promise<void> {
   await execFileAsync('git', args, { cwd });
 }
@@ -1486,6 +1784,45 @@ async function generateSourceDocsFixture(): Promise<{
 
   return {
     sourceDir,
+    outputDir,
+    manifestPath,
+    manifest: JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest,
+  };
+}
+
+async function generateSourceDocsSemanticChunkFixture(
+  prefix = 'llm-docs-source-chunks-verify-'
+): Promise<{
+  sourcePath: string;
+  outputDir: string;
+  manifestPath: string;
+  manifest: SourceDocsManifest;
+}> {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), prefix));
+  tempDirs.push(dir);
+  const sourcePath = join(dir, 'indexed-docs.md');
+  const outputDir = join(dir, 'agent-docs');
+  const manifestPath = join(outputDir, 'manifest.json');
+
+  await writeFile(
+    sourcePath,
+    ['# Indexed Docs', '', 'Stable chunk text.', '', '## Usage', '', 'Use it.', ''].join('\n'),
+    'utf-8'
+  );
+  await runCli([
+    'generate',
+    '--source',
+    sourcePath,
+    '--format',
+    'markdown',
+    '--chunks',
+    'jsonl',
+    '--output-dir',
+    outputDir,
+  ]);
+
+  return {
+    sourcePath,
     outputDir,
     manifestPath,
     manifest: JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest,
@@ -1670,6 +2007,7 @@ async function refreshDiscoveryManifestReportMetadata(
   output.hash = await sha256File(reportPath);
   output.lineCount = countTextLines(reportText);
   output.estimatedTokenCount = estimateTextTokens(reportText);
+  refreshArtifactSummaryForTest(manifest);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
   return manifest;
@@ -1691,6 +2029,7 @@ async function refreshSourceVerificationManifestReportMetadata(
   output.hash = await sha256File(reportPath);
   output.lineCount = countTextLines(reportText);
   output.estimatedTokenCount = estimateTextTokens(reportText);
+  refreshArtifactSummaryForTest(manifest);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
   return manifest;
@@ -1714,6 +2053,7 @@ async function refreshSourceTruthReportOutputMetadata(
   reportOutput.hash = await sha256File(reportPath);
   reportOutput.lineCount = countTextLines(reportText);
   reportOutput.estimatedTokenCount = estimateTextTokens(reportText);
+  refreshArtifactSummaryForTest(manifest);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
   return manifest;
@@ -2484,6 +2824,9 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('source-truth-generate')?.summary).toEqual(
       expect.stringContaining('descriptive manifest contract metadata')
     );
+    expect(implemented.get('source-truth-generate')?.summary).toEqual(
+      expect.stringContaining('content-free artifact summary metadata')
+    );
     expect(implemented.get('source-truth-generate')?.limitations).toContain(
       'manifest source-file line/token metadata is content-free text metadata, not behavior verification'
     );
@@ -2577,6 +2920,9 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('generate-source')?.summary).toContain(
       'descriptive manifest contract metadata'
     );
+    expect(implemented.get('generate-source')?.summary).toContain(
+      'content-free artifact summary metadata'
+    );
     expect(implemented.get('parser-plugin-execution')).toMatchObject({
       command: 'generate',
       mode: 'generate --source <local-file-or-directory> --parser-plugin-manifest <path> --format <plugin-format-id>',
@@ -2604,6 +2950,9 @@ describe('CLI compatibility behavior', () => {
         'no network added by the CLI',
       ]),
     });
+    expect(implemented.get('parser-plugin-execution')?.summary).toContain(
+      'content-free artifact summary metadata'
+    );
     expect(implemented.get('generate-preset-swift-book')).toMatchObject({
       command: 'generate',
       mode: 'generate --source --preset swift-book',
@@ -2637,11 +2986,17 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('generate-sdk')?.summary).toContain(
       'descriptive manifest contract metadata'
     );
+    expect(implemented.get('generate-sdk')?.summary).toContain(
+      'content-free artifact summary metadata'
+    );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain(
       'recorded generator/sdk/parser/formatter metadata'
     );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain(
       'manifest contract validation'
+    );
+    expect(implemented.get('verify-configured-sdk')?.summary).toContain(
+      'artifact summary validation'
     );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain(
       'optional content-free source line/token metadata'
@@ -2674,6 +3029,12 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('verify-discovery-report')?.summary).toContain(
       'manifest contract validation'
     );
+    expect(implemented.get('verify-discovery-report')?.summary).toContain(
+      'artifact summary validation'
+    );
+    expect(implemented.get('verify-discovery-report')?.limitations).toContain(
+      'artifact summaries are content-free and do not score candidates'
+    );
     expect(implemented.get('verify-source-docs')?.inputBoundary).toBe(
       'local-source-docs manifest.json'
     );
@@ -2689,6 +3050,7 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('verify-source-docs')?.summary).toContain(
       'manifest contract validation'
     );
+    expect(implemented.get('verify-source-docs')?.summary).toContain('artifact summary validation');
     expect(implemented.get('verify-source-docs')?.limitations).toEqual(
       expect.arrayContaining([
         'local-source-docs manifest mode only',
@@ -2719,6 +3081,9 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('verify-source-truth-docs')?.summary).toContain(
       'manifest contract validation'
     );
+    expect(implemented.get('verify-source-truth-docs')?.summary).toContain(
+      'artifact summary validation'
+    );
     const sourceVerificationVerify = implemented.get('verify-source-verification');
     expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('report integrity'));
     expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('provenance'));
@@ -2737,6 +3102,9 @@ describe('CLI compatibility behavior', () => {
     );
     expect(sourceVerificationVerify?.summary).toEqual(
       expect.stringContaining('manifest contract validation')
+    );
+    expect(sourceVerificationVerify?.summary).toEqual(
+      expect.stringContaining('artifact summary validation')
     );
     expect(sourceVerificationVerify).toMatchObject({
       command: 'verify',
@@ -2780,6 +3148,9 @@ describe('CLI compatibility behavior', () => {
     });
     expect(implemented.get('refresh-source-docs')?.summary).toContain(
       'recording verified refresh provenance metadata'
+    );
+    expect(implemented.get('refresh-source-docs')?.summary).toContain(
+      'content-free artifact summary metadata'
     );
     expect(implemented.get('refresh-source-truth-docs')).toMatchObject({
       command: 'refresh',
@@ -2963,6 +3334,7 @@ describe('CLI compatibility behavior', () => {
     ];
     const expectedGenerateLimitations = [
       'manifest source-file line/token metadata is content-free text metadata, not behavior verification',
+      'artifact summaries are content-free manifest metadata only',
       ...expectedLimitations,
     ];
 
@@ -3746,6 +4118,7 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expectManifestContract(manifest, 'discovery-report');
+    expectArtifactSummary(manifest);
     expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
     expectLocalCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report, {
       source: {
@@ -4874,6 +5247,7 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expectManifestContract(manifest, 'discovery-report');
+    expectArtifactSummary(manifest);
     expectWebsiteCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report);
     expectCandidateEvidenceIndexHasNoReportContent(manifest.candidateEvidenceIndex);
     const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
@@ -5637,6 +6011,7 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expectManifestContract(manifest, 'discovery-report');
+    expectArtifactSummary(manifest);
     expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
     expectLocalCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report, {
       repo: {
@@ -6704,6 +7079,7 @@ describe('CLI compatibility behavior', () => {
       },
     });
     expectManifestContract(manifest, 'local-source-docs');
+    expectArtifactSummary(manifest);
     expect(manifest.parser.plugin?.execution.statement).toContain('not sandboxed');
     expect(manifest.sourceFiles).toEqual([
       {
@@ -6781,6 +7157,7 @@ describe('CLI compatibility behavior', () => {
 
     expect(manifest.parser.plugin).toBeDefined();
     expectManifestContract(manifest, 'local-source-docs');
+    expectArtifactSummary(manifest);
     expect(manifest.refresh).toBeUndefined();
 
     await writeFile(
@@ -7299,6 +7676,11 @@ describe('CLI compatibility behavior', () => {
       lineCount: countTextLines(chunkText),
       estimatedTokenCount: estimateTextTokens(chunkText),
     });
+    if (generatedManifest.artifactSummary === undefined) {
+      throw new Error('expected artifact summary');
+    }
+    generatedManifest.artifactSummary.generatedOutputs =
+      expectedGeneratedArtifactSummary(generatedManifest);
     await writeFile(
       generatedManifestPath,
       `${JSON.stringify(generatedManifest, null, 2)}\n`,
@@ -7372,6 +7754,7 @@ describe('CLI compatibility behavior', () => {
     const verifyResult = await runCli(['verify', '--manifest', join(outputDir, 'manifest.json')]);
 
     expectManifestContract(manifest, 'local-source-docs');
+    expectArtifactSummary(manifest);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
     expect(refreshResult.exitCode).toBe(1);
@@ -8068,6 +8451,7 @@ describe('CLI compatibility behavior', () => {
       semanticChunkIndex?.aggregateHash
     );
     expect(secondManifest.semanticChunkIndexes?.[0]?.chunks).toEqual(semanticChunkIndex?.chunks);
+    expectArtifactSummary(manifest);
 
     const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
 
@@ -8158,6 +8542,7 @@ describe('CLI compatibility behavior', () => {
     const chunkPath = join(outputDir, chunkOutput.path);
     await writeFile(chunkPath, 'not-json\n', 'utf-8');
     await refreshGeneratedTextOutputMetadata(chunkPath, chunkOutput);
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -9504,6 +9889,7 @@ describe('CLI compatibility behavior', () => {
     expect(refreshedSourceFile.estimatedTokenCount).toBe(estimateTextTokens(refreshedSourceText));
     expectManifestContract(refreshedManifest, 'local-source-docs');
     expectRefreshProvenance(refreshedManifest, 'local-source-docs');
+    expectArtifactSummary(refreshedManifest);
     expect(refreshedText).toContain('refreshed local docs');
     expect(refreshedText).not.toContain('tampered output');
     expect(verifyResult.stdout).toContain('Failures: 0');
@@ -9712,6 +10098,7 @@ describe('CLI compatibility behavior', () => {
       refreshedManifest as SourceTruthDocsManifest & { refresh?: RefreshProvenance },
       'source-truth-local-docs'
     );
+    expectArtifactSummary(refreshedManifest);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
   });
@@ -9770,6 +10157,7 @@ describe('CLI compatibility behavior', () => {
       manifest as SourceVerificationManifest & { refresh?: RefreshProvenance },
       'source-verification-local-evidence'
     );
+    expectArtifactSummary(manifest);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
   });
@@ -10182,6 +10570,7 @@ describe('CLI compatibility behavior', () => {
       'parsed/swift-v2-spec.json',
     ]);
     expectRefreshProvenance(refreshedManifest, 'configured-sdk');
+    expectArtifactSummary(refreshedManifest);
     expect(parsedSpec.operations[0]).toMatchObject({
       title: 'Select refreshed data',
       description: 'Read refreshed rows',
@@ -10743,6 +11132,7 @@ describe('CLI compatibility behavior', () => {
     });
     expect(manifest.candidateEvidenceIndex?.candidateCount).toBe(1);
     expectRefreshProvenance(manifest, 'discovery-report');
+    expectArtifactSummary(manifest);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
   });
@@ -11073,6 +11463,7 @@ describe('CLI compatibility behavior', () => {
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
     expectManifestContract(manifest, 'configured-sdk');
+    expectArtifactSummary(manifest);
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain('Checked files: 4');
     expect(result.stdout).toContain('Failures: 0');
@@ -11085,6 +11476,7 @@ describe('CLI compatibility behavior', () => {
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
     expectManifestContract(manifest, 'local-source-docs');
+    expectArtifactSummary(manifest);
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain(
       `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
@@ -11093,14 +11485,16 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).toContain('Verification passed');
   });
 
-  it('accepts older generated manifests without manifest contract or refresh provenance', async () => {
+  it('accepts older generated manifests without manifest contract artifact summary or refresh provenance', async () => {
     const { outputDir, manifestPath } = await generateSourceDocsFixture();
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
 
     expect(manifest.manifestContract).toBeDefined();
+    expect(manifest.artifactSummary).toBeDefined();
     expect(manifest.refresh).toBeUndefined();
 
     delete manifest.manifestContract;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCli(['verify', '--output-dir', outputDir]);
@@ -11295,6 +11689,239 @@ describe('CLI compatibility behavior', () => {
     15000
   );
 
+  it.each([
+    {
+      name: 'non-object value',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        manifest.artifactSummary = [] as unknown as ArtifactSummary;
+      },
+      expected: 'artifactSummary must be an object when present',
+    },
+    {
+      name: 'unsupported extra key',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary & Record<string, unknown>;
+        summary.score = 1;
+      },
+      expected: 'artifactSummary.score is not supported',
+    },
+    {
+      name: 'unsupported nested key',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary & {
+          generatedOutputs: ArtifactSummary['generatedOutputs'] & Record<string, unknown>;
+        };
+        summary.generatedOutputs.authorityScore = 1;
+      },
+      expected: 'artifactSummary.generatedOutputs.authorityScore is not supported',
+    },
+    {
+      name: 'bad schema',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary;
+        summary.schema = 'llm-docs-generator.artifact-summary.v2';
+      },
+      expected: 'artifactSummary.schema must be llm-docs-generator.artifact-summary.v1',
+    },
+    {
+      name: 'wrong manifest mode',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary;
+        summary.manifestMode = 'configured-sdk';
+      },
+      expected: 'artifactSummary.manifestMode must match manifest mode local-source-docs',
+    },
+    {
+      name: 'generated output count mismatch',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary;
+        summary.generatedOutputs.count += 1;
+      },
+      expected: 'artifactSummary.generatedOutputs.count must match generatedOutputs length',
+    },
+    {
+      name: 'generated output total mismatch',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary;
+        summary.generatedOutputs.totalByteSize += 1;
+      },
+      expected:
+        'artifactSummary.generatedOutputs.totalByteSize must match generatedOutputs byte sizes',
+    },
+    {
+      name: 'generated output aggregate mismatch',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary;
+        summary.generatedOutputs.aggregateHash = `sha256:${'0'.repeat(64)}`;
+      },
+      expected:
+        'artifactSummary.generatedOutputs.aggregateHash must match generated output metadata',
+    },
+    {
+      name: 'source file count mismatch',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary;
+
+        if (summary.sourceFiles === undefined) {
+          throw new Error('expected sourceFiles summary');
+        }
+
+        summary.sourceFiles.count += 1;
+      },
+      expected: 'artifactSummary.sourceFiles.count must match source file metadata length',
+    },
+    {
+      name: 'source file aggregate mismatch',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary;
+
+        if (summary.sourceFiles === undefined) {
+          throw new Error('expected sourceFiles summary');
+        }
+
+        summary.sourceFiles.aggregateHash = `sha256:${'0'.repeat(64)}`;
+      },
+      expected: 'artifactSummary.sourceFiles.aggregateHash must match source file metadata',
+    },
+    {
+      name: 'warning count mismatch',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const summary = manifest.artifactSummary as ArtifactSummary;
+        summary.warnings.count += 1;
+      },
+      expected: 'artifactSummary.warnings.count must match manifest warnings',
+    },
+  ])(
+    'rejects malformed artifact summary: $name',
+    async (testCase) => {
+      const { manifestPath } = await generateSourceDocsFixture();
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest &
+        Record<string, unknown>;
+
+      if (manifest.artifactSummary === undefined) {
+        throw new Error('expected generated artifact summary before tampering');
+      }
+
+      testCase.mutate(manifest);
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stdout, testCase.name).toContain('Checked files: 0');
+      expect(result.stderr, testCase.name).toContain(testCase.expected);
+      expect(result.stderr, testCase.name).not.toContain('hash mismatch');
+    },
+    15000
+  );
+
+  const artifactSummaryIndexCounterCases: Array<{
+    name: string;
+    setup: () => Promise<{ manifestPath: string }>;
+    mutate: (indexes: NonNullable<ArtifactSummary['indexes']>) => void;
+  }> = [
+    {
+      name: 'source-docs semantic chunk index count',
+      setup: () =>
+        generateSourceDocsSemanticChunkFixture('llm-docs-artifact-summary-index-source-docs-'),
+      mutate(indexes) {
+        const value = indexes.semanticChunkIndexCount;
+
+        if (value === undefined) {
+          throw new Error('expected semanticChunkIndexCount');
+        }
+
+        indexes.semanticChunkIndexCount = value + 1;
+      },
+    },
+    {
+      name: 'source-docs semantic chunk count',
+      setup: () => generateSourceDocsSemanticChunkFixture('llm-docs-artifact-summary-chunk-count-'),
+      mutate(indexes) {
+        const value = indexes.semanticChunkCount;
+
+        if (value === undefined) {
+          throw new Error('expected semanticChunkCount');
+        }
+
+        indexes.semanticChunkCount = value + 1;
+      },
+    },
+    {
+      name: 'discovery candidate evidence candidate count',
+      setup: () => createSourceDiscoveryVerifyFixture('llm-docs-artifact-summary-index-discovery-'),
+      mutate(indexes) {
+        const value = indexes.candidateEvidenceCandidateCount;
+
+        if (value === undefined) {
+          throw new Error('expected candidateEvidenceCandidateCount');
+        }
+
+        indexes.candidateEvidenceCandidateCount = value + 1;
+      },
+    },
+    {
+      name: 'source-verification source file evidence count',
+      setup: () =>
+        createSourceVerificationVerifyFixture(
+          'llm-docs-artifact-summary-index-source-verification-source-'
+        ),
+      mutate(indexes) {
+        const value = indexes.sourceVerificationSourceFileCount;
+
+        if (value === undefined) {
+          throw new Error('expected sourceVerificationSourceFileCount');
+        }
+
+        indexes.sourceVerificationSourceFileCount = value + 1;
+      },
+    },
+    {
+      name: 'source-verification docs file evidence count',
+      setup: () =>
+        createSourceVerificationVerifyFixture(
+          'llm-docs-artifact-summary-index-source-verification-docs-'
+        ),
+      mutate(indexes) {
+        const value = indexes.sourceVerificationDocsFileCount;
+
+        if (value === undefined) {
+          throw new Error('expected sourceVerificationDocsFileCount');
+        }
+
+        indexes.sourceVerificationDocsFileCount = value + 1;
+      },
+    },
+  ];
+
+  it.each(artifactSummaryIndexCounterCases)(
+    'rejects mismatched artifact summary index counters: $name',
+    async (testCase) => {
+      const { manifestPath } = await testCase.setup();
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as {
+        artifactSummary?: ArtifactSummary;
+      } & Record<string, unknown>;
+      const indexes = manifest.artifactSummary?.indexes;
+
+      if (indexes === undefined) {
+        throw new Error('expected artifactSummary.indexes before tampering');
+      }
+
+      testCase.mutate(indexes);
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stdout, testCase.name).toContain('Checked files: 0');
+      expect(result.stderr, testCase.name).toContain(
+        'artifactSummary.indexes must match manifest index counters'
+      );
+      expect(result.stderr, testCase.name).not.toContain('hash mismatch');
+    },
+    15000
+  );
+
   it('verifies a generated source-truth docs manifest by output directory and manifest path', async () => {
     const { outputDir, manifestPath, manifest } = await generateSourceTruthDocsFixture();
 
@@ -11303,6 +11930,7 @@ describe('CLI compatibility behavior', () => {
     const expectedCheckedFiles = manifest.sourceFiles.length + manifest.generatedOutputs.length;
 
     expectManifestContract(manifest, 'source-truth-local-docs');
+    expectArtifactSummary(manifest);
     expect(outputDirResult.stdout).toContain('Manifest verification');
     expect(outputDirResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
     expect(outputDirResult.stdout).toContain('Failures: 0');
@@ -11322,6 +11950,7 @@ describe('CLI compatibility behavior', () => {
       delete sourceFile.lineCount;
       delete sourceFile.estimatedTokenCount;
     }
+    delete manifest.artifactSummary;
 
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
@@ -11341,6 +11970,7 @@ describe('CLI compatibility behavior', () => {
 
     const passResult = await runCli(['verify', '--output-dir', outputDir]);
     expectManifestContract(manifest, 'discovery-report');
+    expectArtifactSummary(manifest);
     expect(manifest.manifestContract?.artifactRole).toBe('candidate-evidence-report');
     expect(manifest.manifestContract?.cliGuarantees.join(' ')).toContain(
       'candidate evidence for agent review only'
@@ -11372,6 +12002,7 @@ describe('CLI compatibility behavior', () => {
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
     expectManifestContract(manifest, 'source-verification-local-evidence');
+    expectArtifactSummary(manifest);
     expectSourceVerificationFileEvidenceIndex(
       manifest.sourceVerification.fileEvidenceIndex,
       report
@@ -11457,6 +12088,7 @@ describe('CLI compatibility behavior', () => {
     fileEvidenceIndex.docsFileCount += 1;
     fileEvidenceIndex.aggregateHash =
       sourceVerificationFileEvidenceIndexAggregateHashForTest(fileEvidenceIndex);
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
@@ -11651,6 +12283,7 @@ describe('CLI compatibility behavior', () => {
     ) as SourceVerificationManifest;
 
     delete manifest.sourceVerification.fileEvidenceIndex;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCli(['verify', '--output-dir', outputDir]);
@@ -12092,6 +12725,7 @@ describe('CLI compatibility behavior', () => {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
 
     delete manifest.candidateEvidenceIndex;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCli(['verify', '--output-dir', outputDir]);
@@ -12205,6 +12839,7 @@ describe('CLI compatibility behavior', () => {
     }
 
     outputFile.lineCount += 1;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12227,6 +12862,7 @@ describe('CLI compatibility behavior', () => {
     }
 
     outputFile.estimatedTokenCount += 1;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12252,6 +12888,7 @@ describe('CLI compatibility behavior', () => {
 
     manifest.source.lineCount += 1;
     manifest.source.estimatedTokenCount += 1;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12270,6 +12907,7 @@ describe('CLI compatibility behavior', () => {
 
     delete manifest.source.lineCount;
     delete manifest.source.estimatedTokenCount;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCli(['verify', '--manifest', manifestPath]);
@@ -12286,6 +12924,7 @@ describe('CLI compatibility behavior', () => {
 
     manifest.source.lineCount = -1;
     manifest.source.estimatedTokenCount = 1.5;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12327,6 +12966,7 @@ describe('CLI compatibility behavior', () => {
     for (const output of manifest.generatedOutputs) {
       mutate(output);
     }
+    delete manifest.artifactSummary;
 
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
@@ -12584,6 +13224,7 @@ describe('CLI compatibility behavior', () => {
 
     sourceFile.lineCount += 1;
     sourceFile.estimatedTokenCount += 1;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12609,6 +13250,7 @@ describe('CLI compatibility behavior', () => {
 
     delete sourceFile.lineCount;
     delete sourceFile.estimatedTokenCount;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12634,6 +13276,7 @@ describe('CLI compatibility behavior', () => {
 
     sourceFile.lineCount = -1;
     sourceFile.estimatedTokenCount = 1.5;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12679,6 +13322,7 @@ describe('CLI compatibility behavior', () => {
 
     outputFile.lineCount += 1;
     outputFile.estimatedTokenCount += 1;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12802,6 +13446,7 @@ describe('CLI compatibility behavior', () => {
 
     delete outputFile.lineCount;
     delete outputFile.estimatedTokenCount;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12883,6 +13528,7 @@ describe('CLI compatibility behavior', () => {
     await writeFile(join(sourceDir, sourceFile.path), refreshedSource, 'utf-8');
     sourceFile.byteSize = Buffer.byteLength(refreshedSource);
     sourceFile.hash = `sha256:${createHash('sha256').update(refreshedSource).digest('hex')}`;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12905,6 +13551,7 @@ describe('CLI compatibility behavior', () => {
 
     sourceFile.lineCount = -1;
     sourceFile.estimatedTokenCount = 1.5;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13262,6 +13909,7 @@ describe('CLI compatibility behavior', () => {
 
     sourceFile.path = '../outside.md';
     outputFile.path = '../outside-output.txt';
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13290,6 +13938,7 @@ describe('CLI compatibility behavior', () => {
     sourceFile.byteSize = await byteSize(outsidePath);
     sourceFile.hash = await sha256File(outsidePath);
     manifest.source.aggregateHash = aggregateSourceFilesHashForTest(manifest.sourceFiles);
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13319,6 +13968,7 @@ describe('CLI compatibility behavior', () => {
     sourceFile.byteSize = await byteSize(outsidePath);
     sourceFile.hash = await sha256File(outsidePath);
     manifest.source.aggregateHash = aggregateSourceFilesHashForTest(manifest.sourceFiles);
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13370,6 +14020,7 @@ describe('CLI compatibility behavior', () => {
     await symlink(outsideDir, linkPath, 'dir');
 
     outputFile.path = 'llm-docs/link/file.txt';
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13391,6 +14042,7 @@ describe('CLI compatibility behavior', () => {
     pathSourceFile.path = '../outside.ts';
     pathOutputFile.path = join(dirname(pathFixture.outputDir), 'absolute-output.json');
     pathOutputFile.kind = 'llm-docs';
+    delete pathFixture.manifest.artifactSummary;
     await writeFile(
       pathFixture.manifestPath,
       `${JSON.stringify(pathFixture.manifest, null, 2)}\n`,
@@ -13425,6 +14077,7 @@ describe('CLI compatibility behavior', () => {
     sourceLinkFile.resolvedPath = sourceLinkPath;
     sourceLinkFile.byteSize = await byteSize(outsideSourcePath);
     sourceLinkFile.hash = await sha256File(outsideSourcePath);
+    delete sourceLinkFixture.manifest.artifactSummary;
     await writeFile(
       sourceLinkFixture.manifestPath,
       `${JSON.stringify(sourceLinkFixture.manifest, null, 2)}\n`,
@@ -13526,6 +14179,7 @@ describe('CLI compatibility behavior', () => {
     }
 
     outputFile.kind = 'repo-source';
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13546,6 +14200,7 @@ describe('CLI compatibility behavior', () => {
     }
 
     delete sourceFile.format;
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);

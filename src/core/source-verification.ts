@@ -14,7 +14,12 @@ import {
 } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
-import { buildManifestContract, type ManifestContract } from './manifest.js';
+import {
+  buildArtifactSummaryForManifest,
+  buildManifestContract,
+  type ArtifactSummary,
+  type ManifestContract,
+} from './manifest.js';
 import {
   buildSourceVerificationFileEvidenceIndex,
   type SourceVerificationFileEvidenceIndex,
@@ -211,6 +216,7 @@ export interface SourceVerificationManifest {
   schemaVersion: typeof SOURCE_VERIFICATION_MANIFEST_SCHEMA_VERSION;
   mode: typeof SOURCE_VERIFICATION_MODE;
   manifestContract?: ManifestContract;
+  artifactSummary?: ArtifactSummary;
   generator: SourceVerificationGeneratorMetadata;
   sourceVerification: {
     reportPath: string;
@@ -972,7 +978,7 @@ function buildManifest(options: {
   report: SourceVerificationReport;
   generatedOutputs: SourceVerificationGeneratedOutput[];
 }): SourceVerificationManifest {
-  return {
+  const manifest = {
     schemaVersion: SOURCE_VERIFICATION_MANIFEST_SCHEMA_VERSION,
     mode: SOURCE_VERIFICATION_MODE,
     manifestContract: buildManifestContract(SOURCE_VERIFICATION_MODE),
@@ -991,6 +997,11 @@ function buildManifest(options: {
       fileEvidenceIndex: buildSourceVerificationFileEvidenceIndex(options.report),
     },
     generatedOutputs: options.generatedOutputs,
+  } satisfies Omit<SourceVerificationManifest, 'artifactSummary'>;
+
+  return {
+    ...manifest,
+    artifactSummary: buildArtifactSummaryForManifest(manifest),
   };
 }
 

@@ -17,7 +17,12 @@ import {
   buildSemanticChunkJsonlManifestIndex,
   type SemanticChunkManifestIndex,
 } from './semantic-chunk-index.js';
-import { buildManifestContract, type ManifestContract } from './manifest.js';
+import {
+  buildArtifactSummaryForManifest,
+  buildManifestContract,
+  type ArtifactSummary,
+  type ManifestContract,
+} from './manifest.js';
 import { formatDocNode } from './universal-formatter.js';
 import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
@@ -149,6 +154,7 @@ export interface SourceDocsManifest {
   generator: SourceDocsGeneratorMetadata;
   mode: typeof SOURCE_DOCS_MODE;
   manifestContract?: ManifestContract;
+  artifactSummary?: ArtifactSummary;
   source: {
     input: string;
     resolvedPath: string;
@@ -1323,7 +1329,7 @@ function buildSourceDocsManifest(options: {
   }));
   const sourceFile = options.source.type === 'file' ? sourceFiles[0] : undefined;
 
-  return {
+  const manifest = {
     schemaVersion: SOURCE_DOCS_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     generator: options.generator,
@@ -1363,6 +1369,11 @@ function buildSourceDocsManifest(options: {
       : { semanticChunkIndexes: options.semanticChunkIndexes }),
     ...(options.preset === undefined ? {} : { preset: options.preset }),
     warnings: [...new Set(options.warnings)].sort(compareStringsByCodeUnit),
+  } satisfies Omit<SourceDocsManifest, 'artifactSummary'>;
+
+  return {
+    ...manifest,
+    artifactSummary: buildArtifactSummaryForManifest(manifest),
   };
 }
 

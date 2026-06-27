@@ -966,6 +966,13 @@ capabilities:
             automation-flag choice; it is not CLI authority, source-truth, task-fit, or
             source-selection judgment.
           </p>
+          <p>
+            Current successful manifests include content-free validation metadata such as
+            <code>manifestContract</code> and <code>artifactSummary</code>. The artifact summary
+            records deterministic counts, totals, aggregate hashes over existing manifest file
+            metadata, warning counts, and compact index counters only; it does not include raw
+            content, rank candidates, score authority, prove freshness, or select sources.
+          </p>
           <pre><code>{
   "schemaVersion": "1.0",
   "target": {

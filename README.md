@@ -85,8 +85,9 @@ Current implemented capabilities include:
   defaults only when the agent or user supplies the exact local source path
 - opt-in semantic chunk JSONL output for explicit local source generation
 - manifests with source or discovery provenance, descriptive top-level
-  `manifestContract` metadata, content hashes, generated file hashes,
-  parser/formatter metadata, and warnings
+  `manifestContract` metadata, content-free top-level `artifactSummary`
+  metadata, content hashes, generated file hashes, parser/formatter metadata,
+  and warnings
 - configured OpenRef SDK generation plus configured-SDK, source-docs,
   source-truth docs, discovery-report, and source-verification manifest
   verification, including recorded generator/sdk/parser/formatter metadata
@@ -334,9 +335,14 @@ strategy, deterministic input boundary, limitations, and supported keys. New
 successful manifests also include a top-level `manifestContract` block that
 describes the deterministic CLI/agent boundary for the manifest mode; `verify`
 accepts older manifests without it and validates its schema, mode, artifact
-role, static arrays, and supported keys when present. These checks do not refresh
-outputs or sources, inspect additional source/docs files, perform broad
-official-docs claim checking, validate source-code behavior or runtime
+role, static arrays, and supported keys when present. New successful manifests
+also include a top-level `artifactSummary` block with deterministic content-free
+counts, totals, aggregate hashes over existing manifest file metadata, warning
+counts, source-file totals where already represented, and compact index
+counters; `verify` accepts older manifests without it and validates supported
+keys, mode, counts, totals, and aggregate hashes when present. These checks do
+not refresh outputs or sources, inspect additional source/docs files, perform
+broad official-docs claim checking, validate source-code behavior or runtime
 behavior, validate freshness, refresh remote resources, decide candidate
 authority, task fit, source truth, or source selection, or prove that docs
 statements are correct.
