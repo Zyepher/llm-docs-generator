@@ -1326,7 +1326,7 @@ async function createSourceDiscoveryVerifyFixture(prefix = 'llm-docs-discovery-v
   reportPath: string;
   manifestPath: string;
 }> {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
+  const dir = await mkdtemp(join(await realpath(tmpdir()), prefix));
   tempDirs.push(dir);
   const sourceDir = join(dir, 'docs');
   const outputDir = join(dir, 'reports');
@@ -1725,7 +1725,7 @@ describe('CLI compatibility behavior', () => {
       /verify` checks recorded plugin\s+metadata\s+against the plugin manifest/
     );
     expect(docs.get('README.md')).toMatch(
-      /Parser-plugin `local-source-docs`\s+manifests are not refreshed\s+yet/
+      /Parser-plugin `local-source-docs`\s+manifests are\s+not refreshed\s+yet/
     );
     expect(docs.get('IMPLEMENTATION.md')).toContain('- [ ] Plugin system for custom parsers');
     expect(docs.get('IMPLEMENTATION.md')).toMatch(
@@ -1820,7 +1820,7 @@ describe('CLI compatibility behavior', () => {
       'Print the deterministic machine-readable capabilities contract'
     );
     expect(refreshHelp.stdout).toMatch(
-      /Refresh built-in local source docs, source-truth docs, or local\s+configured SDK\s+docs from an existing explicit local manifest/
+      /Refresh supported explicit local manifests, including local source discovery\s+reports/
     );
     expect(refreshHelp.stdout).toContain('--manifest <path>');
     expect(refreshHelp.stdout).toContain('--output-dir <dir>');
@@ -2224,6 +2224,7 @@ describe('CLI compatibility behavior', () => {
       'refresh-source-docs',
       'refresh-source-truth-docs',
       'refresh-configured-sdk',
+      'refresh-source-discovery-report',
       'list-sdks',
       'validate-sdk',
     ]);
@@ -2443,7 +2444,7 @@ describe('CLI compatibility behavior', () => {
         'candidate evidence for agent review only',
         'no task fit decision',
         'no source selection',
-        'verify does not refresh discovery reports',
+        'verify itself does not refresh discovery reports',
         'verify does not refresh remote freshness evidence',
         'no source-code verification',
       ]),
@@ -2528,7 +2529,7 @@ describe('CLI compatibility behavior', () => {
         'no repo freshness check',
         'no crawling',
         'no source selection',
-        'no discovery report refresh',
+        'does not consume discovery reports',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
@@ -2550,7 +2551,7 @@ describe('CLI compatibility behavior', () => {
         'no repo freshness check',
         'no crawling',
         'no source selection',
-        'no discovery report refresh',
+        'does not consume discovery reports',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
@@ -2577,10 +2578,35 @@ describe('CLI compatibility behavior', () => {
         'OpenRef parser and legacy LLM formatter only',
         'no registry lookup',
         'no URL fetching',
-        'no discovery report refresh',
+        'does not consume discovery reports',
         'no candidate report consumption',
         'no candidate auto-selection',
         'no remote network work',
+      ]),
+    });
+    expect(implemented.get('refresh-source-discovery-report')).toMatchObject({
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for discovery-report source',
+      status: 'implemented',
+      inputBoundary:
+        'existing discovery-report manifest.json with discovery.kind source and a local-bounded report source.resolvedPath',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: ['discovery-report.json', 'manifest.json'],
+      summary: expect.stringContaining('preserving prior traversal bounds'),
+      limitations: expect.arrayContaining([
+        'source discovery-report manifests only',
+        'uses only report.source.resolvedPath and traversal.maxDepth/maxEntries/maxFiles from the existing local report',
+        'candidate evidence for agent review only',
+        'no docs generation',
+        'no source selection',
+        'repo discovery-report refresh is not supported',
+        'URL discovery-report refresh is not supported',
+        'no remote freshness refresh',
+        'no repo cache update',
+        'no broad crawling',
+        'no candidate report consumption',
+        'no candidate auto-selection',
+        'no network access',
       ]),
     });
     expect(planned.has('generate-source')).toBe(false);
@@ -2591,10 +2617,13 @@ describe('CLI compatibility behavior', () => {
       'generate --source'
     );
     expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
-      'only explicit built-in-parser local-source-docs, source-truth-local-docs, and configured-sdk manifests with recorded absolute local spec paths can be refreshed'
+      'local source discovery-report manifests can be refreshed'
     );
     expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
-      'parser-plugin source-docs'
+      'repo/URL discovery-report refresh'
+    );
+    expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
+      'source-verification refresh'
     );
     expect(planned.get('source-code-verification')?.reason).toContain(
       'broad official-docs behavior/API claim verification remains planned'
@@ -2694,7 +2723,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 23');
+    expect(stdout).toContain('Implemented modes: 24');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
   });
@@ -9890,21 +9919,263 @@ describe('CLI compatibility behavior', () => {
     expect(await readFile(markdownPath, 'utf-8')).toBe(preservedMarkdown);
   });
 
-  it('refresh rejects discovery report manifests', async () => {
-    const discoveryFixture = await createSourceDiscoveryVerifyFixture(
-      'llm-docs-refresh-discovery-'
+  it('refreshes a local source discovery-report manifest from the report source path', async () => {
+    const { outputDir, reportPath, manifestPath, sourceDir } =
+      await createSourceDiscoveryVerifyFixture('llm-docs-refresh-discovery-source-');
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(refreshResult.stdout).toContain('Manifest refresh');
+    expect(refreshResult.stdout).toContain('Mode: discovery-report');
+    expect(refreshResult.stdout).toContain(`Source: ${sourceDir}`);
+    expect(refreshResult.stdout).toContain('Candidate evidence report: refreshed');
+    expect(refreshResult.stdout).toContain('Candidate files: 1');
+    expect(refreshResult.stdout).toContain(
+      'Scope: candidate evidence only; no source selection or generation'
+    );
+    expect(refreshResult.stdout).not.toContain('Generated files:');
+    expect(refreshResult.stdout).toContain('Post-refresh verification: passed');
+    expect(refreshResult.stdout).toContain('Checked files: 1');
+    expect(refreshResult.stdout).toContain('Refresh complete');
+    expect(report.source.resolvedPath).toBe(sourceDir);
+    expect(report.traversal.maxDepth).toBe(8);
+    expect(report.traversal.maxEntries).toBe(20000);
+    expect(report.traversal.maxFiles).toBe(5000);
+    expect(manifest.discovery).toMatchObject({
+      kind: 'source',
+      reportPath: 'discovery-report.json',
+      candidateCount: 1,
+      warningCount: report.warnings.length,
+    });
+    expect(manifest.candidateEvidenceIndex?.candidateCount).toBe(1);
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('refresh detects a newly added local discovery candidate and updates manifest evidence', async () => {
+    const { outputDir, reportPath, manifestPath, sourceDir } =
+      await createSourceDiscoveryVerifyFixture('llm-docs-refresh-discovery-new-candidate-');
+
+    await writeFile(
+      join(sourceDir, 'openapi.yaml'),
+      ['openapi: 3.1.0', 'info:', '  title: Refresh API', '  version: 1.0.0', ''].join('\n'),
+      'utf-8'
     );
 
-    const discoveryResult = await runCliWithExit([
-      'refresh',
+    const refreshResult = await runCli(['refresh', '--output-dir', outputDir]);
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
+    const verifyResult = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(refreshResult.stdout).toContain('Mode: discovery-report');
+    expect(refreshResult.stdout).toContain('Candidate files: 2');
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual([
+      'openapi.yaml',
+      'guide.md',
+    ]);
+    expect(manifest.discovery.candidateCount).toBe(report.candidates.length);
+    expect(manifest.generatedOutputs[0]?.path).toBe('discovery-report.json');
+    expect(manifest.candidateEvidenceIndex?.candidateCount).toBe(report.candidates.length);
+    expect(manifest.candidateEvidenceIndex?.candidates.map((candidate) => candidate.path)).toEqual(
+      report.candidates.map((candidate) => candidate.path)
+    );
+    expect(manifest.candidateEvidenceIndex?.context).toMatchObject({
+      source: {
+        resolvedPath: sourceDir,
+        type: 'directory',
+      },
+    });
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('refresh preserves non-default local source discovery traversal bounds', async () => {
+    const { outputDir, reportPath, manifestPath, sourceDir } =
+      await createSourceDiscoveryVerifyFixture('llm-docs-refresh-discovery-bounds-');
+    const priorReport = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+
+    await mkdir(join(sourceDir, 'nested'), { recursive: true });
+    await writeFile(join(sourceDir, 'nested', 'nested.md'), '# Nested\n', 'utf-8');
+    priorReport.traversal.maxDepth = 0;
+    priorReport.traversal.maxEntries = 9;
+    priorReport.traversal.maxFiles = 4;
+    await writeFile(reportPath, `${JSON.stringify(priorReport, null, 2)}\n`, 'utf-8');
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as DiscoveryReport;
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
+
+    expect(refreshResult.stdout).toContain('Mode: discovery-report');
+    expect(report.traversal.maxDepth).toBe(0);
+    expect(report.traversal.maxEntries).toBe(9);
+    expect(report.traversal.maxFiles).toBe(4);
+    expect(report.traversal.truncated).toBe(true);
+    expect(report.warnings).toContain('Traversal stopped at max depth 0: nested');
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual(['guide.md']);
+    expect(manifest.discovery.candidateCount).toBe(report.candidates.length);
+    expect(manifest.candidateEvidenceIndex?.candidateCount).toBe(report.candidates.length);
+  });
+
+  it('refresh rejects symlinked source discovery report path before reading outside report', async () => {
+    const insideFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-report-symlink-inside-'
+    );
+    const outsideFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-report-symlink-outside-'
+    );
+    const originalManifestText = await readFile(insideFixture.manifestPath, 'utf-8');
+    const outsideReportText = await readFile(outsideFixture.reportPath, 'utf-8');
+
+    await rm(insideFixture.reportPath, { force: true });
+    await symlink(outsideFixture.reportPath, insideFixture.reportPath, 'file');
+
+    const result = await runCliWithExit(['refresh', '--output-dir', insideFixture.outputDir]);
+    const linkedReportStats = await lstat(insideFixture.reportPath);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('discovery report path: symbolic links are not allowed');
+    expect(linkedReportStats.isSymbolicLink()).toBe(true);
+    expect(await readFile(outsideFixture.reportPath, 'utf-8')).toBe(outsideReportText);
+    expect(await readFile(insideFixture.manifestPath, 'utf-8')).toBe(originalManifestText);
+  });
+
+  it('refresh rejects repo and URL discovery-report manifests', async () => {
+    const repoDir = await createLocalGitRepo();
+    const repoFixtureDir = await mkdtemp(join(tmpdir(), 'llm-docs-refresh-repo-discovery-'));
+    tempDirs.push(repoFixtureDir);
+    const repoOutputDir = join(repoFixtureDir, 'reports');
+    await runCli([
+      'discover',
+      '--repo',
+      repoDir,
+      '--cache-dir',
+      join(repoFixtureDir, 'cache'),
       '--output-dir',
-      discoveryFixture.outputDir,
+      repoOutputDir,
     ]);
 
-    expect(discoveryResult.exitCode).toBe(1);
-    expect(discoveryResult.stderr).toContain('refresh does not support discovery-report manifests');
-    expect(discoveryResult.stderr).toContain('candidate evidence');
+    const websiteFixture = await createWebsiteDiscoveryVerifyFixture(
+      'llm-docs-refresh-url-discovery-'
+    );
+    const repoResult = await runCliWithExit(['refresh', '--output-dir', repoOutputDir]);
+    const urlResult = await runCliWithExit(['refresh', '--manifest', websiteFixture.manifestPath]);
+
+    expect(repoResult.exitCode).toBe(1);
+    expect(repoResult.stderr).toContain(
+      'refresh supports discovery-report manifests only for discovery.kind source'
+    );
+    expect(repoResult.stderr).toContain('repo discovery-report refresh is not supported');
+    expect(urlResult.exitCode).toBe(1);
+    expect(urlResult.stderr).toContain(
+      'refresh supports discovery-report manifests only for discovery.kind source'
+    );
+    expect(urlResult.stderr).toContain('url discovery-report refresh is not supported');
   });
+
+  it('refresh rejects missing or malformed source discovery reports and bad local source paths', async () => {
+    const missingFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-missing-report-'
+    );
+    await rm(missingFixture.reportPath, { force: true });
+
+    const malformedFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-malformed-report-'
+    );
+    await writeFile(malformedFixture.reportPath, '{', 'utf-8');
+
+    const urlSourceFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-url-source-'
+    );
+    const urlSourceReport = JSON.parse(
+      await readFile(urlSourceFixture.reportPath, 'utf-8')
+    ) as DiscoveryReport;
+    urlSourceReport.source.resolvedPath = 'https://example.com/docs';
+    await writeFile(urlSourceFixture.reportPath, `${JSON.stringify(urlSourceReport, null, 2)}\n`);
+
+    const missingSourceFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-missing-source-'
+    );
+    const missingSourceReport = JSON.parse(
+      await readFile(missingSourceFixture.reportPath, 'utf-8')
+    ) as DiscoveryReport;
+    missingSourceReport.source.resolvedPath = join(missingSourceFixture.dir, 'missing-docs');
+    await writeFile(
+      missingSourceFixture.reportPath,
+      `${JSON.stringify(missingSourceReport, null, 2)}\n`
+    );
+
+    const insideOutputFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-source-in-output-'
+    );
+    const insideOutputSource = join(insideOutputFixture.outputDir, 'inside.md');
+    const insideOutputReport = JSON.parse(
+      await readFile(insideOutputFixture.reportPath, 'utf-8')
+    ) as DiscoveryReport;
+    await writeFile(insideOutputSource, '# Inside Output\n', 'utf-8');
+    insideOutputReport.source.resolvedPath = insideOutputSource;
+    await writeFile(
+      insideOutputFixture.reportPath,
+      `${JSON.stringify(insideOutputReport, null, 2)}\n`
+    );
+
+    const badBoundsFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-bad-bounds-'
+    );
+    const badBoundsReport = JSON.parse(
+      await readFile(badBoundsFixture.reportPath, 'utf-8')
+    ) as DiscoveryReport;
+    badBoundsReport.traversal.maxFiles = 0;
+    await writeFile(badBoundsFixture.reportPath, `${JSON.stringify(badBoundsReport, null, 2)}\n`);
+
+    const missingResult = await runCliWithExit([
+      'refresh',
+      '--output-dir',
+      missingFixture.outputDir,
+    ]);
+    const malformedResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      malformedFixture.manifestPath,
+    ]);
+    const urlSourceResult = await runCliWithExit([
+      'refresh',
+      '--output-dir',
+      urlSourceFixture.outputDir,
+    ]);
+    const missingSourceResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      missingSourceFixture.manifestPath,
+    ]);
+    const insideOutputResult = await runCliWithExit([
+      'refresh',
+      '--output-dir',
+      insideOutputFixture.outputDir,
+    ]);
+    const badBoundsResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      badBoundsFixture.manifestPath,
+    ]);
+
+    expect(missingResult.exitCode).toBe(1);
+    expect(missingResult.stderr).toContain('discovery report not found');
+    expect(malformedResult.exitCode).toBe(1);
+    expect(malformedResult.stderr).toContain('malformed discovery report JSON');
+    expect(urlSourceResult.exitCode).toBe(1);
+    expect(urlSourceResult.stderr).toContain('source.resolvedPath must be a local path');
+    expect(missingSourceResult.exitCode).toBe(1);
+    expect(missingSourceResult.stderr).toContain('manifest source path not found');
+    expect(insideOutputResult.exitCode).toBe(1);
+    expect(insideOutputResult.stderr).toContain(
+      'manifest source path must not be the same as, or inside, the manifest output directory'
+    );
+    expect(badBoundsResult.exitCode).toBe(1);
+    expect(badBoundsResult.stderr).toContain('traversal.maxFiles must be a positive safe integer');
+  }, 15000);
 
   it('refresh requires one manifest location and reports missing or malformed local manifests', async () => {
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-refresh-invalid-'));
@@ -10941,9 +11212,7 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain('Checked files: 0');
-    expect(result.stderr).toContain(
-      'source.lineCount must be a non-negative integer when present'
-    );
+    expect(result.stderr).toContain('source.lineCount must be a non-negative integer when present');
     expect(result.stderr).toContain(
       'source.estimatedTokenCount must be a non-negative integer when present'
     );
