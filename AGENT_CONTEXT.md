@@ -90,6 +90,12 @@ Current implementation:
   block is descriptive validation metadata for the deterministic CLI/agent
   boundary only; it does not score candidates, prove authority, prove source
   truth, validate freshness, or select sources.
+- Writes a top-level `inputProvenance` block on new successful manifests for
+  those same modes. This block is deterministic content-free summary metadata
+  for explicit inputs, report provenance, configured SDK/version metadata, and
+  parser or formatter identifiers already represented elsewhere in the
+  manifest. It does not add raw content, new source paths, candidate selection,
+  scores, ranking, authority, task-fit, freshness proof, or source-truth proof.
 - Writes a top-level `artifactSummary` block on new successful manifests for
   those same modes. This block is deterministic content-free manifest metadata:
   generated-output counts, kinds, byte/line/token totals where present,
@@ -101,10 +107,9 @@ Current implementation:
 - Verifies current `configured-sdk` manifests by checking the recorded
   generator metadata, sdk name/resolvedVersion/displayName, OpenRef parser
   metadata, legacy formatter metadata, configured source hash and byte size,
-  optional deterministic content-free source spec line count and estimated
-  token count metadata when present, generated output file hashes, byte sizes,
-  and valid generated output line counts and estimated token counts when
-  present.
+  required V2 deterministic content-free source spec line count and estimated
+  token count metadata, generated output file hashes, byte sizes, and required
+  generated output line counts and estimated token counts.
 - Verifies current `local-source-docs` manifests by checking source manifest
   shape, recorded generator/parser/formatter metadata, local source path
   existence, recorded source file byte sizes, SHA-256 hashes, line counts,
@@ -118,8 +123,8 @@ Current implementation:
   facts.
 - Verifies current `source-truth-local-docs` manifests by checking conservative
   source-truth manifest shape, local source path existence/type, recorded
-  source file byte sizes, SHA-256 hashes, and optional content-free line/token
-  metadata when present, generated output path containment, output kinds, byte
+  source file byte sizes, SHA-256 hashes, and required content-free line/token
+  metadata, generated output path containment, output kinds, byte
   sizes, hashes, line counts, deterministic estimated token counts, symlink
   rejection, and count consistency with
   `source-truth-report.json` when available.
@@ -318,8 +323,8 @@ Current implementation:
   source-docs refresh preserves that chunk JSONL output only when the existing
   manifest recorded it. Configured SDK, source-truth docs, and discovery
   reports do not publish semantic chunk records. Current manifests include
-  partial content-free line/token metadata only: generated/report file
-  `lineCount` and `estimatedTokenCount` metadata where documented, plus
+  required content-free line/token metadata where the implementation computes
+  it: generated/report file `lineCount` and `estimatedTokenCount` metadata,
   configured-SDK `source.lineCount` and `source.estimatedTokenCount` metadata
   for the explicit resolved OpenRef spec file, source-docs and source-truth
   docs `sourceFiles[]` `lineCount` and `estimatedTokenCount` metadata,
@@ -533,7 +538,7 @@ Agent workflow:
 4. If the manifest mode is `configured-sdk` and `source.resolvedSpecPath`
    records an absolute local, existing, non-symlink OpenRef spec file outside
    the output directory, the current CLI can run `llm-docs refresh --manifest
-   <path>` or `--output-dir <dir>`. It reparses that exact recorded local path,
+<path>` or `--output-dir <dir>`. It reparses that exact recorded local path,
    regenerates `parsed/<sdk>-<resolvedVersion>-spec.json` and LLM docs in the
    existing manifest directory, rewrites `manifest.json`, and verifies the
    regenerated manifest outputs. The rewritten manifest includes current
@@ -773,7 +778,7 @@ Expected behavior:
   metadata when valid, and errors/warnings arrays. The command does not load,
   import, execute, or trust plugin code.
 - `llm-docs generate --source <local-file-or-directory>
-  --parser-plugin-manifest <path>` with explicit custom
+--parser-plugin-manifest <path>` with explicit custom
   `--format <plugin-format-id>` executes one explicitly selected local parser
   plugin module for one explicit local source file or directory. Directory
   sources require `directorySupport: true` on the selected manifest format.
@@ -856,10 +861,10 @@ metadata derived from the report. The current `verify` command supports
 `local-source-docs`, `source-truth-local-docs`, `discovery-report`, and
 `source-verification-local-evidence` manifests.
 For configured SDK manifests, it checks source and generated output hashes,
-byte sizes, optional deterministic content-free source spec line/token
-metadata when present, recorded generator/sdk/parser/formatter metadata, and
-valid generated output line/token metadata when present, and rejects malformed
-metadata before file checks. For source-mode manifests, it checks recorded
+byte sizes, required V2 deterministic content-free source spec line/token
+metadata, recorded generator/sdk/parser/formatter metadata, and required
+generated output line/token metadata, and rejects malformed metadata before
+file checks. For source-mode manifests, it checks recorded
 generator/parser/formatter metadata,
 local source path shape and existence, source file hashes, byte sizes, line
 counts, deterministic estimated token counts, generated output paths, hashes,
@@ -872,23 +877,24 @@ source-docs JSONL records and checks for malformed or stale index data. For
 source-truth docs
 manifests, it checks source input/resolved path/type shape, local source path
 existence/type, source file path containment for directory sources, source file
-hashes, byte sizes, and optional content-free line/token metadata when present,
+hashes, byte sizes, and required content-free line/token metadata,
 generated output path containment, allowed source-truth output kinds, generated
 output hashes, byte sizes, line counts, deterministic estimated token counts,
 symlink rejection, inspection schema/mode/traversal shape, and count
 consistency with `source-truth-report.json` when available. For
 discovery-report manifests, it checks `discovery-report.json` existence, hash,
 byte size, line count, deterministic estimated token count, and basic report
-schema/mode/kind/count consistency. When optional candidate evidence index
-metadata is present, it rebuilds that metadata from `discovery-report.json` and
-fails on malformed or stale index data, including URL resource observed HTTP
+schema/mode/kind/count consistency. V2 requires candidate evidence index
+metadata and verification rebuilds that metadata from `discovery-report.json`,
+failing on malformed or stale index data, including URL resource observed HTTP
 freshness evidence when present. For source-verification manifests, it checks
 `source-verification-report.json` existence, hash, byte size, line count,
 deterministic estimated token count, report schema/mode/output path
 consistency, source/docs endpoint provenance against the report, manifest
 summary consistency with report metadata, report summary consistency with body
-arrays, `sourceInspection.source` consistency, and optional compact
-content-free source/docs file evidence index metadata rebuilt from the report.
+arrays, `sourceInspection.source` consistency, and required V2
+`sourceVerification.fileEvidenceIndex` metadata: a compact content-free
+source/docs file evidence index rebuilt from the report.
 When a top-level `refresh` provenance block is present, verification validates
 its timestamp, source manifest mode, static strategy, deterministic input
 boundary, non-empty limitations, and unsupported keys. It does not perform refresh, inspect additional source/docs files, verify repo
@@ -896,13 +902,16 @@ freshness, perform broad official-docs claim verification, validate source-code
 behavior, make candidate selection, validate HTTP freshness, refresh remote
 resources, make task-fit judgments, resolve source truth, make source selection
 decisions, or prove docs correctness.
-When a top-level `manifestContract` block is present, verification validates
-its schema, manifest mode, artifact role, static arrays, and unsupported keys.
-When a top-level `artifactSummary` block is present, verification validates
-supported keys, manifest mode, generated-output counts/kinds/totals/aggregate
-hashes, source-file counts/formats/totals/aggregate hashes where represented,
-warning counts, and compact index counters. Older manifests without either
-block remain valid for backward compatibility.
+V2 is a fresh manifest/docs-pack contract. Regenerate V1 or early next-gen
+packs with the V2 CLI before verifying them. Verification requires
+`manifestContract`, `inputProvenance`, and `artifactSummary` on supported
+successful manifests; requires `candidateEvidenceIndex` on discovery-report
+manifests; and requires `sourceVerification.fileEvidenceIndex` on
+source-verification manifests. Verification validates supported keys, manifest
+mode, artifact role, input kind, matching source/report/parser/sdk values,
+generated-output counts/kinds/totals/aggregate hashes, source-file
+counts/formats/totals/aggregate hashes where represented, warning counts, and
+compact index counters without scoring, selecting, or proving source authority.
 The current `refresh` command
 supports only built-in-parser `local-source-docs`, `source-truth-local-docs`,
 configured OpenRef SDK manifests that already record explicit absolute local

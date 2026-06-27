@@ -357,9 +357,10 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'explicit local file or directory',
       outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
-        'bounded local source inspection with deterministic candidate file evidence, descriptive manifest contract metadata, content-free artifact summary metadata, and a compact content-free candidate evidence manifest index',
+        'bounded local source inspection with deterministic candidate file evidence, descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, and a compact content-free candidate evidence manifest index',
       limitations: [
         'candidate evidence for agent review only',
+        'input provenance summaries are content-free candidate-evidence metadata only',
         'artifact summaries are content-free manifest metadata only',
         'candidate evidence index is manifest metadata only',
         'no docs generation',
@@ -376,9 +377,10 @@ const CAPABILITIES_CONTRACT = {
       options: ['--scope <path>', '--cache-dir <dir>', '--output-dir <dir>'],
       outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
-        'bounded repository inspection with stable cache reuse, optional repo-relative scope, descriptive manifest contract metadata, content-free artifact summary metadata, and a compact content-free candidate evidence manifest index',
+        'bounded repository inspection with stable cache reuse, optional repo-relative scope, descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, and a compact content-free candidate evidence manifest index',
       limitations: [
         'candidate evidence for agent review only',
+        'input provenance summaries are content-free candidate-evidence metadata only',
         'artifact summaries are content-free manifest metadata only',
         'candidate evidence index is manifest metadata only',
         'no repo script execution',
@@ -395,9 +397,10 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'explicit http or https URL',
       outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
-        'bounded static website inspection for the explicit URL plus same-origin /llms.txt and /sitemap.xml, recording explicit observed HTTP freshness validators, descriptive manifest contract metadata, content-free artifact summary metadata, and a compact content-free candidate evidence manifest index',
+        'bounded static website inspection for the explicit URL plus same-origin /llms.txt and /sitemap.xml, recording explicit observed HTTP freshness validators, descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, and a compact content-free candidate evidence manifest index',
       limitations: [
         'candidate evidence for agent review only',
+        'input provenance summaries are content-free candidate-evidence metadata only',
         'artifact summaries are content-free manifest metadata only',
         'candidate evidence index is manifest metadata only',
         'observed HTTP freshness evidence is not freshness validation or remote refresh',
@@ -449,8 +452,9 @@ const CAPABILITIES_CONTRACT = {
         'AST-observed test-case label context facts',
       ],
       summary:
-        'evidence-bound Markdown and provenance files from source-truth inspection, with descriptive manifest contract metadata, content-free artifact summary metadata, and deterministic content-free source-file line/token metadata in the manifest',
+        'evidence-bound Markdown and provenance files from source-truth inspection, with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, and deterministic content-free source-file line/token metadata in the manifest',
       limitations: [
+        'input provenance summaries are content-free manifest metadata only',
         'manifest source-file line/token metadata is content-free text metadata, not behavior verification',
         'artifact summaries are content-free manifest metadata only',
         'no behavior inference',
@@ -480,10 +484,11 @@ const CAPABILITIES_CONTRACT = {
         'unmatched docs references',
       ],
       summary:
-        'deterministic local evidence comparing explicit docs references with observed source exported names and emitting descriptive manifest contract metadata, content-free artifact summary metadata, plus compact content-free source/docs file evidence index metadata',
+        'deterministic local evidence comparing explicit docs references with observed source exported names and emitting descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, plus compact content-free source/docs file evidence index metadata',
       limitations: [
         'explicit local paths only',
         'Markdown/MDX-style text docs only',
+        'input provenance summaries are content-free manifest metadata only',
         'file evidence index metadata is content-free and derived only from the local report',
         'artifact summaries are content-free manifest metadata only',
         'docs evidence limited to inline-code identifiers and empty call identifiers',
@@ -569,9 +574,10 @@ const CAPABILITIES_CONTRACT = {
       ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic local source parsing through the registered parser or an explicit local parser plugin and universal formatter, with descriptive manifest contract metadata, content-free artifact summary metadata, opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, and a scoped swift-book preset',
+        'deterministic local source parsing through the registered parser or an explicit local parser plugin and universal formatter, with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, and a scoped swift-book preset',
       limitations: [
         'local files and directories only',
+        'input provenance summaries are content-free manifest metadata only',
         'artifact summaries are content-free manifest metadata only',
         'no URL fetching',
         'no discovery report consumption',
@@ -600,9 +606,10 @@ const CAPABILITIES_CONTRACT = {
       ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt'],
       summary:
-        'explicit parser plugin execution through one declared local module, normalized through the universal formatter with descriptive manifest contract metadata, content-free artifact summary metadata, and parser plugin provenance in the source-docs manifest',
+        'explicit parser plugin execution through one declared local module, normalized through the universal formatter with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, and parser plugin provenance in the source-docs manifest',
       limitations: [
         'explicit local source files or directories only',
+        'input provenance summaries are content-free manifest metadata only',
         'artifact summaries are content-free manifest metadata only',
         'directory sources require directorySupport: true on the selected manifest format',
         'requires a custom plugin format id declared by the manifest',
@@ -655,9 +662,10 @@ const CAPABILITIES_CONTRACT = {
         'llm-docs/*-llms.txt',
       ],
       summary:
-        'configured OpenRef SDK generation through the existing compatibility flow with descriptive manifest contract metadata and content-free artifact summary metadata',
+        'configured OpenRef SDK generation through the existing compatibility flow with descriptive manifest contract metadata, content-free input provenance summary metadata, and content-free artifact summary metadata',
       limitations: [
         'configured SDKs only',
+        'input provenance summaries are content-free manifest metadata only',
         'artifact summaries are content-free manifest metadata only',
         'no preset generation',
         'no discovery report consumption',
@@ -670,10 +678,11 @@ const CAPABILITIES_CONTRACT = {
       status: 'implemented',
       inputBoundary: 'discovery-report manifest.json',
       summary:
-        'file integrity, basic schema consistency, optional descriptive manifest contract validation, optional content-free artifact summary validation, optional content-free candidate evidence index checks, and optional refresh provenance validation for discovery report manifests',
+        'file integrity, basic schema consistency, required V2 descriptive manifest contract validation, required V2 content-free input provenance summary validation, required V2 content-free artifact summary validation, required V2 content-free candidate evidence index checks, and optional refresh provenance validation for discovery report manifests',
       limitations: [
         'discovery-report manifest mode only',
         'candidate evidence for agent review only',
+        'input provenance summaries are content-free and do not score or select candidates',
         'artifact summaries are content-free and do not score candidates',
         'candidate evidence indexes are content-free and do not score candidates',
         'no task fit decision',
@@ -691,10 +700,11 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'configured-sdk manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'recorded generator/sdk/parser/formatter metadata, optional descriptive manifest contract validation, optional content-free artifact summary validation, source file hash, byte-size, optional content-free source line/token metadata, generated output hash, byte-size, manifest-recorded output line/token verification when present, and optional refresh provenance validation for configured SDK manifests',
+        'recorded generator/sdk/parser/formatter metadata, required V2 descriptive manifest contract validation, required V2 content-free input provenance summary validation, required V2 content-free artifact summary validation, source file hash, byte-size, required content-free source line/token metadata, generated output hash, byte-size, required manifest-recorded output line/token verification, and optional refresh provenance validation for configured SDK manifests',
       limitations: [
         'configured-sdk manifest mode only',
         'only verifies existing source and generated output files recorded in the manifest',
+        'input provenance summaries are content-free manifest metadata only',
         'artifact summaries are content-free manifest metadata only',
         'source line/token metadata is deterministic content-free text metadata only',
         'verify does not refresh configured SDK outputs',
@@ -710,9 +720,10 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'local-source-docs manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'recorded generator/parser/formatter metadata, optional descriptive manifest contract validation, optional content-free artifact summary validation, source path, source file hash, byte-size, line-count, estimated-token, generated output hash, byte-size, line-count, estimated-token, optional semantic chunk index verification, and optional refresh provenance validation for local source docs manifests',
+        'recorded generator/parser/formatter metadata, required V2 descriptive manifest contract validation, required V2 content-free input provenance summary validation, required V2 content-free artifact summary validation, source path, source file hash, byte-size, line-count, estimated-token, generated output hash, byte-size, line-count, estimated-token, optional semantic chunk index verification, and optional refresh provenance validation for local source docs manifests',
       limitations: [
         'local-source-docs manifest mode only',
+        'input provenance summaries are content-free manifest metadata only',
         'artifact summaries are content-free manifest metadata only',
         'verify does not refresh outputs',
         'no repo freshness check',
@@ -727,9 +738,10 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'source-truth-local-docs manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'deterministic integrity and schema consistency checks for source-truth docs manifests, including optional descriptive manifest contract validation, optional content-free artifact summary validation, optional content-free source-file line/token metadata, and optional refresh provenance validation when present',
+        'deterministic integrity and schema consistency checks for source-truth docs manifests, including required V2 descriptive manifest contract validation, required V2 content-free input provenance summary validation, required V2 content-free artifact summary validation, required content-free source-file line/token metadata, and optional refresh provenance validation when present',
       limitations: [
         'source-truth-local-docs manifest mode only',
+        'input provenance summaries are content-free manifest metadata only',
         'artifact summaries are content-free manifest metadata only',
         'source-file line/token metadata is content-free text metadata only',
         'local generated evidence docs only',
@@ -747,9 +759,10 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'source-verification-local-evidence manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'deterministic source-verification report integrity, provenance, report-path, manifest/report summary, report-body count, sourceInspection.source consistency, optional descriptive manifest contract validation, optional content-free artifact summary validation, optional content-free file evidence index checks, and optional refresh provenance validation',
+        'deterministic source-verification report integrity, provenance, report-path, manifest/report summary, report-body count, sourceInspection.source consistency, required V2 descriptive manifest contract validation, required V2 content-free input provenance summary validation, required V2 content-free artifact summary validation, required V2 content-free file evidence index checks, and optional refresh provenance validation',
       limitations: [
         'source-verification-local-evidence manifest mode only',
+        'input provenance summaries are content-free manifest metadata only',
         'artifact summaries are content-free manifest metadata only',
         'file evidence indexes are source/docs file metadata only',
         'verify does not refresh outputs or sources',
@@ -770,9 +783,10 @@ const CAPABILITIES_CONTRACT = {
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic regeneration of built-in-parser local source docs from the manifest-recorded explicit local source path, preserving opt-in chunk JSONL and chunk index metadata when the prior manifest recorded that output, writing current content-free artifact summary metadata, recording verified refresh provenance metadata, followed by manifest integrity verification of regenerated outputs',
+        'deterministic regeneration of built-in-parser local source docs from the manifest-recorded explicit local source path, preserving opt-in chunk JSONL and chunk index metadata when the prior manifest recorded that output, writing current content-free input provenance summary metadata and content-free artifact summary metadata, recording verified refresh provenance metadata, followed by manifest integrity verification of regenerated outputs',
       limitations: [
         'built-in-parser local-source-docs manifests only',
+        'input provenance summaries are content-free manifest metadata only',
         'parser-plugin local-source-docs manifests are not refreshed; rerun explicit generate --source --parser-plugin-manifest --format',
         'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',
         'no URLs',
@@ -795,9 +809,10 @@ const CAPABILITIES_CONTRACT = {
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json'],
       summary:
-        'deterministic regeneration of source-truth docs and content-free source-file line/token manifest metadata plus content-free artifact summary metadata from the manifest-recorded explicit local source path, recording verified refresh provenance metadata, followed by manifest integrity verification of regenerated outputs',
+        'deterministic regeneration of source-truth docs and content-free source-file line/token manifest metadata plus content-free input provenance summary metadata and content-free artifact summary metadata from the manifest-recorded explicit local source path, recording verified refresh provenance metadata, followed by manifest integrity verification of regenerated outputs',
       limitations: [
         'source-truth-local-docs manifests only',
+        'input provenance summaries are content-free manifest metadata only',
         'uses only source.resolvedPath from the existing manifest',
         'no URLs',
         'no repo freshness check',
@@ -824,9 +839,10 @@ const CAPABILITIES_CONTRACT = {
         'llm-docs/*-llms.txt',
       ],
       summary:
-        'deterministic regeneration of configured OpenRef SDK docs and content-free source spec line/token manifest metadata plus content-free artifact summary metadata from the manifest-recorded absolute local spec path, recording verified refresh provenance metadata, followed by manifest integrity verification of regenerated outputs',
+        'deterministic regeneration of configured OpenRef SDK docs and content-free source spec line/token manifest metadata plus content-free input provenance summary metadata and content-free artifact summary metadata from the manifest-recorded absolute local spec path, recording verified refresh provenance metadata, followed by manifest integrity verification of regenerated outputs',
       limitations: [
         'configured-sdk manifests only',
+        'input provenance summaries are content-free manifest metadata only',
         'requires source.resolvedSpecPath to be an absolute local non-symlink file outside the output directory',
         'uses only the recorded local spec path, SDK metadata, parser/formatter metadata, and manifest-recorded filename prefix',
         'OpenRef parser and legacy LLM formatter only',
@@ -853,9 +869,10 @@ const CAPABILITIES_CONTRACT = {
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['discovery-report.json', 'manifest.json'],
       summary:
-        'deterministic rerun of local source discovery from discovery-report.json report.source.resolvedPath into the same output directory, preserving prior traversal bounds, writing current content-free artifact summary metadata, recording verified refresh provenance metadata, and followed by manifest integrity verification',
+        'deterministic rerun of local source discovery from discovery-report.json report.source.resolvedPath into the same output directory, preserving prior traversal bounds, writing current content-free input provenance summary metadata and content-free artifact summary metadata, recording verified refresh provenance metadata, and followed by manifest integrity verification',
       limitations: [
         'source discovery-report manifests only',
+        'input provenance summaries are content-free candidate-evidence metadata only',
         'uses only report.source.resolvedPath and traversal.maxDepth/maxEntries/maxFiles from the existing local report',
         'candidate evidence for agent review only',
         'no docs generation',
@@ -881,9 +898,10 @@ const CAPABILITIES_CONTRACT = {
       options: ['--manifest <path>', '--output-dir <dir>'],
       outputFiles: ['source-verification-report.json', 'manifest.json', 'failure.json'],
       summary:
-        'deterministic rerun of explicit local source/docs lexical evidence from source-verification-report.json recorded source/docs paths into the same output directory, preserving prior docs traversal bounds, writing current content-free artifact summary metadata, recording verified refresh provenance metadata, and followed by manifest integrity verification on success',
+        'deterministic rerun of explicit local source/docs lexical evidence from source-verification-report.json recorded source/docs paths into the same output directory, preserving prior docs traversal bounds, writing current content-free input provenance summary metadata and content-free artifact summary metadata, recording verified refresh provenance metadata, and followed by manifest integrity verification on success',
       limitations: [
         'source-verification-local-evidence manifests only',
+        'input provenance summaries are content-free manifest metadata only',
         'uses only report.source.resolvedPath, report.docs.resolvedPath, and docs.traversal maxDepth/maxEntries/maxFiles/maxFileBytes from the existing local report',
         'explicit local paths only',
         'Markdown/MDX-style text docs only',

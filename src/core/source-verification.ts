@@ -16,8 +16,10 @@ import {
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
   buildArtifactSummaryForManifest,
+  buildInputProvenanceForManifest,
   buildManifestContract,
   type ArtifactSummary,
+  type InputProvenance,
   type ManifestContract,
 } from './manifest.js';
 import {
@@ -215,8 +217,9 @@ export interface SourceVerificationGeneratedOutput {
 export interface SourceVerificationManifest {
   schemaVersion: typeof SOURCE_VERIFICATION_MANIFEST_SCHEMA_VERSION;
   mode: typeof SOURCE_VERIFICATION_MODE;
-  manifestContract?: ManifestContract;
-  artifactSummary?: ArtifactSummary;
+  manifestContract: ManifestContract;
+  inputProvenance: InputProvenance;
+  artifactSummary: ArtifactSummary;
   generator: SourceVerificationGeneratorMetadata;
   sourceVerification: {
     reportPath: string;
@@ -233,7 +236,7 @@ export interface SourceVerificationManifest {
       type: SourceVerificationInputType;
     };
     summary: SourceVerificationSummary;
-    fileEvidenceIndex?: SourceVerificationFileEvidenceIndex;
+    fileEvidenceIndex: SourceVerificationFileEvidenceIndex;
   };
   generatedOutputs: SourceVerificationGeneratedOutput[];
 }
@@ -997,11 +1000,15 @@ function buildManifest(options: {
       fileEvidenceIndex: buildSourceVerificationFileEvidenceIndex(options.report),
     },
     generatedOutputs: options.generatedOutputs,
-  } satisfies Omit<SourceVerificationManifest, 'artifactSummary'>;
+  } satisfies Omit<SourceVerificationManifest, 'inputProvenance' | 'artifactSummary'>;
+  const manifestWithProvenance = {
+    ...manifest,
+    inputProvenance: buildInputProvenanceForManifest(manifest),
+  };
 
   return {
-    ...manifest,
-    artifactSummary: buildArtifactSummaryForManifest(manifest),
+    ...manifestWithProvenance,
+    artifactSummary: buildArtifactSummaryForManifest(manifestWithProvenance),
   };
 }
 

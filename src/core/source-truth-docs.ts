@@ -4,8 +4,10 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
   buildArtifactSummaryForManifest,
+  buildInputProvenanceForManifest,
   buildManifestContract,
   type ArtifactSummary,
+  type InputProvenance,
   type ManifestContract,
 } from './manifest.js';
 import {
@@ -57,8 +59,9 @@ export interface SourceTruthManifestSourceFile {
 export interface SourceTruthDocsManifest {
   schemaVersion: typeof SOURCE_TRUTH_DOCS_SCHEMA_VERSION;
   mode: typeof SOURCE_TRUTH_DOCS_MODE;
-  manifestContract?: ManifestContract;
-  artifactSummary?: ArtifactSummary;
+  manifestContract: ManifestContract;
+  inputProvenance: InputProvenance;
+  artifactSummary: ArtifactSummary;
   source: {
     input: string;
     resolvedPath: string;
@@ -469,11 +472,15 @@ async function buildManifest(
     },
     sourceFiles,
     generatedOutputs,
-  } satisfies Omit<SourceTruthDocsManifest, 'artifactSummary'>;
+  } satisfies Omit<SourceTruthDocsManifest, 'inputProvenance' | 'artifactSummary'>;
+  const manifestWithProvenance = {
+    ...manifest,
+    inputProvenance: buildInputProvenanceForManifest(manifest),
+  };
 
   return {
-    ...manifest,
-    artifactSummary: buildArtifactSummaryForManifest(manifest),
+    ...manifestWithProvenance,
+    artifactSummary: buildArtifactSummaryForManifest(manifestWithProvenance),
   };
 }
 

@@ -240,8 +240,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       files
 - [x] Scoped manifest generation for configured OpenRef CLI output
 - [x] Scoped manifest recorded generator/sdk/parser/formatter metadata,
-      hash/size, and valid line/token metadata verification for current
-      configured SDK output
+      source/output hash/size, and required line/token metadata verification
+      for current configured SDK manifests
 - [x] Explicit local `discover --source` bounded inspection report
 - [x] Explicit repo `discover --repo` cache and bounded inspection report
 - [x] Explicit website `discover --url` bounded inspection report
@@ -293,11 +293,16 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
   - [x] Descriptive top-level `manifestContract` metadata for currently
         verified manifest modes, with deterministic CLI/agent boundary arrays
-        validated by `verify` when present
+        required and validated by V2 `verify`
   - [x] Content-free top-level `artifactSummary` metadata for currently
         verified manifest modes, with generated-output totals, source-file
         totals where already represented, warning counts, compact index
-        counters, and aggregate hashes validated by `verify` when present
+        counters, and aggregate hashes required and validated by V2 `verify`
+  - [x] Content-free top-level `inputProvenance` metadata for currently
+        verified successful manifest modes, with explicit input/source/report
+        provenance, configured SDK/version metadata, and parser/formatter
+        identifiers copied from existing manifest metadata and validated by
+        V2 `verify`
 - [ ] Broad official-docs behavior/API claim verification, broad website
       crawling, repo/URL discovery-report refresh, source-code behavior
       validation, and remote freshness refresh
@@ -313,7 +318,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
         manifest data without importing plugin code
   - [ ] Parser plugin discovery, install, package resolution, auto-selection,
         sandboxing, and broad custom parser workflows
-- [x] OpenRef backward compatibility tests
+- [x] OpenRef compatibility tests
 
 Current discovery scope:
 
@@ -399,13 +404,14 @@ Current capabilities contract scope:
   `source-verification-report.json`, `manifest.json`, `failure.json`, source
   docs under `llm-docs/`, configured SDK parsed spec output, and configured SDK
   LLM docs output.
-- Manifest line/token metadata is currently partial and content-free: source
-  docs, configured SDK, source-truth docs, and discovery-report manifests
-  record `lineCount` and deterministic `estimatedTokenCount` for explicit
-  generated or report files, and local source-docs plus source-truth docs
-  manifests additionally record those fields for explicit `sourceFiles[]`
-  entries. Configured SDK manifests additionally record those fields for the
-  explicit resolved OpenRef spec file under `source`. Discovery-report
+- Manifest line/token metadata is content-free and required where the current
+  implementation computes it: source docs, configured SDK, source-truth docs,
+  and discovery-report manifests record `lineCount` and deterministic
+  `estimatedTokenCount` for explicit generated or report files, and local
+  source-docs plus source-truth docs manifests additionally record those fields
+  for explicit `sourceFiles[]` entries. Configured SDK manifests additionally
+  record those fields for the explicit resolved OpenRef spec file under
+  `source`. Discovery-report
   manifests additionally record compact content-free candidate evidence indexes
   derived only from
   `discovery-report.json`. Source docs can additionally publish opt-in
@@ -422,15 +428,26 @@ Current capabilities contract scope:
   `source-verification-local-evidence` manifests include a top-level
   `manifestContract` block. This is descriptive validation metadata for the
   deterministic CLI/agent boundary only; it does not score candidates, prove
-  authority, prove source truth, validate freshness, or select sources. The
-  verifier accepts older manifests without it and validates supported keys,
-  schema, mode, artifact role, and static arrays when it is present.
+  authority, prove source truth, validate freshness, or select sources. V2
+  verification requires it and validates supported keys, schema, mode, artifact
+  role, and static arrays.
+- New successful manifests for those same modes include a top-level
+  `inputProvenance` block. This is deterministic content-free summary
+  metadata for explicit inputs, report provenance, configured SDK/version
+  metadata, and parser or formatter identifiers already represented elsewhere
+  in the manifest. It does not add raw content, new source paths, selected
+  candidates, scores, ranking, authority, task-fit, freshness proof, or
+  source-truth proof. V2 verification requires it and validates supported keys,
+  mode, artifact role, input kind, and matching source/report/parser/sdk values.
 - New successful manifests for those same modes include a top-level
   `artifactSummary` block. This is deterministic content-free validation
   metadata only: generated-output counts/kinds/totals/aggregate hashes,
   source-file totals where already represented, warning counts, and compact
-  index counters. The verifier accepts older manifests without it and validates
-  supported keys, mode, counts, totals, and aggregate hashes when present.
+  index counters. V2 verification requires it and validates supported keys,
+  mode, counts, totals, and aggregate hashes. Discovery-report manifests also
+  require `candidateEvidenceIndex`; source-verification manifests also require
+  `sourceVerification.fileEvidenceIndex`. Regenerate V1 or early next-gen packs
+  with the V2 CLI instead of relying on manifest compatibility.
 - The capabilities contract intentionally omits `generatedAt`. The command
   does not inspect sources, load config, write files, perform network work, or
   probe hidden environment state.
@@ -545,7 +562,7 @@ Current source/docs evidence scope:
   deterministic report file integrity, report path consistency, source/docs
   endpoint provenance against the report, manifest/report summary consistency,
   report summary consistency with body arrays, `sourceInspection.source`
-  consistency, and optional file evidence index rebuild checks only. They do not
+  consistency, and required V2 file evidence index rebuild checks only. They do not
   perform broad official-docs claim checking, validate source-code behavior,
   decide task fit/source truth/source selection, or prove docs correctness.
   Successful `source-verification-local-evidence` manifests are supported by
@@ -597,15 +614,15 @@ Current explicit local source docs generation scope:
   `source-verification-local-evidence` manifests.
   Discovery-report verification checks `discovery-report.json` existence, hash,
   byte size, line count, deterministic estimated token count, and basic report
-  schema/mode/kind/count consistency. When optional candidate evidence index
-  metadata is present, verification rebuilds it from `discovery-report.json`
-  and fails on malformed or stale index data, including URL resource observed
+  schema/mode/kind/count consistency. V2 requires candidate evidence index
+  metadata; verification rebuilds it from `discovery-report.json` and fails on
+  malformed or stale index data, including URL resource observed
   HTTP freshness evidence when present; it does not choose candidates, validate
   task fit, claim source truth, validate freshness, refresh repos or websites,
   or perform source-code verification. Configured-SDK verification checks
   recorded generator/sdk/parser/formatter metadata, configured source hash,
-  byte size, optional deterministic content-free source spec line/token
-  metadata when present, and generated outputs.
+  byte size, required V2 deterministic content-free source spec line/token
+  metadata, and generated outputs with required line/token metadata.
   Source-docs verification checks recorded generator/parser/formatter metadata,
   source file hashes, byte sizes, line counts, deterministic estimated token
   counts, and all generated text outputs, including opt-in chunk JSONL when
@@ -613,23 +630,26 @@ Current explicit local source docs generation scope:
   semantic chunk index is present, verification rebuilds it from the JSONL
   records and fails on malformed JSONL or stale index facts.
   Source-truth docs verification checks deterministic source-truth manifest
-  shape, source/source-file integrity including optional content-free
-  source-file line/token metadata when present, generated output integrity,
+  shape, source/source-file integrity including required V2 content-free
+  source-file line/token metadata, generated output integrity,
   symlink/path containment, inspection basics, and raw report count consistency;
   it does not infer behavior or perform broad source-code verification.
-Source-verification manifest checks verify `source-verification-report.json`
-file integrity, report path consistency, source/docs endpoint provenance
-against the report, manifest/report summary consistency, report summary
-consistency with body arrays, `sourceInspection.source` consistency, and
-optional compact content-free source/docs file evidence index metadata rebuilt
-from the report; they do not refresh outputs or sources, inspect additional
-source/docs files, parse behavior claims, perform broad official-docs claim
-checking, validate source-code behavior, decide task fit/source truth/source
-selection, or prove docs correctness.
-When optional top-level `artifactSummary` metadata is present, verification
-rebuilds it from existing manifest metadata and validates supported keys,
-mode, counts, totals, aggregate hashes, warning counts, and compact index
-counters before file checks.
+  Source-verification manifest checks verify `source-verification-report.json`
+  file integrity, report path consistency, source/docs endpoint provenance
+  against the report, manifest/report summary consistency, report summary
+  consistency with body arrays, `sourceInspection.source` consistency, and
+  required V2 compact content-free source/docs file evidence index metadata
+  rebuilt from the report; they do not refresh outputs or sources, inspect
+  additional source/docs files, parse behavior claims, perform broad
+  official-docs claim checking, validate source-code behavior, decide task
+  fit/source truth/source selection, or prove docs correctness.
+  V2 verification requires top-level `manifestContract`, `inputProvenance`, and
+  `artifactSummary` metadata for supported successful manifests, rejects missing
+  or malformed required metadata with regeneration guidance, rebuilds the
+  content-free blocks from existing manifest metadata, and validates supported
+  keys, mode, artifact role, input kind, matching source/report/parser/sdk values,
+  counts, totals, aggregate hashes, warning counts, and compact index counters
+  before or alongside normal file checks.
   When optional top-level `refresh` provenance metadata is present on any
   supported manifest mode, verification checks its timestamp, source manifest
   mode, static strategy, deterministic input boundary, non-empty limitations,
