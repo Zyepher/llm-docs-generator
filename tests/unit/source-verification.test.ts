@@ -7,7 +7,11 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { describeGeneratedTextOutput } from '../../src/core/generated-output-metadata.js';
-import { verifyGenerationManifest } from '../../src/core/manifest.js';
+import {
+  buildArtifactSummaryForManifest,
+  buildInputProvenanceForManifest,
+  verifyGenerationManifest,
+} from '../../src/core/manifest.js';
 import {
   SourceVerificationNoDocsEvidenceError,
   verifyDocsAgainstSource,
@@ -634,7 +638,12 @@ describe('source verification evidence', () => {
       ...manifest.generatedOutputs[0]!,
       ...refreshedReportMetadata,
     };
-    delete manifest.artifactSummary;
+    manifest.inputProvenance = buildInputProvenanceForManifest(
+      manifest as unknown as Record<string, unknown>
+    );
+    manifest.artifactSummary = buildArtifactSummaryForManifest(
+      manifest as unknown as Record<string, unknown>
+    );
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const verification = await verifyGenerationManifest({ manifestPath });
@@ -711,6 +720,12 @@ describe('source verification evidence', () => {
     ) as SourceVerificationManifest;
     manifest.sourceVerification.source.resolvedPath = join(dir, 'other-source');
     manifest.sourceVerification.docs.resolvedPath = join(dir, 'other-docs');
+    manifest.inputProvenance = buildInputProvenanceForManifest(
+      manifest as unknown as Record<string, unknown>
+    );
+    manifest.artifactSummary = buildArtifactSummaryForManifest(
+      manifest as unknown as Record<string, unknown>
+    );
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const verification = await verifyGenerationManifest({ manifestPath });

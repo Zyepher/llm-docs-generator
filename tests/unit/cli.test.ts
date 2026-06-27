@@ -82,6 +82,96 @@ interface ManifestContract {
   unsupportedAutomation: string[];
 }
 
+interface InputProvenance {
+  schema: string;
+  manifestMode: string;
+  artifactRole: string;
+  inputKind: string;
+  source?: {
+    input?: string;
+    configuredUrl?: string;
+    configuredLocalPath?: string | null;
+    resolvedPath?: string;
+    resolvedSpecPath?: string;
+    type?: string;
+    format?: string;
+    formatHint?: string;
+    resolvedFormat?: string;
+  };
+  docs?: {
+    input: string;
+    resolvedPath: string;
+    type: string;
+  };
+  repo?: {
+    input: string;
+    normalizedInput: string;
+    commit: string | null;
+    dirty: boolean | null;
+  };
+  scope?: {
+    input: string;
+    path: string;
+    resolvedPath: string;
+    type: string;
+  };
+  website?: {
+    input: string;
+    normalizedUrl: string;
+    origin: string;
+  };
+  crawlPolicy?: {
+    linkedCandidateFetches: false;
+    renderedJavaScript: false;
+    inspectedResourceCount: number;
+    sameOriginWellKnownResourceCount: number;
+  };
+  report?: {
+    path: string;
+    kind: string;
+    schemaVersion: string;
+    mode: string;
+    discoveryKind?: string;
+    candidateCount?: number;
+    warningCount?: number;
+    urlResourceCount?: number;
+  };
+  sdk?: {
+    name: string;
+    resolvedVersion: string;
+    displayName: string;
+  };
+  parser?: {
+    name: string;
+    version: string;
+    format: string;
+    plugin?: {
+      manifestPath: string;
+      resolvedManifestPath: string;
+      manifestByteSize: number;
+      manifestHash: string;
+      name: string;
+      version: string;
+      module: {
+        path: string;
+        resolvedPath: string;
+      };
+      format: {
+        id: string;
+        displayName: string;
+        extensions: string[];
+        mediaTypes?: string[];
+        directorySupport?: boolean;
+      };
+    };
+  };
+  formatter?: {
+    name: string;
+    version: string;
+    format: string;
+  };
+}
+
 interface ArtifactSummary {
   schema: string;
   manifestMode: string;
@@ -326,6 +416,7 @@ interface GenerationManifest {
   generatedOutputs: ManifestFileEntry[];
   warnings: string[];
   manifestContract?: ManifestContract;
+  inputProvenance?: InputProvenance;
   artifactSummary?: ArtifactSummary;
   refresh?: RefreshProvenance;
 }
@@ -413,6 +504,7 @@ interface SourceDocsManifest {
   };
   warnings: string[];
   manifestContract?: ManifestContract;
+  inputProvenance?: InputProvenance;
   artifactSummary?: ArtifactSummary;
   refresh?: RefreshProvenance;
 }
@@ -573,6 +665,7 @@ interface DiscoveryReportManifest {
   candidateEvidenceIndex?: CandidateEvidenceManifestIndex;
   generatedOutputs: ManifestFileEntry[];
   manifestContract?: ManifestContract;
+  inputProvenance?: InputProvenance;
   artifactSummary?: ArtifactSummary;
   refresh?: RefreshProvenance;
 }
@@ -1357,6 +1450,237 @@ function expectManifestContract(
   expect(JSON.stringify(contract)).not.toMatch(/confidence|score|sha256:|rawText|contentHash/i);
 }
 
+function manifestContractForTest(
+  mode: keyof typeof manifestContractExpectations
+): ManifestContract {
+  const expected = manifestContractExpectations[mode];
+
+  return {
+    schema: 'llm-docs-generator.manifest-contract.v1',
+    manifestMode: mode,
+    artifactRole: expected.artifactRole,
+    cliGuarantees: [...expected.cliGuarantees],
+    agentResponsibilities: [...expected.agentResponsibilities],
+    unsupportedAutomation: [...expected.unsupportedAutomation],
+  };
+}
+
+function expectInputProvenance(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): void {
+  const provenance = manifest.inputProvenance;
+
+  expect(provenance).toBeDefined();
+
+  if (provenance === undefined) {
+    throw new Error('expected input provenance');
+  }
+
+  expect(provenance).toEqual(expectedInputProvenance(manifest));
+  expect(JSON.stringify(provenance)).not.toMatch(
+    /authority|confidence|score|rank|taskFit|selection|freshness|proof|rawText|content|trust/i
+  );
+}
+
+function expectedInputProvenance(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): InputProvenance {
+  const base = {
+    schema: 'llm-docs-generator.input-provenance.v1',
+    manifestMode: manifest.mode,
+    artifactRole:
+      manifestContractExpectations[manifest.mode as keyof typeof manifestContractExpectations]
+        .artifactRole,
+  };
+
+  if (manifest.mode === 'configured-sdk') {
+    const configuredManifest = manifest as GenerationManifest;
+
+    return {
+      ...base,
+      inputKind: 'configured-sdk',
+      source: {
+        configuredUrl: configuredManifest.source.configuredUrl,
+        configuredLocalPath: configuredManifest.source.configuredLocalPath,
+        resolvedSpecPath: configuredManifest.source.resolvedSpecPath,
+        format: configuredManifest.source.format,
+      },
+      sdk: configuredManifest.sdk,
+      parser: configuredManifest.parser,
+      formatter: configuredManifest.formatter,
+    };
+  }
+
+  if (manifest.mode === 'local-source-docs') {
+    const sourceDocsManifest = manifest as SourceDocsManifest;
+    const parserPlugin = sourceDocsManifest.parser.plugin;
+
+    return {
+      ...base,
+      inputKind:
+        parserPlugin === undefined
+          ? 'built-in-local-source-docs'
+          : 'parser-plugin-local-source-docs',
+      source: {
+        input: sourceDocsManifest.source.input,
+        resolvedPath: sourceDocsManifest.source.resolvedPath,
+        type: sourceDocsManifest.source.type,
+        formatHint: sourceDocsManifest.source.formatHint,
+        resolvedFormat: sourceDocsManifest.source.resolvedFormat,
+      },
+      parser: {
+        name: sourceDocsManifest.parser.name,
+        version: sourceDocsManifest.parser.version,
+        format: sourceDocsManifest.parser.format,
+        ...(parserPlugin === undefined
+          ? {}
+          : {
+              plugin: {
+                manifestPath: parserPlugin.manifestPath,
+                resolvedManifestPath: parserPlugin.resolvedManifestPath,
+                manifestByteSize: parserPlugin.manifestByteSize,
+                manifestHash: parserPlugin.manifestHash,
+                name: parserPlugin.name,
+                version: parserPlugin.version,
+                module: parserPlugin.module,
+                format: parserPlugin.format,
+              },
+            }),
+      },
+      formatter: sourceDocsManifest.formatter,
+    };
+  }
+
+  if (manifest.mode === 'source-truth-local-docs') {
+    const sourceTruthManifest = manifest as SourceTruthDocsManifest;
+    const reportOutput = requiredOutputForTest(
+      sourceTruthManifest.generatedOutputs,
+      'source-truth-report-json'
+    );
+
+    return {
+      ...base,
+      inputKind: 'source-truth-local-source',
+      source: sourceTruthManifest.source,
+      report: {
+        path: reportOutput.path,
+        kind: 'source-truth-report-json',
+        schemaVersion: sourceTruthManifest.inspection.schemaVersion,
+        mode: sourceTruthManifest.inspection.mode,
+      },
+    };
+  }
+
+  if (manifest.mode === 'discovery-report') {
+    return expectedDiscoveryInputProvenance(manifest as DiscoveryReportManifest, base);
+  }
+
+  const sourceVerificationManifest = manifest as SourceVerificationManifest;
+  const reportOutput = requiredOutputForTest(
+    sourceVerificationManifest.generatedOutputs,
+    'source-verification-report-json'
+  );
+
+  if (reportOutput.path !== sourceVerificationManifest.sourceVerification.reportPath) {
+    throw new Error('expected source-verification report output path to match reportPath');
+  }
+
+  return {
+    ...base,
+    inputKind: 'source-verification-local-evidence',
+    source: sourceVerificationManifest.sourceVerification.source,
+    docs: sourceVerificationManifest.sourceVerification.docs,
+    report: {
+      path: sourceVerificationManifest.sourceVerification.reportPath,
+      kind: 'source-verification-report-json',
+      schemaVersion: sourceVerificationManifest.sourceVerification.reportSchemaVersion,
+      mode: sourceVerificationManifest.sourceVerification.reportMode,
+    },
+  };
+}
+
+function expectedDiscoveryInputProvenance(
+  manifest: DiscoveryReportManifest,
+  base: Pick<InputProvenance, 'schema' | 'manifestMode' | 'artifactRole'>
+): InputProvenance {
+  const candidateEvidenceIndex = manifest.candidateEvidenceIndex;
+
+  if (candidateEvidenceIndex === undefined) {
+    throw new Error('expected candidate evidence index for discovery input provenance');
+  }
+
+  const report = {
+    path: manifest.discovery.reportPath,
+    kind: 'discovery-report',
+    schemaVersion: manifest.discovery.reportSchemaVersion,
+    mode: manifest.discovery.reportMode,
+    discoveryKind: manifest.discovery.kind,
+    candidateCount: manifest.discovery.candidateCount,
+    warningCount: manifest.discovery.warningCount,
+    ...(manifest.discovery.urlResourceCount === undefined
+      ? {}
+      : { urlResourceCount: manifest.discovery.urlResourceCount }),
+  };
+
+  if (manifest.discovery.kind === 'source') {
+    return {
+      ...base,
+      inputKind: 'discovery-source-report',
+      source: candidateEvidenceIndex.context.source as InputProvenance['source'],
+      report,
+    };
+  }
+
+  if (manifest.discovery.kind === 'repo') {
+    return {
+      ...base,
+      inputKind: 'discovery-repo-report',
+      repo: candidateEvidenceIndex.context.repo as InputProvenance['repo'],
+      scope: candidateEvidenceIndex.context.scope as InputProvenance['scope'],
+      report,
+    };
+  }
+
+  return {
+    ...base,
+    inputKind: 'discovery-url-report',
+    website: candidateEvidenceIndex.context.website as InputProvenance['website'],
+    crawlPolicy: candidateEvidenceIndex.context.crawlPolicy as InputProvenance['crawlPolicy'],
+    report,
+  };
+}
+
+function requiredOutputForTest(outputs: ManifestFileEntry[], kind: string): ManifestFileEntry {
+  const output = outputs.find((entry) => entry.kind === kind);
+
+  if (output === undefined) {
+    throw new Error(`expected generated output kind ${kind}`);
+  }
+
+  return output;
+}
+
+function refreshInputProvenanceForTest(
+  manifest:
+    | GenerationManifest
+    | SourceDocsManifest
+    | SourceTruthDocsManifest
+    | DiscoveryReportManifest
+    | SourceVerificationManifest
+): void {
+  manifest.inputProvenance = expectedInputProvenance(manifest);
+}
+
 function expectArtifactSummary(
   manifest:
     | GenerationManifest
@@ -1748,6 +2072,39 @@ function validConfiguredSdkManifestMetadata(): Pick<
   };
 }
 
+async function configuredSdkManifestForTest(options: {
+  sourcePath: string;
+  resolvedSpecPath?: string;
+  sourceText?: string;
+  generatedOutputs: ManifestFileEntry[];
+  warnings?: string[];
+}): Promise<GenerationManifest> {
+  const sourceText = options.sourceText ?? (await readFile(options.sourcePath, 'utf-8'));
+  const manifest = {
+    schemaVersion: '0.1.0',
+    mode: 'configured-sdk',
+    manifestContract: manifestContractForTest('configured-sdk'),
+    ...validConfiguredSdkManifestMetadata(),
+    source: {
+      configuredUrl: 'test://configured-sdk/source.yml',
+      configuredLocalPath: options.sourcePath,
+      resolvedSpecPath: options.resolvedSpecPath ?? options.sourcePath,
+      format: 'openref-0.1',
+      byteSize: await byteSize(options.sourcePath),
+      contentHash: await sha256File(options.sourcePath),
+      lineCount: countTextLines(sourceText),
+      estimatedTokenCount: estimateTextTokens(sourceText),
+    },
+    generatedOutputs: options.generatedOutputs,
+    warnings: options.warnings ?? [],
+  } as GenerationManifest;
+
+  refreshInputProvenanceForTest(manifest);
+  refreshArtifactSummaryForTest(manifest);
+
+  return manifest;
+}
+
 async function generateSourceDocsFixture(): Promise<{
   sourceDir: string;
   outputDir: string;
@@ -2053,6 +2410,7 @@ async function refreshSourceTruthReportOutputMetadata(
   reportOutput.hash = await sha256File(reportPath);
   reportOutput.lineCount = countTextLines(reportText);
   reportOutput.estimatedTokenCount = estimateTextTokens(reportText);
+  refreshInputProvenanceForTest(manifest);
   refreshArtifactSummaryForTest(manifest);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
@@ -2999,9 +3357,11 @@ describe('CLI compatibility behavior', () => {
       'artifact summary validation'
     );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain(
-      'optional content-free source line/token metadata'
+      'required content-free source line/token metadata'
     );
-    expect(implemented.get('verify-configured-sdk')?.summary).toContain('when present');
+    expect(implemented.get('verify-configured-sdk')?.summary).toContain(
+      'required manifest-recorded output line/token verification'
+    );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain(
       'refresh provenance validation'
     );
@@ -3065,7 +3425,7 @@ describe('CLI compatibility behavior', () => {
       status: 'implemented',
       inputBoundary: 'source-truth-local-docs manifest.json',
       outputFiles: ['stdout verification result'],
-      summary: expect.stringContaining('optional content-free source-file line/token metadata'),
+      summary: expect.stringContaining('required content-free source-file line/token metadata'),
       limitations: expect.arrayContaining([
         'source-truth-local-docs manifest mode only',
         'source-file line/token metadata is content-free text metadata only',
@@ -3333,6 +3693,7 @@ describe('CLI compatibility behavior', () => {
       'local explicit sources only',
     ];
     const expectedGenerateLimitations = [
+      'input provenance summaries are content-free manifest metadata only',
       'manifest source-file line/token metadata is content-free text metadata, not behavior verification',
       'artifact summaries are content-free manifest metadata only',
       ...expectedLimitations,
@@ -4118,6 +4479,7 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expectManifestContract(manifest, 'discovery-report');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
     expectLocalCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report, {
@@ -5247,6 +5609,7 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expectManifestContract(manifest, 'discovery-report');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expectWebsiteCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report);
     expectCandidateEvidenceIndexHasNoReportContent(manifest.candidateEvidenceIndex);
@@ -6011,6 +6374,7 @@ describe('CLI compatibility behavior', () => {
       ],
     });
     expectManifestContract(manifest, 'discovery-report');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
     expectLocalCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report, {
@@ -7079,6 +7443,7 @@ describe('CLI compatibility behavior', () => {
       },
     });
     expectManifestContract(manifest, 'local-source-docs');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(manifest.parser.plugin?.execution.statement).toContain('not sandboxed');
     expect(manifest.sourceFiles).toEqual([
@@ -7157,6 +7522,7 @@ describe('CLI compatibility behavior', () => {
 
     expect(manifest.parser.plugin).toBeDefined();
     expectManifestContract(manifest, 'local-source-docs');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(manifest.refresh).toBeUndefined();
 
@@ -7585,6 +7951,7 @@ describe('CLI compatibility behavior', () => {
     generatedManifest.parser.plugin.format.extensions = ['tampered'];
     generatedManifest.parser.plugin.format.mediaTypes = ['text/x-tampered'];
     generatedManifest.parser.plugin.format.directorySupport = true;
+    refreshInputProvenanceForTest(generatedManifest);
 
     await writeFile(
       generatedManifestPath,
@@ -7754,6 +8121,7 @@ describe('CLI compatibility behavior', () => {
     const verifyResult = await runCli(['verify', '--manifest', join(outputDir, 'manifest.json')]);
 
     expectManifestContract(manifest, 'local-source-docs');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
@@ -8451,6 +8819,7 @@ describe('CLI compatibility behavior', () => {
       semanticChunkIndex?.aggregateHash
     );
     expect(secondManifest.semanticChunkIndexes?.[0]?.chunks).toEqual(semanticChunkIndex?.chunks);
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
 
     const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
@@ -10157,6 +10526,7 @@ describe('CLI compatibility behavior', () => {
       manifest as SourceVerificationManifest & { refresh?: RefreshProvenance },
       'source-verification-local-evidence'
     );
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
@@ -11132,6 +11502,7 @@ describe('CLI compatibility behavior', () => {
     });
     expect(manifest.candidateEvidenceIndex?.candidateCount).toBe(1);
     expectRefreshProvenance(manifest, 'discovery-report');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
@@ -11463,6 +11834,7 @@ describe('CLI compatibility behavior', () => {
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
     expectManifestContract(manifest, 'configured-sdk');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain('Checked files: 4');
@@ -11476,6 +11848,7 @@ describe('CLI compatibility behavior', () => {
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
     expectManifestContract(manifest, 'local-source-docs');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain(
@@ -11485,22 +11858,29 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).toContain('Verification passed');
   });
 
-  it('accepts older generated manifests without manifest contract artifact summary or refresh provenance', async () => {
+  it('rejects incomplete pre-V2 manifests missing required V2 top-level metadata', async () => {
     const { outputDir, manifestPath } = await generateSourceDocsFixture();
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
 
     expect(manifest.manifestContract).toBeDefined();
+    expect(manifest.inputProvenance).toBeDefined();
     expect(manifest.artifactSummary).toBeDefined();
     expect(manifest.refresh).toBeUndefined();
 
     delete manifest.manifestContract;
+    delete manifest.inputProvenance;
     delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
-    const result = await runCli(['verify', '--output-dir', outputDir]);
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
 
-    expect(result.stdout).toContain('Failures: 0');
-    expect(result.stdout).toContain('Verification passed');
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('manifestContract is required for V2 manifests');
+    expect(result.stderr).toContain('inputProvenance is required for V2 manifests');
+    expect(result.stderr).toContain('artifactSummary is required for V2 manifests');
+    expect(result.stderr).toContain('unsupported pre-V2 manifest; regenerate with V2');
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it.each([
@@ -11509,7 +11889,7 @@ describe('CLI compatibility behavior', () => {
       mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
         manifest.manifestContract = [] as unknown as ManifestContract;
       },
-      expected: 'manifestContract must be an object when present',
+      expected: 'manifestContract must be an object',
     },
     {
       name: 'unsupported extra key',
@@ -11614,6 +11994,157 @@ describe('CLI compatibility behavior', () => {
 
   it.each([
     {
+      name: 'non-object value',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        manifest.inputProvenance = [] as unknown as InputProvenance;
+      },
+      expected: 'inputProvenance must be an object',
+    },
+    {
+      name: 'unsupported extra key',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const provenance = manifest.inputProvenance as InputProvenance & Record<string, unknown>;
+        provenance.selection = { selectedBy: 'cli' };
+      },
+      expected: 'inputProvenance.selection is not supported',
+    },
+    {
+      name: 'unsupported nested key',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const source = (manifest.inputProvenance as InputProvenance).source as Record<
+          string,
+          unknown
+        >;
+        source.authorityScore = 1;
+      },
+      expected: 'inputProvenance.source.authorityScore is not supported',
+    },
+    {
+      name: 'bad schema',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const provenance = manifest.inputProvenance as InputProvenance;
+        provenance.schema = 'llm-docs-generator.input-provenance.v2';
+      },
+      expected: 'inputProvenance.schema must be llm-docs-generator.input-provenance.v1',
+    },
+    {
+      name: 'wrong manifest mode',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const provenance = manifest.inputProvenance as InputProvenance;
+        provenance.manifestMode = 'configured-sdk';
+      },
+      expected: 'inputProvenance.manifestMode must match manifest mode local-source-docs',
+    },
+    {
+      name: 'wrong input kind',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const provenance = manifest.inputProvenance as InputProvenance;
+        provenance.inputKind = 'configured-sdk';
+      },
+      expected:
+        'inputProvenance.inputKind must be built-in-local-source-docs for local-source-docs',
+    },
+    {
+      name: 'source mismatch',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const source = (manifest.inputProvenance as InputProvenance).source;
+
+        if (source === undefined) {
+          throw new Error('expected inputProvenance.source');
+        }
+
+        source.resolvedPath = `${source.resolvedPath ?? ''}-stale`;
+      },
+      expected: 'inputProvenance must match manifest metadata for local-source-docs',
+    },
+    {
+      name: 'parser mismatch',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const parser = (manifest.inputProvenance as InputProvenance).parser;
+
+        if (parser === undefined) {
+          throw new Error('expected inputProvenance.parser');
+        }
+
+        parser.format = 'html';
+      },
+      expected: 'inputProvenance must match manifest metadata for local-source-docs',
+    },
+  ])(
+    'rejects malformed input provenance: $name',
+    async (testCase) => {
+      const { manifestPath } = await generateSourceDocsFixture();
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest &
+        Record<string, unknown>;
+
+      if (manifest.inputProvenance === undefined) {
+        throw new Error('expected generated input provenance before tampering');
+      }
+
+      testCase.mutate(manifest);
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stdout, testCase.name).toContain('Checked files: 0');
+      expect(result.stderr, testCase.name).toContain(testCase.expected);
+      expect(result.stderr, testCase.name).not.toContain('hash mismatch');
+    },
+    15000
+  );
+
+  it('rejects configured SDK input provenance sdk mismatches', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+
+    if (manifest.inputProvenance?.sdk === undefined) {
+      throw new Error('expected configured SDK input provenance sdk summary');
+    }
+
+    manifest.inputProvenance.sdk.resolvedVersion = 'v3';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'inputProvenance must match manifest metadata for configured-sdk'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects discovery input provenance report mismatches without claiming selection', async () => {
+    const { manifestPath } = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-input-provenance-discovery-report-'
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
+
+    expectInputProvenance(manifest);
+    expect(JSON.stringify(manifest.inputProvenance)).not.toMatch(
+      /score|rank|selection|authority|taskFit|freshness|proof/i
+    );
+
+    if (manifest.inputProvenance?.report === undefined) {
+      throw new Error('expected discovery input provenance report summary');
+    }
+
+    manifest.inputProvenance.report.path = 'other-report.json';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'inputProvenance must match manifest metadata for discovery-report'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it.each([
+    {
       name: 'bad refreshedAt',
       mutate: (refresh: Record<string, unknown>) => {
         refresh.refreshedAt = 'not-an-iso-date';
@@ -11695,7 +12226,7 @@ describe('CLI compatibility behavior', () => {
       mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
         manifest.artifactSummary = [] as unknown as ArtifactSummary;
       },
-      expected: 'artifactSummary must be an object when present',
+      expected: 'artifactSummary must be an object',
     },
     {
       name: 'unsupported extra key',
@@ -11930,6 +12461,7 @@ describe('CLI compatibility behavior', () => {
     const expectedCheckedFiles = manifest.sourceFiles.length + manifest.generatedOutputs.length;
 
     expectManifestContract(manifest, 'source-truth-local-docs');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(outputDirResult.stdout).toContain('Manifest verification');
     expect(outputDirResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
@@ -11941,27 +12473,54 @@ describe('CLI compatibility behavior', () => {
     expect(manifestResult.stdout).toContain('Verification passed');
   });
 
-  it('verifies older source-truth docs manifests without source-file text metadata', async () => {
+  it('rejects source-truth manifests missing required V2 metadata before source path inspection', async () => {
+    const { manifestPath, sourceDir, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-pre-v2-missing-source-'
+    );
+    const incompleteManifest = manifest as SourceTruthDocsManifest & Record<string, unknown>;
+
+    delete incompleteManifest.manifestContract;
+    delete incompleteManifest.inputProvenance;
+    delete incompleteManifest.artifactSummary;
+    await writeFile(manifestPath, `${JSON.stringify(incompleteManifest, null, 2)}\n`, 'utf-8');
+    await rm(sourceDir, { recursive: true, force: true });
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('manifestContract is required for V2 manifests');
+    expect(result.stderr).toContain('inputProvenance is required for V2 manifests');
+    expect(result.stderr).toContain('artifactSummary is required for V2 manifests');
+    expect(result.stderr).toContain('unsupported pre-V2 manifest; regenerate with V2');
+    expect(result.stderr).not.toContain('source: missing');
+    expect(result.stderr).not.toContain('missing directory');
+    expect(result.stderr).not.toContain('missing file');
+    expect(result.stderr).not.toContain(sourceDir);
+  });
+
+  it('rejects incomplete pre-V2 source-truth manifests without source-file text metadata', async () => {
     const { manifestPath, manifest } = await generateSourceTruthDocsFixture(
-      'llm-docs-source-truth-old-source-metadata-'
+      'llm-docs-source-truth-pre-v2-source-metadata-'
     );
 
     for (const sourceFile of manifest.sourceFiles as Array<Record<string, unknown>>) {
       delete sourceFile.lineCount;
       delete sourceFile.estimatedTokenCount;
     }
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
 
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
-    const result = await runCli(['verify', '--manifest', manifestPath]);
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
 
-    expect(result.stdout).toContain('Manifest verification');
-    expect(result.stdout).toContain(
-      `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('sourceFiles[0].lineCount must be a non-negative integer');
+    expect(result.stderr).toContain(
+      'sourceFiles[0].estimatedTokenCount must be a non-negative integer'
     );
-    expect(result.stdout).toContain('Failures: 0');
-    expect(result.stdout).toContain('Verification passed');
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it('verifies a source discovery manifest contract and rejects a tampered report', async () => {
@@ -11970,6 +12529,7 @@ describe('CLI compatibility behavior', () => {
 
     const passResult = await runCli(['verify', '--output-dir', outputDir]);
     expectManifestContract(manifest, 'discovery-report');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expect(manifest.manifestContract?.artifactRole).toBe('candidate-evidence-report');
     expect(manifest.manifestContract?.cliGuarantees.join(' ')).toContain(
@@ -12002,6 +12562,7 @@ describe('CLI compatibility behavior', () => {
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
     expectManifestContract(manifest, 'source-verification-local-evidence');
+    expectInputProvenance(manifest);
     expectArtifactSummary(manifest);
     expectSourceVerificationFileEvidenceIndex(
       manifest.sourceVerification.fileEvidenceIndex,
@@ -12088,7 +12649,7 @@ describe('CLI compatibility behavior', () => {
     fileEvidenceIndex.docsFileCount += 1;
     fileEvidenceIndex.aggregateHash =
       sourceVerificationFileEvidenceIndexAggregateHashForTest(fileEvidenceIndex);
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
@@ -12274,24 +12835,26 @@ describe('CLI compatibility behavior', () => {
     );
   });
 
-  it('accepts older source-verification manifests without a file evidence index', async () => {
+  it('rejects incomplete pre-V2 source-verification manifests without a file evidence index', async () => {
     const { outputDir, manifestPath } = await createSourceVerificationVerifyFixture(
-      'llm-docs-source-verification-index-backcompat-'
+      'llm-docs-source-verification-index-pre-v2-'
     );
     const manifest = JSON.parse(
       await readFile(manifestPath, 'utf-8')
     ) as SourceVerificationManifest;
 
     delete manifest.sourceVerification.fileEvidenceIndex;
-    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
-    const result = await runCli(['verify', '--output-dir', outputDir]);
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
 
-    expect(result.stdout).toContain('Manifest verification');
-    expect(result.stdout).toContain('Checked files: 1');
-    expect(result.stdout).toContain('Failures: 0');
-    expect(result.stdout).toContain('Verification passed');
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'sourceVerification.fileEvidenceIndex is required for V2 source-verification-local-evidence manifests'
+    );
+    expect(result.stderr).toContain('unsupported pre-V2 manifest; regenerate with V2');
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it('rejects discovery report mode drift after file metadata still matches', async () => {
@@ -12392,6 +12955,7 @@ describe('CLI compatibility behavior', () => {
     ) as DiscoveryReportManifest;
 
     countManifest.discovery.candidateCount += 1;
+    refreshInputProvenanceForTest(countManifest);
     await writeFile(
       countFixture.manifestPath,
       `${JSON.stringify(countManifest, null, 2)}\n`,
@@ -12412,6 +12976,7 @@ describe('CLI compatibility behavior', () => {
     ) as DiscoveryReportManifest;
 
     pathManifest.discovery.reportPath = 'other-report.json';
+    refreshInputProvenanceForTest(pathManifest);
     await writeFile(
       pathFixture.manifestPath,
       `${JSON.stringify(pathManifest, null, 2)}\n`,
@@ -12718,22 +13283,24 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('candidateEvidenceIndex.candidates[0].sha256 is not supported');
   });
 
-  it('accepts older discovery manifests without a candidate evidence index', async () => {
+  it('rejects incomplete pre-V2 discovery manifests without a candidate evidence index', async () => {
     const { outputDir, manifestPath } = await createSourceDiscoveryVerifyFixture(
-      'llm-docs-discovery-candidate-index-backcompat-'
+      'llm-docs-discovery-candidate-index-pre-v2-'
     );
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
 
     delete manifest.candidateEvidenceIndex;
-    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
-    const result = await runCli(['verify', '--output-dir', outputDir]);
+    const result = await runCliWithExit(['verify', '--output-dir', outputDir]);
 
-    expect(result.stdout).toContain('Manifest verification');
-    expect(result.stdout).toContain('Checked files: 1');
-    expect(result.stdout).toContain('Failures: 0');
-    expect(result.stdout).toContain('Verification passed');
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'candidateEvidenceIndex is required for V2 discovery-report manifests'
+    );
+    expect(result.stderr).toContain('unsupported pre-V2 manifest; regenerate with V2');
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it('rejects tampered swift-book preset metadata during source docs verification', async () => {
@@ -12901,21 +13468,22 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).not.toContain('hash mismatch');
   });
 
-  it('accepts older configured SDK manifests without source line and token metadata', async () => {
+  it('rejects incomplete pre-V2 configured SDK manifests without source line and token metadata', async () => {
     const { manifestPath } = await generateSwiftFixture();
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
 
     delete manifest.source.lineCount;
     delete manifest.source.estimatedTokenCount;
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
-    const result = await runCli(['verify', '--manifest', manifestPath]);
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
 
-    expect(result.stdout).toContain('Manifest verification');
-    expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
-    expect(result.stdout).toContain('Failures: 0');
-    expect(result.stdout).toContain('Verification passed');
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('source.lineCount must be a non-negative integer');
+    expect(result.stderr).toContain('source.estimatedTokenCount must be a non-negative integer');
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it('rejects malformed configured SDK source line and token metadata before file checks', async () => {
@@ -12924,7 +13492,6 @@ describe('CLI compatibility behavior', () => {
 
     manifest.source.lineCount = -1;
     manifest.source.estimatedTokenCount = 1.5;
-    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -12932,10 +13499,8 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain('Checked files: 0');
-    expect(result.stderr).toContain('source.lineCount must be a non-negative integer when present');
-    expect(result.stderr).toContain(
-      'source.estimatedTokenCount must be a non-negative integer when present'
-    );
+    expect(result.stderr).toContain('source.lineCount must be a non-negative integer');
+    expect(result.stderr).toContain('source.estimatedTokenCount must be a non-negative integer');
     expect(result.stderr).not.toContain('hash mismatch');
   });
 
@@ -12945,12 +13510,14 @@ describe('CLI compatibility behavior', () => {
       mutate(output: ManifestFileEntry): void {
         delete output.estimatedTokenCount;
       },
+      expected: 'output[0].estimatedTokenCount must be a non-negative integer',
     },
     {
       label: 'only estimatedTokenCount',
       mutate(output: ManifestFileEntry): void {
         delete output.lineCount;
       },
+      expected: 'output[0].lineCount must be a non-negative integer',
     },
     {
       label: 'neither optional text metadata field',
@@ -12958,27 +13525,31 @@ describe('CLI compatibility behavior', () => {
         delete output.lineCount;
         delete output.estimatedTokenCount;
       },
+      expected: 'output[0].lineCount must be a non-negative integer',
     },
-  ])('accepts configured SDK generated outputs with $label present', async ({ mutate }) => {
-    const { manifestPath } = await generateSwiftFixture();
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+  ])(
+    'rejects incomplete pre-V2 configured SDK generated outputs with $label present',
+    async ({ mutate, expected }) => {
+      const { manifestPath } = await generateSwiftFixture();
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
 
-    for (const output of manifest.generatedOutputs) {
-      mutate(output);
+      for (const output of manifest.generatedOutputs) {
+        mutate(output);
+      }
+      refreshArtifactSummaryForTest(manifest);
+
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toContain('Checked files: 0');
+      expect(result.stderr).toContain(expected);
+      expect(result.stderr).not.toContain('hash mismatch');
     }
-    delete manifest.artifactSummary;
+  );
 
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
-
-    const result = await runCli(['verify', '--manifest', manifestPath]);
-
-    expect(result.stdout).toContain('Manifest verification');
-    expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
-    expect(result.stdout).toContain('Failures: 0');
-    expect(result.stdout).toContain('Verification passed');
-  });
-
-  it('rejects mixed valid and invalid optional generated output metadata before file checks', async () => {
+  it('rejects mixed valid and invalid required generated output metadata before file checks', async () => {
     const { manifestPath } = await generateSwiftFixture();
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
     const outputFile = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs') as
@@ -12997,9 +13568,7 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain('Checked files: 0');
-    expect(result.stderr).toContain(
-      'estimatedTokenCount must be a non-negative integer when present'
-    );
+    expect(result.stderr).toContain('estimatedTokenCount must be a non-negative integer');
     expect(result.stderr).not.toContain('hash mismatch');
     expect(result.stderr).not.toContain('line count mismatch');
   });
@@ -13250,7 +13819,7 @@ describe('CLI compatibility behavior', () => {
 
     delete sourceFile.lineCount;
     delete sourceFile.estimatedTokenCount;
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13276,7 +13845,7 @@ describe('CLI compatibility behavior', () => {
 
     sourceFile.lineCount = -1;
     sourceFile.estimatedTokenCount = 1.5;
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13446,7 +14015,7 @@ describe('CLI compatibility behavior', () => {
 
     delete outputFile.lineCount;
     delete outputFile.estimatedTokenCount;
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13543,7 +14112,7 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).not.toContain('byte size mismatch');
   });
 
-  it('rejects malformed source-truth docs source-file text metadata when present', async () => {
+  it('rejects malformed source-truth docs source-file text metadata before file checks', async () => {
     const { manifestPath, manifest } = await generateSourceTruthDocsFixture(
       'llm-docs-source-truth-source-text-shape-'
     );
@@ -13551,18 +14120,16 @@ describe('CLI compatibility behavior', () => {
 
     sourceFile.lineCount = -1;
     sourceFile.estimatedTokenCount = 1.5;
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain('sourceFiles[0].lineCount must be a non-negative integer');
     expect(result.stderr).toContain(
-      'sourceFiles[0].lineCount must be a non-negative integer when present'
-    );
-    expect(result.stderr).toContain(
-      'sourceFiles[0].estimatedTokenCount must be a non-negative integer when present'
+      'sourceFiles[0].estimatedTokenCount must be a non-negative integer'
     );
     expect(result.stderr).not.toContain('hash mismatch');
   });
@@ -13711,37 +14278,28 @@ describe('CLI compatibility behavior', () => {
     const sourcePath = join(outputDir, 'config/source.yml');
     const generatedPath = join(outputDir, 'llm-docs/output.txt');
     const manifestPath = join(outputDir, 'manifest.json');
+    const generatedText = 'generated docs\n';
 
     await mkdir(dirname(sourcePath), { recursive: true });
     await mkdir(dirname(generatedPath), { recursive: true });
     await writeFile(sourcePath, testSpecYaml, 'utf-8');
-    await writeFile(generatedPath, 'generated docs\n', 'utf-8');
-    await writeFile(
-      manifestPath,
-      JSON.stringify(
+    await writeFile(generatedPath, generatedText, 'utf-8');
+    const manifest = await configuredSdkManifestForTest({
+      sourcePath,
+      resolvedSpecPath: 'config/source.yml',
+      sourceText: testSpecYaml,
+      generatedOutputs: [
         {
-          schemaVersion: '0.1.0',
-          mode: 'configured-sdk',
-          ...validConfiguredSdkManifestMetadata(),
-          source: {
-            resolvedSpecPath: 'config/source.yml',
-            byteSize: await byteSize(sourcePath),
-            contentHash: await sha256File(sourcePath),
-          },
-          generatedOutputs: [
-            {
-              path: 'llm-docs/output.txt',
-              kind: 'llm-docs',
-              byteSize: await byteSize(generatedPath),
-              hash: await sha256File(generatedPath),
-            },
-          ],
+          path: 'llm-docs/output.txt',
+          kind: 'llm-docs',
+          byteSize: await byteSize(generatedPath),
+          hash: await sha256File(generatedPath),
+          lineCount: countTextLines(generatedText),
+          estimatedTokenCount: estimateTextTokens(generatedText),
         },
-        null,
-        2
-      ),
-      'utf-8'
-    );
+      ],
+    });
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const passResult = await runCli(['verify', '--manifest', manifestPath], repoRoot);
 
@@ -13766,39 +14324,30 @@ describe('CLI compatibility behavior', () => {
     const cwdSourcePath = join(dir, 'cwd/config/source.yml');
     const generatedPath = join(outputDir, 'llm-docs/output.txt');
     const manifestPath = join(outputDir, 'manifest.json');
+    const generatedText = 'generated docs\n';
 
     await mkdir(dirname(sourcePath), { recursive: true });
     await mkdir(dirname(cwdSourcePath), { recursive: true });
     await mkdir(dirname(generatedPath), { recursive: true });
     await writeFile(sourcePath, testSpecYaml, 'utf-8');
     await writeFile(cwdSourcePath, testSpecYaml, 'utf-8');
-    await writeFile(generatedPath, 'generated docs\n', 'utf-8');
-    await writeFile(
-      manifestPath,
-      JSON.stringify(
+    await writeFile(generatedPath, generatedText, 'utf-8');
+    const manifest = await configuredSdkManifestForTest({
+      sourcePath,
+      resolvedSpecPath: 'config/source.yml',
+      sourceText: testSpecYaml,
+      generatedOutputs: [
         {
-          schemaVersion: '0.1.0',
-          mode: 'configured-sdk',
-          ...validConfiguredSdkManifestMetadata(),
-          source: {
-            resolvedSpecPath: 'config/source.yml',
-            byteSize: await byteSize(sourcePath),
-            contentHash: await sha256File(sourcePath),
-          },
-          generatedOutputs: [
-            {
-              path: 'llm-docs/output.txt',
-              kind: 'llm-docs',
-              byteSize: await byteSize(generatedPath),
-              hash: await sha256File(generatedPath),
-            },
-          ],
+          path: 'llm-docs/output.txt',
+          kind: 'llm-docs',
+          byteSize: await byteSize(generatedPath),
+          hash: await sha256File(generatedPath),
+          lineCount: countTextLines(generatedText),
+          estimatedTokenCount: estimateTextTokens(generatedText),
         },
-        null,
-        2
-      ),
-      'utf-8'
-    );
+      ],
+    });
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
     await rm(sourcePath, { force: true });
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath], join(dir, 'cwd'));
@@ -13857,38 +14406,29 @@ describe('CLI compatibility behavior', () => {
     const manifestPath = join(dir, 'manifest.json');
 
     await writeFile(sourcePath, testSpecYaml, 'utf-8');
-    await writeFile(
-      manifestPath,
-      JSON.stringify(
+    const manifest = await configuredSdkManifestForTest({
+      sourcePath,
+      sourceText: testSpecYaml,
+      generatedOutputs: [
         {
-          schemaVersion: '0.1.0',
-          mode: 'configured-sdk',
-          ...validConfiguredSdkManifestMetadata(),
-          source: {
-            resolvedSpecPath: sourcePath,
-            byteSize: await byteSize(sourcePath),
-            contentHash: await sha256File(sourcePath),
-          },
-          generatedOutputs: [
-            {
-              path: join(dir, 'absolute-output.txt'),
-              kind: 'llm-docs',
-              byteSize: 0,
-              hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
-            },
-            {
-              path: '../outside-output.txt',
-              kind: 'llm-docs',
-              byteSize: 0,
-              hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
-            },
-          ],
+          path: join(dir, 'absolute-output.txt'),
+          kind: 'llm-docs',
+          byteSize: 0,
+          hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+          lineCount: 0,
+          estimatedTokenCount: 0,
         },
-        null,
-        2
-      ),
-      'utf-8'
-    );
+        {
+          path: '../outside-output.txt',
+          kind: 'llm-docs',
+          byteSize: 0,
+          hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+          lineCount: 0,
+          estimatedTokenCount: 0,
+        },
+      ],
+    });
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
 
@@ -13909,7 +14449,7 @@ describe('CLI compatibility behavior', () => {
 
     sourceFile.path = '../outside.md';
     outputFile.path = '../outside-output.txt';
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13938,7 +14478,7 @@ describe('CLI compatibility behavior', () => {
     sourceFile.byteSize = await byteSize(outsidePath);
     sourceFile.hash = await sha256File(outsidePath);
     manifest.source.aggregateHash = aggregateSourceFilesHashForTest(manifest.sourceFiles);
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -13968,7 +14508,7 @@ describe('CLI compatibility behavior', () => {
     sourceFile.byteSize = await byteSize(outsidePath);
     sourceFile.hash = await sha256File(outsidePath);
     manifest.source.aggregateHash = aggregateSourceFilesHashForTest(manifest.sourceFiles);
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -14020,7 +14560,7 @@ describe('CLI compatibility behavior', () => {
     await symlink(outsideDir, linkPath, 'dir');
 
     outputFile.path = 'llm-docs/link/file.txt';
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -14042,7 +14582,7 @@ describe('CLI compatibility behavior', () => {
     pathSourceFile.path = '../outside.ts';
     pathOutputFile.path = join(dirname(pathFixture.outputDir), 'absolute-output.json');
     pathOutputFile.kind = 'llm-docs';
-    delete pathFixture.manifest.artifactSummary;
+    refreshArtifactSummaryForTest(pathFixture.manifest);
     await writeFile(
       pathFixture.manifestPath,
       `${JSON.stringify(pathFixture.manifest, null, 2)}\n`,
@@ -14077,7 +14617,7 @@ describe('CLI compatibility behavior', () => {
     sourceLinkFile.resolvedPath = sourceLinkPath;
     sourceLinkFile.byteSize = await byteSize(outsideSourcePath);
     sourceLinkFile.hash = await sha256File(outsideSourcePath);
-    delete sourceLinkFixture.manifest.artifactSummary;
+    refreshArtifactSummaryForTest(sourceLinkFixture.manifest);
     await writeFile(
       sourceLinkFixture.manifestPath,
       `${JSON.stringify(sourceLinkFixture.manifest, null, 2)}\n`,
@@ -14127,41 +14667,17 @@ describe('CLI compatibility behavior', () => {
   }, 15000);
 
   it('rejects invalid generated output kinds before checking files', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));
-    tempDirs.push(dir);
-    const sourcePath = join(dir, 'source.yml');
-    const outputPath = join(dir, 'llm-docs/output.txt');
-    const manifestPath = join(dir, 'manifest.json');
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+    const outputFile = manifest.generatedOutputs[0];
 
-    await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(sourcePath, testSpecYaml, 'utf-8');
-    await writeFile(outputPath, 'generated docs\n', 'utf-8');
-    await writeFile(
-      manifestPath,
-      JSON.stringify(
-        {
-          schemaVersion: '0.1.0',
-          mode: 'configured-sdk',
-          ...validConfiguredSdkManifestMetadata(),
-          source: {
-            resolvedSpecPath: sourcePath,
-            byteSize: await byteSize(sourcePath),
-            contentHash: await sha256File(sourcePath),
-          },
-          generatedOutputs: [
-            {
-              path: 'llm-docs/output.txt',
-              kind: 'repo-source',
-              byteSize: await byteSize(outputPath),
-              hash: await sha256File(outputPath),
-            },
-          ],
-        },
-        null,
-        2
-      ),
-      'utf-8'
-    );
+    if (outputFile === undefined) {
+      throw new Error('expected configured SDK generated output');
+    }
+
+    outputFile.kind = 'repo-source';
+    refreshArtifactSummaryForTest(manifest);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
 
@@ -14179,7 +14695,7 @@ describe('CLI compatibility behavior', () => {
     }
 
     outputFile.kind = 'repo-source';
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -14200,7 +14716,7 @@ describe('CLI compatibility behavior', () => {
     }
 
     delete sourceFile.format;
-    delete manifest.artifactSummary;
+    refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
@@ -14220,42 +14736,29 @@ describe('CLI compatibility behavior', () => {
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(sourcePath, testSpecYaml, 'utf-8');
     await writeFile(outputPath, 'generated docs\n', 'utf-8');
-    await writeFile(
-      manifestPath,
-      JSON.stringify(
+    const manifest = await configuredSdkManifestForTest({
+      sourcePath,
+      sourceText: testSpecYaml,
+      generatedOutputs: [
         {
-          schemaVersion: '0.1.0',
-          mode: 'configured-sdk',
-          ...validConfiguredSdkManifestMetadata(),
-          source: {
-            resolvedSpecPath: sourcePath,
-            byteSize: await byteSize(sourcePath),
-            contentHash: await sha256File(sourcePath),
-          },
-          generatedOutputs: [
-            {
-              path: 'llm-docs/output.txt',
-              kind: 'llm-docs',
-              byteSize: await byteSize(outputPath),
-              hash: await sha256File(outputPath),
-              lineCount: -1,
-              estimatedTokenCount: -1,
-            },
-            {
-              path: 'llm-docs/output.txt',
-              kind: 'llm-docs',
-              byteSize: await byteSize(outputPath),
-              hash: await sha256File(outputPath),
-              lineCount: 1.5,
-              estimatedTokenCount: 2.5,
-            },
-          ],
+          path: 'llm-docs/output.txt',
+          kind: 'llm-docs',
+          byteSize: await byteSize(outputPath),
+          hash: await sha256File(outputPath),
+          lineCount: -1,
+          estimatedTokenCount: -1,
         },
-        null,
-        2
-      ),
-      'utf-8'
-    );
+        {
+          path: 'llm-docs/output.txt',
+          kind: 'llm-docs',
+          byteSize: await byteSize(outputPath),
+          hash: await sha256File(outputPath),
+          lineCount: 1.5,
+          estimatedTokenCount: 2.5,
+        },
+      ],
+    });
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
 

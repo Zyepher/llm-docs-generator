@@ -19,8 +19,10 @@ import {
 } from './semantic-chunk-index.js';
 import {
   buildArtifactSummaryForManifest,
+  buildInputProvenanceForManifest,
   buildManifestContract,
   type ArtifactSummary,
+  type InputProvenance,
   type ManifestContract,
 } from './manifest.js';
 import { formatDocNode } from './universal-formatter.js';
@@ -153,8 +155,9 @@ export interface SourceDocsManifest {
   generatedAt: string;
   generator: SourceDocsGeneratorMetadata;
   mode: typeof SOURCE_DOCS_MODE;
-  manifestContract?: ManifestContract;
-  artifactSummary?: ArtifactSummary;
+  manifestContract: ManifestContract;
+  inputProvenance: InputProvenance;
+  artifactSummary: ArtifactSummary;
   source: {
     input: string;
     resolvedPath: string;
@@ -1369,11 +1372,15 @@ function buildSourceDocsManifest(options: {
       : { semanticChunkIndexes: options.semanticChunkIndexes }),
     ...(options.preset === undefined ? {} : { preset: options.preset }),
     warnings: [...new Set(options.warnings)].sort(compareStringsByCodeUnit),
-  } satisfies Omit<SourceDocsManifest, 'artifactSummary'>;
+  } satisfies Omit<SourceDocsManifest, 'inputProvenance' | 'artifactSummary'>;
+  const manifestWithProvenance = {
+    ...manifest,
+    inputProvenance: buildInputProvenanceForManifest(manifest),
+  };
 
   return {
-    ...manifest,
-    artifactSummary: buildArtifactSummaryForManifest(manifest),
+    ...manifestWithProvenance,
+    artifactSummary: buildArtifactSummaryForManifest(manifestWithProvenance),
   };
 }
 

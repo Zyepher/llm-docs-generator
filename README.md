@@ -85,17 +85,17 @@ Current implemented capabilities include:
   defaults only when the agent or user supplies the exact local source path
 - opt-in semantic chunk JSONL output for explicit local source generation
 - manifests with source or discovery provenance, descriptive top-level
-  `manifestContract` metadata, content-free top-level `artifactSummary`
-  metadata, content hashes, generated file hashes, parser/formatter metadata,
-  and warnings
+  `manifestContract` metadata, content-free top-level `inputProvenance`
+  summary metadata, content-free top-level `artifactSummary` metadata, content
+  hashes, generated file hashes, parser/formatter metadata, and warnings
 - configured OpenRef SDK generation plus configured-SDK, source-docs,
   source-truth docs, discovery-report, and source-verification manifest
   verification, including recorded generator/sdk/parser/formatter metadata
-  checks plus deterministic content-free source spec line/token metadata checks
-  when present for configured-SDK manifests, and recorded
+  checks plus required V2 deterministic content-free source spec line/token
+  metadata checks for configured-SDK manifests, and recorded
   generator/parser/formatter metadata checks for local source-docs manifests,
-  plus deterministic content-free source-file line/token metadata checks for
-  source-truth docs manifests when present
+  plus required V2 deterministic content-free source-file line/token metadata
+  checks for source-truth docs manifests
 - explicit-manifest refresh for built-in-parser local source docs, source-truth
   docs, configured OpenRef SDK manifests that already record an absolute local
   source path, local source discovery-report manifests, and
@@ -298,10 +298,10 @@ Verification currently supports `configured-sdk`, `local-source-docs`,
 `source-verification-local-evidence` manifests. Configured SDK verification
 checks recorded generator metadata, sdk name/resolvedVersion/displayName,
 OpenRef parser metadata, legacy formatter metadata, source path existence,
-source content hash and byte size, optional deterministic content-free source
-line count and estimated token count metadata when present, generated file
-hashes, byte sizes, and valid generated output line counts and deterministic
-estimated token counts when present. Source-docs verification checks recorded
+source content hash and byte size, required V2 deterministic content-free
+source line count and estimated token count metadata, generated file hashes,
+byte sizes, and required generated output line counts and deterministic
+estimated token counts. Source-docs verification checks recorded
 generator metadata, parser
 name/version/format,
 formatter name/version/format, local source path shape and existence, recorded
@@ -314,33 +314,39 @@ semantic chunk indexes against
 manifests as data and does not import or execute parser plugin modules.
 Source-truth docs
 verification checks the conservative source-truth manifest shape, source file
-hashes, byte sizes, optional content-free line counts and deterministic
-estimated token counts when present, generated output hashes, byte sizes, line
+hashes, byte sizes, required content-free line counts and deterministic
+estimated token counts, generated output hashes, byte sizes, line
 counts, deterministic estimated token counts, symlink/path containment, and
 count consistency with `source-truth-report.json` when available.
 Discovery-report verification checks `discovery-report.json` existence, hash,
 byte size, line
 count, estimated token count, basic report schema/mode/kind/count consistency,
-and optional content-free candidate evidence index metadata against the report,
+and required V2 content-free candidate evidence index metadata against the report,
 including URL resource observed HTTP freshness evidence when present.
 Source-verification manifest checks cover `source-verification-report.json`
 existence, hash, byte size, line count, deterministic estimated token count,
 report schema/mode/output path consistency, source/docs endpoint provenance
 against the report, manifest summary consistency with report metadata, report
 summary consistency with body arrays, `sourceInspection.source` consistency,
-and optional compact content-free source/docs file evidence index metadata
+and required V2 compact content-free source/docs file evidence index metadata
 rebuilt from `source-verification-report.json`. When a top-level `refresh`
 provenance block is present, verification validates its mode, timestamp,
-strategy, deterministic input boundary, limitations, and supported keys. New
-successful manifests also include a top-level `manifestContract` block that
-describes the deterministic CLI/agent boundary for the manifest mode; `verify`
-accepts older manifests without it and validates its schema, mode, artifact
-role, static arrays, and supported keys when present. New successful manifests
-also include a top-level `artifactSummary` block with deterministic content-free
-counts, totals, aggregate hashes over existing manifest file metadata, warning
-counts, source-file totals where already represented, and compact index
-counters; `verify` accepts older manifests without it and validates supported
-keys, mode, counts, totals, and aggregate hashes when present. These checks do
+strategy, deterministic input boundary, limitations, and supported keys. V2 is
+a fresh manifest/docs-pack contract: regenerate V1 or early next-gen packs with
+the V2 CLI before verifying them. Supported successful manifests require a
+top-level `manifestContract` block that describes the deterministic CLI/agent
+boundary for the manifest mode, a top-level `inputProvenance` block with
+deterministic content-free explicit input/source/report/parser/sdk summary
+metadata copied from existing manifest metadata, and a top-level
+`artifactSummary` block with deterministic content-free counts, totals,
+aggregate hashes over existing manifest file metadata, warning counts,
+source-file totals where already represented, and compact index counters.
+Discovery-report manifests also require `candidateEvidenceIndex`, and
+source-verification manifests require `sourceVerification.fileEvidenceIndex`.
+`verify` rejects missing or malformed V2-required metadata with regeneration
+guidance. These blocks do not add raw content, new source paths, candidate
+selection, scores, ranking, authority, task-fit, freshness proof, or
+source-truth proof. These checks do
 not refresh outputs or sources, inspect additional source/docs files, perform
 broad official-docs claim checking, validate source-code behavior or runtime
 behavior, validate freshness, refresh remote resources, decide candidate
