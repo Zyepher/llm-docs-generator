@@ -877,12 +877,6 @@ async function verifySourceDocsManifest(
     failures.push('malformed manifest: source.type must be file or directory');
   }
 
-  if (hasParserPluginMetadata && sourceType === 'directory') {
-    failures.push(
-      'malformed manifest: parser.plugin source manifests must record source.type file'
-    );
-  }
-
   if (hasParserPluginMetadata && preset !== undefined) {
     failures.push('malformed manifest: parser.plugin source manifests must not include preset');
   }
@@ -1009,6 +1003,17 @@ async function verifySourceDocsManifest(
     if (sourceAggregateHash !== actualAggregateHash) {
       failures.push('malformed manifest: source.aggregateHash must match sourceFiles metadata');
     }
+  }
+
+  if (
+    hasParserPluginMetadata &&
+    sourceType === 'directory' &&
+    parserPluginMetadata !== undefined &&
+    parserPluginMetadata.format.directorySupport !== true
+  ) {
+    failures.push(
+      'malformed manifest: parser.plugin directory source manifests require parser.plugin.format.directorySupport true'
+    );
   }
 
   validateGeneratedOutputs({

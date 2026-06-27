@@ -28,11 +28,12 @@ Use this skill when the task is about this repository or about calling the insta
   implemented. `plugins validate` must not be described as loading, importing,
   executing, trusting, or selecting plugin code.
 - If `capabilities --json` reports explicit parser plugin generation as
-  implemented, treat it as one local source file plus one explicit local
-  manifest plus one custom format id only. Plugin code is trusted local code
-  executed for generation and is not sandboxed. Do not claim plugin discovery,
-  installation, package resolution, auto-selection, directory generation, or
-  sandboxing unless capabilities reports those features separately.
+  implemented, treat it as one local source file or opted-in directory plus
+  one explicit local manifest plus one custom format id only. Directory sources
+  require `directorySupport: true` on the selected manifest format. Plugin
+  code is trusted local code executed for generation and is not sandboxed. Do
+  not claim plugin discovery, installation, package resolution, auto-selection,
+  or sandboxing unless capabilities reports those features separately.
 - Do not treat discovery reports as source-selection decisions. They are candidate evidence reports for agent review, and report order is not authority, source truth, freshness, or task-fit proof.
 - Reject unsupported candidate scoring, CLI source-selection, authority/source-truth, correctness, source-intent, task-fit, or "top candidate" claims in docs or code review. Do not add numeric candidate scores; report ordering is readability only. Require explicit user/agent candidate input or a documented automation flag before generation from discovery candidates.
 
@@ -81,4 +82,4 @@ When modifying this repository:
 
 ## Current CLI Boundary
 
-Implemented modes may include local/repo/URL discovery evidence reports with integrity manifests, conservative source-truth evidence extraction/generation and source-truth docs manifest verification, local source docs generation with optional source-only chunk JSONL export and manifest verification, explicit single-file local parser plugin generation with trusted non-sandboxed execution when `capabilities --json` reports it, configured SDK generation and verification, discovery-report verification, explicit local-manifest refresh for current built-in-parser local source docs and source-truth docs manifests, read-only parser plugin manifest validation, `capabilities --json`, read-only `agent context` metadata, and read-only `agent doctor` diagnostics. Treat parser plugin discovery, installation, package resolution, auto-selection, directory generation, parser-plugin source-docs refresh, sandboxing, custom parser generation, and any broader lifecycle command as unavailable unless the installed CLI says otherwise.
+Implemented modes may include local/repo/URL discovery evidence reports with integrity manifests, conservative source-truth evidence extraction/generation and source-truth docs manifest verification, local source docs generation with optional source-only chunk JSONL export and manifest verification, explicit local parser plugin generation for one source file or an opted-in directory with trusted non-sandboxed execution when `capabilities --json` reports it, configured SDK generation and verification, discovery-report verification, explicit local-manifest refresh for current built-in-parser local source docs and source-truth docs manifests, read-only parser plugin manifest validation, `capabilities --json`, read-only `agent context` metadata, and read-only `agent doctor` diagnostics. Treat parser plugin discovery, installation, package resolution, auto-selection, parser-plugin source-docs refresh, sandboxing, custom parser generation, and any broader lifecycle command as unavailable unless the installed CLI says otherwise.

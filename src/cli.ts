@@ -557,22 +557,22 @@ const CAPABILITIES_CONTRACT = {
       options: [
         '--source <path>',
         '--format auto|markdown|mdx|openapi|openref|rst|html',
-        '--parser-plugin-manifest <path> with explicit custom --format <plugin-format-id>',
+        '--parser-plugin-manifest <path> with explicit custom --format <plugin-format-id>; directory sources require directorySupport: true',
         '--chunks jsonl',
         '--preset swift-book',
       ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic local source parsing through the registered parser or an explicit single-file local parser plugin and universal formatter, with opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, and a scoped swift-book preset',
+        'deterministic local source parsing through the registered parser or an explicit local parser plugin and universal formatter, with opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, and a scoped swift-book preset',
       limitations: [
         'local files and directories only',
         'no URL fetching',
         'no discovery report consumption',
         'no candidate auto-selection',
-        'parser plugin generation requires --source <local-file>, --parser-plugin-manifest <path>, and a custom explicit --format id',
+        'parser plugin generation requires --source <local-file-or-directory>, --parser-plugin-manifest <path>, and a custom explicit --format id',
+        'parser plugin directory generation requires directorySupport: true on the selected manifest format',
         'parser plugin code is trusted local code executed for generation and is not sandboxed',
         'no parser plugin discovery, installation, package resolution, or auto-selection',
-        'no parser plugin directory source generation',
         'swift-book preset requires explicit --source and adds deterministic output defaults only',
         'no source selection decision',
         'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
@@ -582,19 +582,23 @@ const CAPABILITIES_CONTRACT = {
     {
       id: 'parser-plugin-execution',
       command: 'generate',
-      mode: 'generate --source <local-file> --parser-plugin-manifest <path> --format <plugin-format-id>',
+      mode: 'generate --source <local-file-or-directory> --parser-plugin-manifest <path> --format <plugin-format-id>',
       status: 'implemented',
       inputBoundary:
-        'one explicit local source file, one explicit local parser plugin manifest, and one explicit custom plugin format id',
-      options: ['--source <local-file>', '--parser-plugin-manifest <path>', '--format <id>'],
+        'one explicit local source file or directory, one explicit local parser plugin manifest, and one explicit custom plugin format id',
+      options: [
+        '--source <local-file-or-directory>',
+        '--parser-plugin-manifest <path>',
+        '--format <id>',
+      ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt'],
       summary:
-        'explicit single-file parser plugin execution through one declared local module, normalized through the universal formatter with parser plugin provenance in the source-docs manifest',
+        'explicit parser plugin execution through one declared local module, normalized through the universal formatter with parser plugin provenance in the source-docs manifest',
       limitations: [
-        'explicit local source files only',
+        'explicit local source files or directories only',
+        'directory sources require directorySupport: true on the selected manifest format',
         'requires a custom plugin format id declared by the manifest',
         'rejects built-in formats and --format auto',
-        'no directory source generation through parser plugins',
         'no --chunks support with parser plugins',
         'no --preset support with parser plugins',
         'no parser plugin discovery or auto-selection',
@@ -918,10 +922,10 @@ const CAPABILITIES_CONTRACT = {
     {
       id: 'parser-plugin-broader-workflows',
       command:
-        'parser plugin discovery, install, package resolution, auto-detection, directory generation, sandboxing, and broad custom parser workflows',
+        'parser plugin discovery, install, package resolution, auto-detection, sandboxing, and broad custom parser workflows',
       status: 'planned-unsupported',
       reason:
-        'only explicit single-file local parser plugin generation is implemented; discovery, install, package resolution, auto-selection, directory source generation, sandboxing, and broad custom parser workflows remain planned/unsupported',
+        'only explicit local parser plugin generation is implemented for one source file or a directory whose selected manifest format declares directorySupport: true; discovery, install, package resolution, auto-selection, sandboxing, and broad custom parser workflows remain planned/unsupported',
     },
     {
       id: 'agent-install-codex',
@@ -1231,7 +1235,7 @@ function printGenerateRequestFailure(message: string): void {
   console.error(chalk.red(`Generate failed: ${message}`));
   console.error(
     chalk.yellow(
-      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] [--chunks jsonl] [--preset swift-book] --output-dir <dir>; generate --source <local-file> --parser-plugin-manifest <path> --format <plugin-format-id> --output-dir <dir>; generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
+      'Supported generation modes: generate --source <local-file-or-directory> [--format auto|markdown|mdx|openapi|openref|rst|html] [--chunks jsonl] [--preset swift-book] --output-dir <dir>; generate --source <local-file-or-directory> --parser-plugin-manifest <path> --format <plugin-format-id> --output-dir <dir> (directories require selected format directorySupport: true); generate --sdk <sdk> [--sdk-version <version>] [--format openref|openref-0.1].'
     )
   );
   console.error(
@@ -1295,7 +1299,7 @@ function validateGenerateOptions(options: {
 
   if (options.parserPluginManifest !== undefined && options.source === undefined) {
     failGenerateRequest(
-      'generate --parser-plugin-manifest requires --source <explicit-local-file>.'
+      'generate --parser-plugin-manifest requires --source <explicit-local-file-or-directory>.'
     );
   }
 
@@ -2007,7 +2011,7 @@ program
   .option('--chunks <format>', 'Source-only semantic chunk export: jsonl')
   .option(
     '--parser-plugin-manifest <path>',
-    'Explicit local parser plugin manifest for single-file source generation'
+    'Explicit local parser plugin manifest for file or opted-in directory source generation'
   )
   .option('--preset <name>', 'Source-only deterministic preset: swift-book')
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
