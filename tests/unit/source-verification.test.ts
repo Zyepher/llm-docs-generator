@@ -83,7 +83,7 @@ describe('source verification evidence', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
     });
     const second = await verifyDocsAgainstSource({
@@ -93,7 +93,7 @@ describe('source verification evidence', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
     });
 
@@ -247,7 +247,7 @@ describe('source verification evidence', () => {
         generator: {
           name: 'llm-docs-generator',
           version: '1.0.0',
-          cliName: 'supabase-llm-docs',
+          cliName: 'llm-docs',
         },
       })
     ).rejects.toBeInstanceOf(SourceVerificationNoDocsEvidenceError);
@@ -293,7 +293,7 @@ describe('source verification evidence', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
     });
     await writeFile(join(outputDir, 'user-note.txt'), 'keep me\n', 'utf-8');
@@ -306,7 +306,7 @@ describe('source verification evidence', () => {
         generator: {
           name: 'llm-docs-generator',
           version: '1.0.0',
-          cliName: 'supabase-llm-docs',
+          cliName: 'llm-docs',
         },
       })
     ).rejects.toThrow('source-truth verify-docs --docs path not found or cannot be read');
@@ -335,7 +335,7 @@ describe('source verification evidence', () => {
         generator: {
           name: 'llm-docs-generator',
           version: '1.0.0',
-          cliName: 'supabase-llm-docs',
+          cliName: 'llm-docs',
         },
       })
     ).rejects.toBeInstanceOf(SourceVerificationNoDocsEvidenceError);
@@ -351,7 +351,7 @@ describe('source verification evidence', () => {
         generator: {
           name: 'llm-docs-generator',
           version: '1.0.0',
-          cliName: 'supabase-llm-docs',
+          cliName: 'llm-docs',
         },
       })
     ).rejects.toThrow('source-truth verify-docs --docs path not found or cannot be read');
@@ -396,7 +396,7 @@ describe('source verification evidence', () => {
         generator: {
           name: 'llm-docs-generator',
           version: '1.0.0',
-          cliName: 'supabase-llm-docs',
+          cliName: 'llm-docs',
         },
       })
     ).rejects.toThrow('source-truth verify-docs --docs path not found or cannot be read');
@@ -426,7 +426,7 @@ describe('source verification evidence', () => {
         generator: {
           name: 'llm-docs-generator',
           version: '1.0.0',
-          cliName: 'supabase-llm-docs',
+          cliName: 'llm-docs',
         },
       })
     ).rejects.toThrow(
@@ -457,7 +457,7 @@ describe('source verification evidence', () => {
         generator: {
           name: 'llm-docs-generator',
           version: '1.0.0',
-          cliName: 'supabase-llm-docs',
+          cliName: 'llm-docs',
         },
       })
     ).rejects.toBeInstanceOf(SourceVerificationNoDocsEvidenceError);
@@ -521,7 +521,7 @@ describe('source verification evidence', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
     });
 
@@ -573,7 +573,7 @@ describe('source verification evidence', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
     });
 
@@ -619,7 +619,7 @@ describe('source verification evidence', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
     });
 
@@ -673,7 +673,7 @@ describe('source verification evidence', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
     });
 
@@ -710,7 +710,7 @@ describe('source verification evidence', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
     });
 

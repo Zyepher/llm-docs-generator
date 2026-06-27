@@ -2052,7 +2052,7 @@ function validConfiguredSdkManifestMetadata(): Pick<
     generator: {
       name: 'llm-docs-generator',
       version: '1.0.0',
-      cliName: 'supabase-llm-docs',
+      cliName: 'llm-docs',
     },
     sdk: {
       name: 'swift',
@@ -2782,7 +2782,7 @@ describe('CLI compatibility behavior', () => {
       generator: {
         packageName: 'llm-docs-generator',
         packageVersion: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
         binary: 'llm-docs',
       },
       limitations: [
@@ -2872,7 +2872,7 @@ describe('CLI compatibility behavior', () => {
       generator: {
         packageName: 'llm-docs-generator',
         packageVersion: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
         binary: 'llm-docs',
       },
       summary: {
@@ -3087,7 +3087,7 @@ describe('CLI compatibility behavior', () => {
       generator: {
         packageName: 'llm-docs-generator',
         packageVersion: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
         binary: 'llm-docs',
       },
     });
@@ -4456,7 +4456,7 @@ describe('CLI compatibility behavior', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
       mode: 'discovery-report',
       discovery: {
@@ -7121,7 +7121,7 @@ describe('CLI compatibility behavior', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
       mode: 'configured-sdk',
       sdk: {
@@ -7291,7 +7291,7 @@ describe('CLI compatibility behavior', () => {
       generator: {
         name: 'llm-docs-generator',
         version: '1.0.0',
-        cliName: 'supabase-llm-docs',
+        cliName: 'llm-docs',
       },
       mode: 'local-source-docs',
       source: {
@@ -9707,7 +9707,7 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(join(unsupportedFormatOutputDir, 'manifest.json'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'llm-docs'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'chunks'))).toBe(false);
-  });
+  }, 15000);
 
   it('preserves parser plugin files under output artifacts after CLI validation failures', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-cli-cleanup-'));

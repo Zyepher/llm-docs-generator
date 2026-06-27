@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * CLI Entry Point for Supabase LLM Docs Generator
+ * CLI Entry Point for llm-docs-generator
  *
  * Performance considerations:
  * - Lazy module loading (only load what's needed)
@@ -49,7 +49,7 @@ import { Logger, LogLevel } from './utils/logger.js';
 // ============================================================================
 
 const program = new Command();
-const CLI_NAME = 'supabase-llm-docs';
+const CLI_NAME = 'llm-docs';
 const GENERATOR_NAME = packageJson.name;
 const GENERATOR_VERSION = packageJson.version;
 const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';

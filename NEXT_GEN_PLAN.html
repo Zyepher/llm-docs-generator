@@ -1127,14 +1127,16 @@ no authoritative task source: agent investigates another explicit source or asks
                 the last run, and if the parser still understands it. If not, it re-runs bounded
                 inspection within the explicit source scope.
               </p>
-              <pre><code>llm-docs verify supabase/supabase
+              <pre><code>llm-docs verify --manifest ./agent-docs/manifest.json
 
-checks:
-  - source path exists
+current verify checks:
+  - recorded source path exists when represented
+  - recorded content hash matches
+  - generated manifest matches output files
+
+future/planned refresh checks:
   - repo commit changed
-  - content hash changed
-  - parser still succeeds
-  - generated manifest matches output files</code></pre>
+  - parser still succeeds after re-inspection</code></pre>
             </article>
 
             <article class="feature">
@@ -1231,9 +1233,9 @@ ambiguous release lines  -> ask before generating</code></pre>
                 Clone or update the repo cache, inspect files within scope, and write a candidate
                 evidence report for agent review.
               </p>
-              <pre><code>llm-docs discover https://github.com/supabase/supabase
-llm-docs discover supabase/supabase --sdk swift
-llm-docs discover supabase/supabase --format openref</code></pre>
+              <pre><code>llm-docs discover --repo https://github.com/supabase/supabase --scope apps/docs --output-dir ./reports/supabase-docs
+llm-docs discover --repo https://github.com/supabase/supabase --scope apps/docs/spec --output-dir ./reports/supabase-specs
+# agent inspects the candidate evidence report before choosing any source</code></pre>
             </article>
 
             <article class="command">
@@ -1267,9 +1269,10 @@ llm-docs generate --source ./Guide.docc --format markdown</code></pre>
                 Check previous outputs against recorded source metadata, update explicit caches when
                 allowed, and regenerate only when needed.
               </p>
-              <pre><code>llm-docs verify supabase/supabase
-llm-docs refresh supabase/supabase
-llm-docs diff supabase/supabase --since last</code></pre>
+              <pre><code>llm-docs verify --manifest ./agent-docs/manifest.json
+llm-docs refresh --manifest ./agent-docs/manifest.json
+# future/planned lifecycle command, not current CLI:
+# llm-docs diff ./agent-docs --since last</code></pre>
             </article>
           </div>
         </div>
@@ -1406,7 +1409,8 @@ CLI:
                 it through shell commands.
               </p>
               <pre><code>llm-docs --help
-llm-docs agent context --format markdown
+llm-docs agent context
+llm-docs agent context --json
 llm-docs capabilities --json
 
 capabilities:
@@ -2010,7 +2014,7 @@ failure:
                 <h3>Repo Discovery</h3>
                 <p>Implement the cache and repo inspection workflow inspired by the screenshots.</p>
                 <ul>
-                  <li>Add <code>llm-docs discover &lt;repo&gt;</code>.</li>
+                  <li>Add <code>llm-docs discover --repo &lt;repo&gt;</code>.</li>
                   <li>Clone or update repos under <code>~/.explore/repos</code>.</li>
                   <li>
                     Search for docs directories, specs, markdown, MDX, DocC, and OpenAPI files.
