@@ -667,7 +667,7 @@ const CAPABILITIES_CONTRACT = {
         'candidate evidence indexes are content-free and do not score candidates',
         'no task fit decision',
         'no source selection',
-        'verify does not refresh discovery reports',
+        'verify itself does not refresh discovery reports',
         'verify does not refresh remote freshness evidence',
         'no source-code verification',
       ],
@@ -764,7 +764,7 @@ const CAPABILITIES_CONTRACT = {
         'no repo freshness check',
         'no crawling',
         'no source selection',
-        'no discovery report refresh',
+        'does not consume discovery reports',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
@@ -788,7 +788,7 @@ const CAPABILITIES_CONTRACT = {
         'no repo freshness check',
         'no crawling',
         'no source selection',
-        'no discovery report refresh',
+        'does not consume discovery reports',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
@@ -820,12 +820,40 @@ const CAPABILITIES_CONTRACT = {
         'no repo freshness check',
         'no crawling',
         'no source selection',
-        'no discovery report refresh',
+        'does not consume discovery reports',
         'no candidate report consumption',
         'no candidate auto-selection',
         'no source-code verification',
         'no remote network work',
         'no source project script execution',
+      ],
+    },
+    {
+      id: 'refresh-source-discovery-report',
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for discovery-report source',
+      status: 'implemented',
+      inputBoundary:
+        'existing discovery-report manifest.json with discovery.kind source and a local-bounded report source.resolvedPath',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: ['discovery-report.json', 'manifest.json'],
+      summary:
+        'deterministic rerun of local source discovery from discovery-report.json report.source.resolvedPath into the same output directory, preserving prior traversal bounds and followed by manifest integrity verification',
+      limitations: [
+        'source discovery-report manifests only',
+        'uses only report.source.resolvedPath and traversal.maxDepth/maxEntries/maxFiles from the existing local report',
+        'candidate evidence for agent review only',
+        'no docs generation',
+        'no source selection',
+        'repo discovery-report refresh is not supported',
+        'URL discovery-report refresh is not supported',
+        'no remote freshness refresh',
+        'no repo cache update',
+        'no broad crawling',
+        'no candidate report consumption',
+        'no candidate auto-selection',
+        'no source-code verification',
+        'no network access',
       ],
     },
     {
@@ -881,10 +909,10 @@ const CAPABILITIES_CONTRACT = {
     {
       id: 'refresh-unsupported-manifests',
       command:
-        'refresh for parser-plugin source-docs, discovery report, URL, repo, website, or freshness workflows',
+        'refresh for parser-plugin source-docs, repo/URL discovery reports, URL, repo, website, freshness, or verification workflows',
       status: 'planned-unsupported',
       reason:
-        'only explicit built-in-parser local-source-docs, source-truth-local-docs, and configured-sdk manifests with recorded absolute local spec paths can be refreshed; parser-plugin source-docs, discovery report, remote URL/repo, freshness, crawling, and source-code verification refresh remain planned',
+        'only explicit built-in-parser local-source-docs, source-truth-local-docs, configured-sdk manifests with recorded absolute local spec paths, and local source discovery-report manifests can be refreshed; parser-plugin source-docs, repo/URL discovery-report refresh, remote freshness refresh, broad crawling, source-verification refresh, and source-code verification refresh remain planned',
     },
     {
       id: 'source-code-verification',
@@ -2278,7 +2306,7 @@ program
 program
   .command('refresh')
   .description(
-    'Refresh built-in local source docs, source-truth docs, or local configured SDK docs from an existing explicit local manifest'
+    'Refresh supported explicit local manifests, including local source discovery reports'
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')
@@ -2312,8 +2340,17 @@ program
       if (result.presetName !== undefined) {
         console.log(`  Preset: ${result.presetName}`);
       }
-      console.log(`  Source files: ${result.sourceFiles}`);
-      console.log(`  Generated files: ${result.generatedOutputs}`);
+      if (result.mode === DISCOVERY_REPORT_MODE) {
+        console.log(`  Candidate evidence report: refreshed`);
+        console.log(`  Candidate files: ${result.candidateCount ?? 0}`);
+        if (result.reportPath !== undefined) {
+          console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
+        }
+        console.log('  Scope: candidate evidence only; no source selection or generation');
+      } else {
+        console.log(`  Source files: ${result.sourceFiles}`);
+        console.log(`  Generated files: ${result.generatedOutputs}`);
+      }
       if (result.chunkOutputPath !== undefined) {
         console.log(`  Chunk export: ${chalk.cyan(result.chunkOutputPath)}`);
       }

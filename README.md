@@ -95,8 +95,9 @@ Current implemented capabilities include:
   plus deterministic content-free source-file line/token metadata checks for
   source-truth docs manifests when present
 - explicit-manifest refresh for built-in-parser local source docs, source-truth
-  docs, and configured OpenRef SDK manifests that already record an absolute
-  local source path, with post-refresh manifest integrity verification
+  docs, configured OpenRef SDK manifests that already record an absolute local
+  source path, and local source discovery-report manifests, with post-refresh
+  manifest integrity verification
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
 - narrow explicit-local source/docs evidence reports that compare Markdown/MDX
@@ -112,12 +113,12 @@ Current implemented capabilities include:
   custom explicit format id, with trusted local plugin execution and parser
   provenance in the source-docs manifest
 
-Planned capabilities such as discovery report refresh, remote freshness checks,
-diff, host install helpers, broad crawling, documented automation-flag
-candidate handling, broad official-docs behavior/API claim verification,
-additional presets, parser plugin discovery/install/package resolution, parser
-plugin auto-selection, sandboxing, and broad custom parser workflows are not
-implemented in the current CLI.
+Planned capabilities such as repo/URL discovery-report refresh, remote
+freshness checks, diff, host install helpers, broad crawling, documented
+automation-flag candidate handling, broad official-docs behavior/API claim
+verification, additional presets, parser plugin discovery/install/package
+resolution, parser plugin auto-selection, sandboxing, and broad custom parser
+workflows are not implemented in the current CLI.
 
 ## Command Model
 
@@ -241,9 +242,9 @@ The CLI is responsible for:
   `generate --source --parser-plugin-manifest --format` is used, as trusted
   local code without sandboxing
 - refreshing only existing built-in-parser `local-source-docs`,
-  `source-truth-local-docs`, and configured OpenRef SDK manifests that already
-  record explicit absolute local source paths, then verifying the regenerated
-  manifest outputs
+  `source-truth-local-docs`, configured OpenRef SDK manifests that already
+  record explicit absolute local source paths, and local source
+  discovery-report manifests, then verifying the regenerated manifest outputs
 - failing clearly when a requested source, format, parser, permission, or mode
   cannot be used
 
@@ -282,6 +283,7 @@ llm-docs verify --output-dir ./reports/source-truth
 llm-docs verify --output-dir ./reports/local-docs
 llm-docs verify --output-dir ./reports/source-verification
 llm-docs refresh --output-dir ./agent-docs
+llm-docs refresh --manifest ./reports/local-docs/manifest.json
 llm-docs refresh --manifest ./reports/source-truth/manifest.json
 llm-docs refresh --manifest ./output/swift/v2/manifest.json
 ```
@@ -330,10 +332,11 @@ authority, task fit, source truth, or source selection, or prove that docs
 statements are correct.
 
 Refresh currently supports existing built-in-parser `local-source-docs`,
-`source-truth-local-docs`, and configured OpenRef SDK manifests with recorded
-local sources. Parser-plugin `local-source-docs` manifests are not refreshed
-yet; rerun the explicit parser-plugin generate command instead. For source
-docs, refresh reads the manifest, uses the recorded absolute local source path,
+`source-truth-local-docs`, configured OpenRef SDK manifests with recorded
+local sources, and `discovery-report` manifests only when
+`discovery.kind` is `source`. Parser-plugin `local-source-docs` manifests are
+not refreshed yet; rerun the explicit parser-plugin generate command instead.
+For source docs, refresh reads the manifest, uses the recorded absolute local source path,
 `source.formatHint`, preset metadata if present, and whether the prior manifest
 recorded `semantic-chunks-jsonl`, then regenerates into the same output
 directory. For source-truth docs, it uses only the recorded absolute local
@@ -344,16 +347,22 @@ absolute local, existing, non-symlink OpenRef spec file outside the output
 directory; it reparses that exact path, rewrites
 `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs in the
 same output directory, and rewrites `manifest.json`, including current
-deterministic content-free source spec line/token metadata. After successful
+deterministic content-free source spec line/token metadata. For local source
+discovery reports, refresh reads the existing `discovery-report.json` named by
+`manifest.discovery.reportPath`, validates it is a local-bounded source report,
+uses only `report.source.resolvedPath`, preserves `traversal.maxDepth`,
+`traversal.maxEntries`, and `traversal.maxFiles`, reruns local source discovery
+into the same output directory, and rewrites `discovery-report.json` plus
+`manifest.json` as candidate evidence for agent review. After successful
 regeneration, refresh runs the existing manifest verifier over the newly
 written manifest and reports the checked-file count. This post-refresh check is
 deterministic manifest/output integrity verification only; it does not claim
 freshness, source truth, source-code behavior, or runtime behavior. Refresh
-does not support parser-plugin source-docs manifests, discovery-report
-manifests, URLs, repo freshness, broad website crawling, source selection,
-source-code verification, behavior validation, remote network work, registry
-lookup, candidate report consumption, candidate auto-selection, or source
-project script execution.
+does not support parser-plugin source-docs manifests, repo or URL
+discovery-report refresh, remote freshness refresh, broad website crawling,
+source selection, source-code verification, behavior validation, remote network
+work, registry lookup, candidate report consumption, candidate auto-selection,
+source-verification refresh, or source project script execution.
 
 When `generate --source` is run with `--chunks jsonl`, it also writes
 `chunks/semantic-chunks.jsonl`. The source-docs manifest records that file as a

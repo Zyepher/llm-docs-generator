@@ -279,9 +279,10 @@ repos, select sources, verify source truth, claim completeness, or perform
 source-code verification. Additional preset names remain planned/unsupported.
 
 The current `refresh --manifest <path>` / `refresh --output-dir <dir>` command
-supports current built-in-parser `local-source-docs` and
-`source-truth-local-docs` manifests, plus configured OpenRef SDK manifests with
-recorded absolute local `source.resolvedSpecPath` values. Parser-plugin
+supports current built-in-parser `local-source-docs`,
+`source-truth-local-docs`, configured OpenRef SDK manifests with recorded
+absolute local `source.resolvedSpecPath` values, and `discovery-report`
+manifests only when `discovery.kind` is `source`. Parser-plugin
 `local-source-docs` manifests are not refreshed yet; rerun the explicit
 parser-plugin generate command instead. Source-docs refresh reads the existing
 manifest, uses only the recorded absolute local source path,
@@ -297,15 +298,21 @@ recorded spec path to be an absolute local, existing, non-symlink OpenRef spec
 file outside the output directory; it reparses that exact path, rewrites
 `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs, and
 rewrites `manifest.json`, including current deterministic content-free source
-spec line/token metadata. After successful regeneration, refresh runs the
-existing manifest verifier over the newly written manifest outputs and reports
-the checked-file count. This is deterministic manifest/output integrity
-verification only; it does not claim freshness, source truth, source-code
-behavior, or runtime behavior. Refresh does not support discovery-report
-manifests, URLs, repo freshness, broad crawling, source selection, source-code
-verification, behavior validation, remote network work, registry lookup,
-candidate report consumption, candidate auto-selection, or source project
-script execution.
+spec line/token metadata. Local source discovery-report refresh reads
+`discovery-report.json` from `manifest.discovery.reportPath`, validates the
+local-bounded source report, uses only `report.source.resolvedPath`, preserves
+`traversal.maxDepth`, `traversal.maxEntries`, and `traversal.maxFiles`, reruns
+`discover --source` behavior into the same output directory, and rewrites
+`discovery-report.json` plus `manifest.json` as candidate evidence for agent
+review. After successful regeneration, refresh runs the existing manifest
+verifier over the newly written manifest outputs and reports the checked-file
+count. This is deterministic manifest/output integrity verification only; it
+does not claim freshness, source truth, source-code behavior, or runtime
+behavior. Refresh does not support repo/URL discovery-report refresh, remote
+freshness refresh, broad crawling, source selection, source-code verification,
+behavior validation, remote network work, registry lookup, candidate report
+consumption, candidate auto-selection, source-verification refresh, parser-plugin
+source-docs refresh, or source project script execution.
 
 The current CLI exposes only narrow explicit-local source/docs lexical evidence
 through `source-truth verify-docs`; broad official-docs behavior/API claim
@@ -484,12 +491,13 @@ agent intent/source/scope resolution
 --output-dir`. Narrow explicit-local source/docs reference evidence is
   available through `source-truth verify-docs --source --docs --output-dir`.
   Explicit local manifest refresh for current built-in-parser
-  `local-source-docs`, `source-truth-local-docs`, and configured OpenRef SDK
-  manifests with recorded absolute local source paths is available through
+  `local-source-docs`, `source-truth-local-docs`, configured OpenRef SDK
+  manifests with recorded absolute local source paths, and local source
+  `discovery-report` manifests is available through
   `refresh --manifest <path>` or `refresh --output-dir <dir>`, with
   deterministic post-refresh manifest/output integrity verification.
   Parser-plugin `local-source-docs` refresh, broader crawling,
-  discovery-report refresh, remote freshness refresh, broad
+  repo/URL discovery-report refresh, remote freshness refresh, broad
   official-docs behavior/API claim verification, and behavior-level source
   documentation remain planned.
 - Every generated output should eventually include full manifest provenance:
