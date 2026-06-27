@@ -348,8 +348,8 @@ Target next-generation implementation:
 - Clone and cache repositories outside the active workspace.
 - Compare cached clones against remote state to determine freshness.
 - Respect user-pinned versions such as Tailwind 3 even if Tailwind 4 is latest.
-- Verify official documentation claims against source code when the user asks for
-  source-truth confidence and the implementation is available.
+- Collect bounded source-truth evidence for official-docs claims when the user
+  asks for source-truth confidence and the needed workflow is implemented.
 - Generate docs from source code when an explicit source-truth codebase docs
   mode exists.
 - Write manifests so every output is traceable to docs, repo commits, tags,
@@ -408,9 +408,9 @@ Agent workflow:
    observed, and parseability; treat this as agent judgment, not a CLI judgment.
 6. Run this project's parser/formatter on the agent-selected source.
 7. If the user asks for source-truth confidence and a source repo is available,
-   verify API signatures, config defaults, routes, exported types, and behavior
-   claims against implementation source files.
-8. Report provenance, confidence, and any source-code conflicts.
+   use only implemented source-truth evidence workflows for bounded observed
+   facts or narrow local source/docs reference evidence.
+8. Report provenance, confidence limits, and any evidence-backed conflicts.
 
 Use this project as the conversion engine after the agent selects an explicit
 source from user input or a bounded inspection report.
@@ -474,8 +474,9 @@ Agent workflow:
    - examples
    - public exports
    - existing docs
-4. Prefer existing official docs when present, but verify claims against source
-   code when the user asks for source-truth codebase docs.
+4. Prefer existing official docs when present, but use only implemented
+   source-truth evidence workflows when the user asks for source-truth codebase
+   docs.
 5. If the agent has resolved an explicit local source path, it may run
    `llm-docs source-truth inspect --source <path>` to obtain bounded factual
    TypeScript/JavaScript export and package/config evidence for review.
