@@ -429,23 +429,23 @@ async function prepareParserPluginSourceDocsInput(
     );
   }
 
-  if (source.type !== 'file') {
-    throw new Error(
-      'generate --source --parser-plugin-manifest supports explicit local source files only; directory inputs are not supported in this release'
-    );
-  }
-
   const plugin = await loadExplicitParserPlugin({
     manifestPath: options.manifestPath,
     requestedFormat,
     sourcePath: source.resolvedPath,
+    sourceType: source.type,
     outputDir: options.outputDir,
   });
-  const sourceFile = await describeSourceFile(
-    source.resolvedPath,
-    basename(source.resolvedPath),
-    requestedFormat
-  );
+  const sourceFiles =
+    source.type === 'file'
+      ? [
+          await describeSourceFile(
+            source.resolvedPath,
+            basename(source.resolvedPath),
+            requestedFormat
+          ),
+        ]
+      : await describeParserPluginDirectorySourceFiles(source, requestedFormat);
 
   return {
     formatHint: requestedFormat,
@@ -454,7 +454,7 @@ async function prepareParserPluginSourceDocsInput(
       parser: plugin.parser,
       parserVersion: plugin.provenance.version,
       parserPlugin: plugin.provenance,
-      sourceFiles: [sourceFile],
+      sourceFiles,
       warnings: [],
     },
   };
@@ -482,6 +482,7 @@ async function loadExplicitParserPlugin(options: {
   manifestPath: string;
   requestedFormat: string;
   sourcePath: string;
+  sourceType: SourceDocsSourceType;
   outputDir: string;
 }): Promise<{ parser: SourceDocsParser; provenance: SourceDocsParserPluginProvenance }> {
   const validation = await validateParserPluginManifestFile({
@@ -501,6 +502,12 @@ async function loadExplicitParserPlugin(options: {
   if (selectedFormat === undefined) {
     throw new Error(
       `parser plugin manifest does not declare requested format '${options.requestedFormat}'`
+    );
+  }
+
+  if (options.sourceType === 'directory' && selectedFormat.directorySupport !== true) {
+    throw new Error(
+      `parser plugin format '${options.requestedFormat}' does not declare directory support; set directorySupport: true in the selected manifest format to use a directory source`
     );
   }
 
@@ -531,7 +538,7 @@ async function loadExplicitParserPlugin(options: {
 
     if (!detected) {
       throw new Error(
-        `parser plugin '${parser.name}' detect returned false for source file: ${options.sourcePath}`
+        `parser plugin '${parser.name}' detect returned false for source path: ${options.sourcePath}`
       );
     }
   }
@@ -629,7 +636,7 @@ function buildExecutableParserPluginParser(
 
             if (typeof detected !== 'boolean') {
               throw new Error(
-                `parser plugin '${parser.name}' detect must return a boolean for source file: ${sourcePath}`
+                `parser plugin '${parser.name}' detect must return a boolean for source path: ${sourcePath}`
               );
             }
 
@@ -910,6 +917,93 @@ async function describeDirectorySourceFiles(
   };
 }
 
+async function describeParserPluginDirectorySourceFiles(
+  source: ResolvedSourceDocsInput,
+  format: string
+): Promise<BoundedSourceFile[]> {
+  const state = {
+    entries: 0,
+    files: 0,
+  };
+  const files = await collectParserPluginDirectorySourceFiles({
+    rootPath: source.resolvedPath,
+    currentPath: source.resolvedPath,
+    depth: 0,
+    format,
+    state,
+  });
+
+  return files.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+}
+
+async function collectParserPluginDirectorySourceFiles(options: {
+  rootPath: string;
+  currentPath: string;
+  depth: number;
+  format: string;
+  state: { entries: number; files: number };
+}): Promise<BoundedSourceFile[]> {
+  const { rootPath, currentPath, depth, format, state } = options;
+
+  if (depth > DEFAULT_SOURCE_DOCS_MAX_DEPTH) {
+    throw new Error(
+      `generate --source directory exceeds max traversal depth ${DEFAULT_SOURCE_DOCS_MAX_DEPTH}: ${currentPath}`
+    );
+  }
+
+  const entries = (await readdir(currentPath, { withFileTypes: true })).sort((a, b) =>
+    compareStringsByCodeUnit(a.name, b.name)
+  );
+  const files: BoundedSourceFile[] = [];
+
+  for (const entry of entries) {
+    state.entries++;
+
+    if (state.entries > DEFAULT_SOURCE_DOCS_MAX_ENTRIES) {
+      throw new Error(
+        `generate --source directory exceeds max traversal entries ${DEFAULT_SOURCE_DOCS_MAX_ENTRIES}`
+      );
+    }
+
+    const entryPath = join(currentPath, entry.name);
+
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      files.push(
+        ...(await collectParserPluginDirectorySourceFiles({
+          rootPath,
+          currentPath: entryPath,
+          depth: depth + 1,
+          format,
+          state,
+        }))
+      );
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    state.files++;
+
+    if (state.files > DEFAULT_SOURCE_DOCS_MAX_FILES) {
+      throw new Error(
+        `generate --source directory exceeds max source files ${DEFAULT_SOURCE_DOCS_MAX_FILES}`
+      );
+    }
+
+    files.push(
+      await describeSourceFile(entryPath, relativeSourcePath(rootPath, entryPath), format)
+    );
+  }
+
+  return files;
+}
+
 async function collectDirectorySourceFiles(options: {
   rootPath: string;
   currentPath: string;
@@ -1055,7 +1149,7 @@ async function parsePreparedSource(
   source: ResolvedSourceDocsInput,
   preparedSource: PreparedSourceDocsInput
 ): Promise<DocNode> {
-  if (source.type === 'file') {
+  if (source.type === 'file' || preparedSource.parserPlugin !== undefined) {
     return await preparedSource.parser.parse(source.resolvedPath);
   }
 

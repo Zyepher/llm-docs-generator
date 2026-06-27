@@ -285,14 +285,15 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [ ] Plugin system for custom parsers
   - [x] Deterministic read-only parser plugin manifest validation for explicit
         local JSON manifests, without loading or executing plugin code
-  - [x] Explicit single-file parser plugin execution for `generate --source`
-        with `--parser-plugin-manifest` and explicit custom `--format`, with
-        trusted local execution, DocNode validation, formatter normalization,
+  - [x] Explicit parser plugin execution for a local file or opted-in directory
+        source through `generate --source` with `--parser-plugin-manifest` and
+        explicit custom `--format`, with trusted local execution, DocNode
+        validation, formatter normalization, deterministic parser-plugin
+        directory `sourceFiles` provenance for all non-symlink regular files,
         parser plugin provenance, and verify checks against recorded plugin
         manifest data without importing plugin code
   - [ ] Parser plugin discovery, install, package resolution, auto-selection,
-        directory source generation, sandboxing, and broad custom parser
-        workflows
+        sandboxing, and broad custom parser workflows
 - [x] OpenRef backward compatibility tests
 
 Current discovery scope:
@@ -356,7 +357,8 @@ Current capabilities contract scope:
   `source-truth verify-docs --source --docs --output-dir`, read-only
   `agent context`, read-only `agent doctor`, read-only
   `plugins validate --manifest`,
-  explicit single-file `generate --source --parser-plugin-manifest --format`,
+  explicit local file or opted-in directory
+  `generate --source --parser-plugin-manifest --format`,
   explicit local `generate --source` with parser hints and optional
   `--chunks jsonl`, scoped `generate --source --preset swift-book`, configured
   `generate --sdk` with optional `--format openref` /
@@ -369,8 +371,8 @@ Current capabilities contract scope:
   behavior/API claim verification, broad website crawling, documented
   automation-flag candidate handling, framework/route
   understanding, behavior-level generation from source code, parser plugin
-  discovery/install/package resolution/auto-selection/directory generation/
-  sandboxing/broad custom parser workflows, and `agent install codex`.
+  discovery/install/package resolution/auto-selection/sandboxing/broad custom
+  parser workflows, and `agent install codex`.
 - Stable output files are reported where they exist:
   `discovery-report.json`, `source-truth-report.json`, `source-truth.md`,
   `source-verification-report.json`, `manifest.json`, `failure.json`, source

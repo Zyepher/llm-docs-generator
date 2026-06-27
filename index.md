@@ -191,15 +191,18 @@ rejected. The command does not load, import, execute, or trust plugin code.
 
 The current explicit parser-plugin generate path (`generate --source` with
 `--parser-plugin-manifest` and explicit custom `--format`) executes one
-selected local parser plugin module for one explicit local source file. The
-requested custom format id must be declared by the manifest and must not be
-`auto` or a built-in source format. Plugin code is trusted local code and is
-not sandboxed. The generated source-docs manifest records parser plugin
-provenance under `parser.plugin`, and `verify` checks recorded plugin metadata
-against the plugin manifest contents and manifest file hash/byte size without
-importing or executing plugin code. Plugin discovery, install, package
-resolution, auto-selection, directory plugin generation, sandboxing, and broad
-custom parser workflows remain planned/unsupported.
+selected local parser plugin module for one explicit local source file or
+directory. Directory sources require `directorySupport: true` on the selected
+manifest format. The requested custom format id must be declared by the
+manifest and must not be `auto` or a built-in source format. Plugin code is
+trusted local code and is not sandboxed. The generated source-docs manifest
+records parser plugin provenance under `parser.plugin`; parser-plugin
+directory manifests record all non-symlink regular files in deterministic
+`sourceFiles` metadata for provenance only; and `verify` checks recorded plugin
+metadata against the plugin manifest contents and manifest file hash/byte size
+without importing or executing plugin code. Plugin discovery, install, package
+resolution, auto-selection, sandboxing, and broad custom parser workflows
+remain planned/unsupported.
 
 The current `source-truth inspect --source` command accepts one explicit local
 file or directory and prints a deterministic JSON evidence report to stdout. It
@@ -501,9 +504,10 @@ agent intent/source/scope resolution
   - generated files
   - warnings
 - Broad parser plugin workflows remain future work. The current CLI implements
-  only explicit single-file local parser plugin generation from one selected
-  manifest and custom format id. Plugin discovery, install, package resolution,
-  auto-selection, directory generation, sandboxing, and broad custom parser
+  explicit local parser plugin generation only for one source file or a
+  directory whose selected manifest format declares `directorySupport: true`,
+  from one selected manifest and custom format id. Plugin discovery, install,
+  package resolution, auto-selection, sandboxing, and broad custom parser
   workflows remain future work.
 
 ## Agent Crawl Order

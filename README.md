@@ -106,17 +106,18 @@ Current implemented capabilities include:
   binary metadata, PATH visibility, and skipped/not-configured host checks
 - read-only parser plugin manifest validation for explicit local JSON manifests
   without loading, importing, or executing plugin modules
-- explicit single-file parser plugin generation from one local source file,
-  one local parser plugin manifest, and one custom explicit format id, with
-  trusted local plugin execution and parser provenance in the source-docs
-  manifest
+- explicit parser plugin generation from one local source file, or from one
+  local source directory when the selected manifest format declares
+  `directorySupport: true`, using one local parser plugin manifest and one
+  custom explicit format id, with trusted local plugin execution and parser
+  provenance in the source-docs manifest
 
 Planned capabilities such as discovery report refresh, remote freshness checks,
 diff, host install helpers, broad crawling, documented automation-flag
 candidate handling, broad official-docs behavior/API claim verification,
 additional presets, parser plugin discovery/install/package resolution, parser
-plugin auto-selection, directory plugin generation, sandboxing, and broad
-custom parser workflows are not implemented in the current CLI.
+plugin auto-selection, sandboxing, and broad custom parser workflows are not
+implemented in the current CLI.
 
 ## Command Model
 
@@ -169,15 +170,20 @@ llm-docs validate --sdk swift --version v2
 manifest file only. The command is read-only: it does not load, import,
 execute, or trust the declared plugin module.
 
-`llm-docs generate --source <local-file> --parser-plugin-manifest <path>
+`llm-docs generate --source <local-file-or-directory> --parser-plugin-manifest <path>
 --format <plugin-format-id>` is the only implemented parser plugin execution
-path. It requires one explicit local source file, one explicit local manifest,
-and one custom format id declared by the manifest. It rejects `--sdk`,
-`--preset`, `--chunks`, `--format auto`, built-in formats, and directory source
-inputs. The CLI validates the manifest, imports only the declared local module
-file, executes trusted local plugin code without sandboxing, validates the
-returned DocNode tree, formats through the existing universal formatter, and
-writes parser plugin provenance under `parser.plugin` in `manifest.json`.
+path. It requires one explicit local source file or directory, one explicit
+local manifest, and one custom format id declared by the manifest. Directory
+sources require the selected manifest format to set `directorySupport: true`.
+It rejects `--sdk`, `--preset`, `--chunks`, `--format auto`, and built-in
+formats. The CLI validates the manifest, imports only the declared local
+module file, executes trusted local plugin code without sandboxing, validates
+the returned DocNode tree, formats through the existing universal formatter,
+and writes parser plugin provenance under `parser.plugin` in `manifest.json`.
+For parser-plugin directory manifests, `sourceFiles` records all non-symlink
+regular files under the explicit source directory in deterministic path order;
+these records are provenance metadata only and are not used for source
+selection or plugin auto-detection.
 
 Manifest schema `0.1.0`:
 
@@ -200,8 +206,8 @@ Manifest schema `0.1.0`:
 
 Duplicate format ids, duplicate extensions anywhere in the manifest, and
 unsupported root or format keys are rejected. Plugin discovery, installation,
-package resolution, auto-selection, directory plugin generation, sandboxing,
-and broad custom parser workflows remain planned/unsupported.
+package resolution, auto-selection, sandboxing, and broad custom parser
+workflows remain planned/unsupported.
 
 ## Agent Boundary
 
@@ -230,8 +236,10 @@ The CLI is responsible for:
   discovery-report/source-verification files against recorded metadata
 - validating explicit local parser plugin manifests without loading plugin code
 - executing one explicitly selected local parser plugin for one explicit local
-  source file only when `generate --source --parser-plugin-manifest --format`
-  is used, as trusted local code without sandboxing
+  source file, or for one explicit local source directory when the selected
+  manifest format declares `directorySupport: true`, only when
+  `generate --source --parser-plugin-manifest --format` is used, as trusted
+  local code without sandboxing
 - refreshing only existing built-in-parser `local-source-docs`,
   `source-truth-local-docs`, and configured OpenRef SDK manifests that already
   record explicit absolute local source paths, then verifying the regenerated

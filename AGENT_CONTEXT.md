@@ -262,17 +262,19 @@ Current implementation:
 - Current CLI commands are limited to local/repo/website `discover`,
   `source-truth inspect`, `source-truth generate`,
   `source-truth verify-docs`, `generate --source`,
-  `generate --source --parser-plugin-manifest` for one explicit local file and
-  custom plugin format id, `generate --source --preset swift-book`,
+  `generate --source --parser-plugin-manifest` for one explicit local file or
+  directory with an explicit custom plugin format id, where directory sources
+  require `directorySupport: true` on the selected manifest format,
+  `generate --source --preset swift-book`,
   `generate --sdk`, `refresh`, `verify`, `list-sdks`, `validate --sdk`,
   `capabilities --json`, read-only `agent context`, and read-only
   `agent doctor`.
 - Does not yet implement broad website crawling, discovery-report refresh,
   remote freshness refresh, broad official-docs behavior/API claim
   verification, full next-generation manifests, or behavior-level source
-  documentation from code. Parser plugin discovery,
-  install, package resolution, auto-selection, directory source generation,
-  sandboxing, and broad custom parser workflows remain planned/unsupported.
+  documentation from code. Parser plugin discovery, install, package
+  resolution, auto-selection, sandboxing, and broad custom parser workflows
+  remain planned/unsupported.
   Semantic chunking exists as a library capability for existing DocNode IR and
   as an opt-in JSONL export for explicit `generate --source` outputs only;
   source-docs refresh preserves that chunk JSONL output only when the existing
@@ -326,9 +328,10 @@ the narrow explicit-local `source-truth verify-docs` evidence report,
 behavior-level source documentation, or manifest data beyond the current source
 docs, configured SDK, source-truth docs, discovery-report, and
 source-verification manifests, or parser plugin workflows beyond explicit
-single-file local generation with `--parser-plugin-manifest` and a custom
-`--format`, treat it as planned work unless source and tests prove it has been
-implemented.
+local file generation or explicit opted-in directory generation with
+`--parser-plugin-manifest`, a custom `--format`, and selected manifest-format
+`directorySupport: true`, treat it as planned work unless source and tests
+prove it has been implemented.
 
 ### Intent 1: Official Documentation To LLM-Friendly Docs
 
@@ -708,18 +711,21 @@ Expected behavior:
   JSON with schema version, absolute manifest path, valid flag, manifest
   metadata when valid, and errors/warnings arrays. The command does not load,
   import, execute, or trust plugin code.
-- `llm-docs generate --source <local-file> --parser-plugin-manifest <path>` with
-  explicit custom `--format <plugin-format-id>` executes one explicitly
-  selected local parser plugin module for one explicit local source file.
+- `llm-docs generate --source <local-file-or-directory>
+  --parser-plugin-manifest <path>` with explicit custom
+  `--format <plugin-format-id>` executes one explicitly selected local parser
+  plugin module for one explicit local source file or directory. Directory
+  sources require `directorySupport: true` on the selected manifest format.
   Plugin code is trusted local code and is not sandboxed. The CLI rejects
-  `--sdk`, `--preset`, `--chunks`, `--format auto`, built-in formats, and
-  directory sources for this mode. Generated source-docs manifests record
-  parser plugin provenance under `parser.plugin`; `verify` checks recorded
-  plugin metadata against the plugin manifest contents and manifest file
-  hash/byte size without importing or executing plugin code.
+  `--sdk`, `--preset`, `--chunks`, `--format auto`, and built-in formats for
+  this mode. Generated source-docs manifests record parser plugin provenance
+  under `parser.plugin`; parser-plugin directory manifests record all
+  non-symlink regular files in deterministic `sourceFiles` metadata for
+  provenance only. `verify` checks recorded plugin metadata against the plugin
+  manifest contents and manifest file hash/byte size without importing or
+  executing plugin code.
 - Parser plugin discovery, install, package resolution, auto-selection,
-  directory generation, sandboxing, and broad custom parser generation remain
-  planned/unsupported.
+  sandboxing, and broad custom parser generation remain planned/unsupported.
 
 When an agent is in another directory and receives a prompt such as "Generate
 LLM docs for Tailwind CSS," the installed skill is what should tell the agent to
