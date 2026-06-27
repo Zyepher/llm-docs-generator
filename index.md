@@ -293,7 +293,8 @@ content-free line/token manifest metadata. Configured SDK refresh requires the
 recorded spec path to be an absolute local, existing, non-symlink OpenRef spec
 file outside the output directory; it reparses that exact path, rewrites
 `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs, and
-rewrites `manifest.json`. After successful regeneration, refresh runs the
+rewrites `manifest.json`, including current deterministic content-free source
+spec line/token metadata. After successful regeneration, refresh runs the
 existing manifest verifier over the newly written manifest outputs and reports
 the checked-file count. This is deterministic manifest/output integrity
 verification only; it does not claim freshness, source truth, source-code

@@ -89,10 +89,11 @@ Current implemented capabilities include:
 - configured OpenRef SDK generation plus configured-SDK, source-docs,
   source-truth docs, discovery-report, and source-verification manifest
   verification, including recorded generator/sdk/parser/formatter metadata
-  checks for configured-SDK manifests and recorded generator/parser/formatter
-  metadata checks for local source-docs manifests, plus deterministic
-  content-free source-file line/token metadata checks for source-truth docs
-  manifests when present
+  checks plus deterministic content-free source spec line/token metadata checks
+  when present for configured-SDK manifests, and recorded
+  generator/parser/formatter metadata checks for local source-docs manifests,
+  plus deterministic content-free source-file line/token metadata checks for
+  source-truth docs manifests when present
 - explicit-manifest refresh for built-in-parser local source docs, source-truth
   docs, and configured OpenRef SDK manifests that already record an absolute
   local source path, with post-refresh manifest integrity verification
@@ -282,9 +283,11 @@ Verification currently supports `configured-sdk`, `local-source-docs`,
 `source-verification-local-evidence` manifests. Configured SDK verification
 checks recorded generator metadata, sdk name/resolvedVersion/displayName,
 OpenRef parser metadata, legacy formatter metadata, source path existence,
-source content hash and byte size, generated file hashes, byte sizes, and valid
-generated output line counts and deterministic estimated token counts when
-present. Source-docs verification checks recorded generator metadata, parser
+source content hash and byte size, optional deterministic content-free source
+line count and estimated token count metadata when present, generated file
+hashes, byte sizes, and valid generated output line counts and deterministic
+estimated token counts when present. Source-docs verification checks recorded
+generator metadata, parser
 name/version/format,
 formatter name/version/format, local source path shape and existence, recorded
 source file hashes, byte sizes, line counts, and deterministic estimated token
@@ -332,7 +335,8 @@ content-free source-file line/token manifest metadata. For
 absolute local, existing, non-symlink OpenRef spec file outside the output
 directory; it reparses that exact path, rewrites
 `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs in the
-same output directory, and rewrites `manifest.json`. After successful
+same output directory, and rewrites `manifest.json`, including current
+deterministic content-free source spec line/token metadata. After successful
 regeneration, refresh runs the existing manifest verifier over the newly
 written manifest and reports the checked-file count. This post-refresh check is
 deterministic manifest/output integrity verification only; it does not claim

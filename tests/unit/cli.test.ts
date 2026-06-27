@@ -107,6 +107,8 @@ interface GenerationManifest {
     format: string;
     byteSize: number;
     contentHash: string;
+    lineCount?: number;
+    estimatedTokenCount?: number;
   };
   parser: {
     name: string;
@@ -2419,7 +2421,13 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('verify-configured-sdk')?.summary).toContain(
       'recorded generator/sdk/parser/formatter metadata'
     );
+    expect(implemented.get('verify-configured-sdk')?.summary).toContain(
+      'optional content-free source line/token metadata'
+    );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain('when present');
+    expect(implemented.get('verify-configured-sdk')?.limitations).toContain(
+      'source line/token metadata is deterministic content-free text metadata only'
+    );
     expect(implemented.get('verify-discovery-report')).toMatchObject({
       command: 'verify',
       mode: 'verify --manifest or verify --output-dir',
@@ -2556,7 +2564,7 @@ describe('CLI compatibility behavior', () => {
         'parsed/<sdk>-<resolved-version>-spec.json',
         'llm-docs/*-llms.txt',
       ],
-      summary: expect.stringContaining('manifest-recorded absolute local spec path'),
+      summary: expect.stringContaining('content-free source spec line/token manifest metadata'),
       limitations: expect.arrayContaining([
         'configured-sdk manifests only',
         'requires source.resolvedSpecPath to be an absolute local non-symlink file outside the output directory',
@@ -6018,6 +6026,7 @@ describe('CLI compatibility behavior', () => {
     const manifestText = await readFile(manifestPath, 'utf-8');
     const manifest = JSON.parse(manifestText) as GenerationManifest;
     const specPath = join(configDir, 'supabase_swift_v2.yml');
+    const specText = await readFile(specPath, 'utf-8');
     const generatedAt = new Date(manifest.generatedAt);
     const outputPaths = manifest.generatedOutputs.map((output) => output.path);
     const outputsByPath = new Map(manifest.generatedOutputs.map((output) => [output.path, output]));
@@ -6057,6 +6066,8 @@ describe('CLI compatibility behavior', () => {
     });
     expect(manifest.source.byteSize).toBe(await byteSize(specPath));
     expect(manifest.source.contentHash).toBe(await sha256File(specPath));
+    expect(manifest.source.lineCount).toBe(countTextLines(specText));
+    expect(manifest.source.estimatedTokenCount).toBe(estimateTextTokens(specText));
     expect(outputPaths).toEqual([...outputPaths].sort(compareStringsByCodeUnit));
     expect(outputPaths).toEqual([
       'llm-docs/supabase-swift-v2-database-llms.txt',
@@ -8767,12 +8778,21 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Generation complete!');
     expect(stdout).toContain('Successful: 1');
 
+    const manifestPath = join(outputDir, 'swift/v2/manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
     const fullDoc = await readFile(
       join(outputDir, 'swift/v2/llm-docs/supabase-swift-v2-full-llms.txt'),
       'utf-8'
     );
+    const verifyResult = await runCli(['verify', '--manifest', manifestPath], configDir);
+
+    expect(manifest.source.configuredLocalPath).toBeNull();
+    expect(manifest.source.resolvedSpecPath).toBe(cacheSpecPath);
+    expect(isAbsolute(manifest.source.resolvedSpecPath)).toBe(true);
     expect(fullDoc).toContain('<!-- Generated from: config/supabase_swift_v2.yml -->');
     expect(fullDoc).not.toContain('<!-- Generated from:  -->');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
   });
 
   it('refreshes a local source docs manifest after output tamper and source edit', async () => {
@@ -9096,6 +9116,12 @@ describe('CLI compatibility behavior', () => {
     expect(refreshResult.stdout).toContain('Refresh complete');
     expect(refreshedManifest.source.resolvedSpecPath).toBe(sourcePath);
     expect(refreshedManifest.source.contentHash).toBe(await sha256File(sourcePath));
+    expect(refreshedManifest.source.lineCount).toBe(
+      countTextLines(await readFile(sourcePath, 'utf-8'))
+    );
+    expect(refreshedManifest.source.estimatedTokenCount).toBe(
+      estimateTextTokens(await readFile(sourcePath, 'utf-8'))
+    );
     expect(refreshedManifest.generatedOutputs.map((output) => output.path)).toEqual([
       'llm-docs/supabase-swift-v2-database-llms.txt',
       'llm-docs/supabase-swift-v2-full-llms.txt',
@@ -9122,9 +9148,19 @@ describe('CLI compatibility behavior', () => {
       join(outputDir, 'llm-docs', 'supabase-swift-v2-full-llms.txt'),
       'utf-8'
     );
+    const outputDirRefreshedManifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as GenerationManifest;
+    const outputDirRefreshedSourceText = await readFile(sourcePath, 'utf-8');
 
     expect(outputDirRefresh.stdout).toContain('Mode: configured-sdk');
     expect(outputDirRefreshedText).toContain('Select via output dir refresh');
+    expect(outputDirRefreshedManifest.source.lineCount).toBe(
+      countTextLines(outputDirRefreshedSourceText)
+    );
+    expect(outputDirRefreshedManifest.source.estimatedTokenCount).toBe(
+      estimateTextTokens(outputDirRefreshedSourceText)
+    );
   });
 
   it('refresh rejects unsafe configured SDK filename metadata before writing outside output', async () => {
@@ -10613,6 +10649,69 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain(`output ${outputFile.path}: estimated token count mismatch`);
     expect(result.stderr).not.toContain('hash mismatch');
     expect(result.stderr).not.toContain('line count mismatch');
+  });
+
+  it('reports configured SDK source line and token metadata drift', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+
+    if (
+      manifest.source.lineCount === undefined ||
+      manifest.source.estimatedTokenCount === undefined
+    ) {
+      throw new Error('expected configured SDK source text metadata');
+    }
+
+    manifest.source.lineCount += 1;
+    manifest.source.estimatedTokenCount += 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
+    expect(result.stderr).toContain('source: line count mismatch');
+    expect(result.stderr).toContain('source: estimated token count mismatch');
+    expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('accepts older configured SDK manifests without source line and token metadata', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+
+    delete manifest.source.lineCount;
+    delete manifest.source.estimatedTokenCount;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCli(['verify', '--manifest', manifestPath]);
+
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
+    expect(result.stdout).toContain('Failures: 0');
+    expect(result.stdout).toContain('Verification passed');
+  });
+
+  it('rejects malformed configured SDK source line and token metadata before file checks', async () => {
+    const { manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
+
+    manifest.source.lineCount = -1;
+    manifest.source.estimatedTokenCount = 1.5;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Manifest verification');
+    expect(result.stdout).toContain('Checked files: 0');
+    expect(result.stderr).toContain(
+      'source.lineCount must be a non-negative integer when present'
+    );
+    expect(result.stderr).toContain(
+      'source.estimatedTokenCount must be a non-negative integer when present'
+    );
+    expect(result.stderr).not.toContain('hash mismatch');
   });
 
   it.each([

@@ -80,13 +80,17 @@ Current implementation:
   derived only from generated JSONL records and excluding chunk content.
 - Has early multi-format architecture.
 - Writes scoped manifests for successful configured `generate --sdk` tasks,
-  including generator/sdk/parser/formatter metadata, generated output hashes,
-  byte sizes, line counts, and deterministic estimated token counts.
+  including generator/sdk/parser/formatter metadata, source hash, byte size,
+  deterministic content-free source spec line count and estimated token count,
+  generated output hashes, byte sizes, line counts, and deterministic
+  estimated token counts.
 - Verifies current `configured-sdk` manifests by checking the recorded
   generator metadata, sdk name/resolvedVersion/displayName, OpenRef parser
-  metadata, legacy formatter metadata, configured source, generated output file
-  hashes, byte sizes, and valid generated output line counts and estimated
-  token counts when present.
+  metadata, legacy formatter metadata, configured source hash and byte size,
+  optional deterministic content-free source spec line count and estimated
+  token count metadata when present, generated output file hashes, byte sizes,
+  and valid generated output line counts and estimated token counts when
+  present.
 - Verifies current `local-source-docs` manifests by checking source manifest
   shape, recorded generator/parser/formatter metadata, local source path
   existence, recorded source file byte sizes, SHA-256 hashes, line counts,
@@ -221,9 +225,11 @@ Current implementation:
   `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs in
   the manifest directory, and rewrites `manifest.json`. After regeneration,
   refresh runs the existing manifest verifier against the newly written
-  manifest outputs and reports the checked-file count. This is deterministic
-  post-refresh integrity verification only; it does not claim freshness, source
-  truth, source-code behavior, or runtime behavior. Refresh does not support
+  manifest outputs and reports the checked-file count. The rewritten manifest
+  includes current deterministic content-free source spec line/token metadata.
+  This is deterministic post-refresh integrity verification only; it does not
+  claim freshness, source truth, source-code behavior, or runtime behavior.
+  Refresh does not support
   parser-plugin source-docs manifests, discovery-report manifests, URLs, repo
   freshness, broad website crawling, source selection, source-code
   verification, behavior validation, remote network work, registry lookup,
@@ -274,10 +280,11 @@ Current implementation:
   reports do not publish semantic chunk records. Current manifests include
   partial content-free line/token metadata only: generated/report file
   `lineCount` and `estimatedTokenCount` metadata where documented, plus
-  source-docs and source-truth docs `sourceFiles[]` `lineCount` and
-  `estimatedTokenCount` metadata, source-docs opt-in chunk JSONL file metadata,
-  compact chunk indexes when requested, and compact content-free discovery
-  candidate evidence indexes.
+  configured-SDK `source.lineCount` and `source.estimatedTokenCount` metadata
+  for the explicit resolved OpenRef spec file, source-docs and source-truth
+  docs `sourceFiles[]` `lineCount` and `estimatedTokenCount` metadata,
+  source-docs opt-in chunk JSONL file metadata, compact chunk indexes when
+  requested, and compact content-free discovery candidate evidence indexes.
   Discovery modes are inspection foundations only;
   they do not generate docs, choose sources, assign trust or authority labels, infer
   authority, or claim source truth.
@@ -487,8 +494,10 @@ Agent workflow:
    <path>` or `--output-dir <dir>`. It reparses that exact recorded local path,
    regenerates `parsed/<sdk>-<resolvedVersion>-spec.json` and LLM docs in the
    existing manifest directory, rewrites `manifest.json`, and verifies the
-   regenerated manifest outputs. It does not look up registries, fetch source
-   URLs, consume discovery reports, or choose source candidates.
+   regenerated manifest outputs. The rewritten manifest includes current
+   deterministic content-free source spec line/token metadata for that exact
+   local file. It does not look up registries, fetch source URLs, consume
+   discovery reports, or choose source candidates.
 5. If the manifest is `discovery-report`,
    `source-verification-local-evidence`, URL/repo/website, parser-plugin
    source-docs, or requires freshness/source-code verification, treat refresh
@@ -767,8 +776,10 @@ optional `chunks/semantic-chunks.jsonl` metadata when `--chunks jsonl` is
 requested, optional compact semantic chunk manifest indexes derived from the
 JSONL records, and warnings. The current
 configured SDK generation path writes a scoped `manifest.json` with configured
-source details, hashes, generator/sdk/parser/formatter metadata, generated file
-hashes, byte sizes, line counts, and deterministic estimated token counts. The
+source details, hash and byte size, deterministic content-free source spec
+line count and estimated token count, generator/sdk/parser/formatter metadata,
+generated file hashes, byte sizes, line counts, and deterministic estimated
+token counts. The
 current discovery commands write a scoped `manifest.json` beside
 `discovery-report.json` with discovery kind, report path, report schema/mode,
 factual counts, and report file hash, byte size, line count, deterministic
@@ -778,8 +789,9 @@ metadata derived from the report. The current `verify` command supports
 `local-source-docs`, `source-truth-local-docs`, `discovery-report`, and
 `source-verification-local-evidence` manifests.
 For configured SDK manifests, it checks source and generated output hashes,
-byte sizes, recorded generator/sdk/parser/formatter metadata, and valid
-generated output line/token metadata when present, and rejects malformed
+byte sizes, optional deterministic content-free source spec line/token
+metadata when present, recorded generator/sdk/parser/formatter metadata, and
+valid generated output line/token metadata when present, and rejects malformed
 metadata before file checks. For source-mode manifests, it checks recorded
 generator/parser/formatter metadata,
 local source path shape and existence, source file hashes, byte sizes, line
@@ -829,11 +841,13 @@ through the current source-truth docs generator. Configured SDK refresh
 requires `source.resolvedSpecPath` to be an absolute local, existing,
 non-symlink OpenRef spec file outside the output directory; it reparses exactly
 that recorded file and rewrites `parsed/<sdk>-<resolvedVersion>-spec.json`,
-legacy LLM docs, and `manifest.json`. After successful regeneration, refresh
-runs the existing manifest verifier over the newly written manifest outputs and
-reports the checked-file count. This is deterministic manifest/output
-integrity verification only, not freshness, source truth, source-code behavior,
-or runtime behavior verification. It does not refresh parser-plugin
+legacy LLM docs, and `manifest.json`, including current deterministic
+content-free source spec line/token metadata. After successful regeneration,
+refresh runs the existing manifest verifier over the newly written manifest
+outputs and reports the checked-file count. This is deterministic
+manifest/output integrity verification only, not freshness, source truth,
+source-code behavior, or runtime behavior verification. It does not refresh
+parser-plugin
 source-docs manifests, discovery reports, URLs, repos, websites, remote
 freshness, source-code verification, task-fit decisions, source truth
 resolution, or behavior validation. It performs no remote network work,

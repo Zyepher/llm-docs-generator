@@ -259,8 +259,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       compact content-free manifest file evidence index metadata derived from
       the local report
 - [x] Partial content-free line/token manifest metadata for generated/report
-      files, local source-docs source files, and source-truth docs source files
-      (`lineCount` and deterministic `estimatedTokenCount`)
+      files, configured-SDK explicit resolved OpenRef spec files, local
+      source-docs source files, and source-truth docs source files (`lineCount`
+      and deterministic `estimatedTokenCount`)
 - [x] RST parser foundation for explicit local Python-style documentation
 - [x] Static HTML parser foundation for explicit local rendered-HTML fallback
 - [x] Semantic chunking foundation for existing DocNode IR as a library API
@@ -380,8 +381,10 @@ Current capabilities contract scope:
   record `lineCount` and deterministic `estimatedTokenCount` for explicit
   generated or report files, and local source-docs plus source-truth docs
   manifests additionally record those fields for explicit `sourceFiles[]`
-  entries. Discovery-report manifests additionally record compact content-free
-  candidate evidence indexes derived only from
+  entries. Configured SDK manifests additionally record those fields for the
+  explicit resolved OpenRef spec file under `source`. Discovery-report
+  manifests additionally record compact content-free candidate evidence indexes
+  derived only from
   `discovery-report.json`. Source docs can additionally publish opt-in
   `chunks/semantic-chunks.jsonl` records for explicit `generate --source`
   outputs plus compact manifest chunk indexes derived only from those JSONL
@@ -558,9 +561,10 @@ Current explicit local source docs generation scope:
   and fails on malformed or stale index data, including URL resource observed
   HTTP freshness evidence when present; it does not choose candidates, validate
   task fit, claim source truth, validate freshness, refresh repos or websites,
-  or perform source-code verification. Configured-SDK verification checks recorded
-  generator/sdk/parser/formatter metadata, configured source, and generated
-  outputs.
+  or perform source-code verification. Configured-SDK verification checks
+  recorded generator/sdk/parser/formatter metadata, configured source hash,
+  byte size, optional deterministic content-free source spec line/token
+  metadata when present, and generated outputs.
   Source-docs verification checks recorded generator/parser/formatter metadata,
   source file hashes, byte sizes, line counts, deterministic estimated token
   counts, and all generated text outputs, including opt-in chunk JSONL when
@@ -599,7 +603,8 @@ Current explicit local source docs generation scope:
   absolute local, existing, non-symlink OpenRef spec file outside the output
   directory, reparses that exact path, rewrites
   `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs in
-  the manifest directory, and rewrites `manifest.json`.
+  the manifest directory, and rewrites `manifest.json`, including current
+  deterministic content-free source spec line/token metadata.
   After successful regeneration, it runs the existing manifest verifier over
   the newly written manifest outputs and reports the checked-file count. This
   post-refresh check is deterministic manifest/output integrity verification

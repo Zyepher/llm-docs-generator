@@ -340,7 +340,7 @@ export async function writeGenerationManifest(
   options: WriteGenerationManifestOptions
 ): Promise<void> {
   const manifestDir = dirname(options.manifestPath);
-  const sourceFile = await describeFile(options.source.resolvedSpecPath);
+  const sourceFile = await describeGeneratedTextOutput(options.source.resolvedSpecPath);
 
   const generatedOutputs: GeneratedOutputManifestEntry[] = (
     await Promise.all(
@@ -371,6 +371,8 @@ export async function writeGenerationManifest(
       ...options.source,
       byteSize: sourceFile.byteSize,
       contentHash: sourceFile.hash,
+      lineCount: sourceFile.lineCount,
+      estimatedTokenCount: sourceFile.estimatedTokenCount,
     },
     parser: options.parser,
     formatter: options.formatter,
@@ -731,6 +733,8 @@ async function verifyConfiguredSdkManifest(
   const sourcePath = sourceRecord.resolvedSpecPath;
   const sourceByteSize = sourceRecord.byteSize;
   const sourceHash = sourceRecord.contentHash;
+  const sourceLineCount = sourceRecord.lineCount;
+  const sourceEstimatedTokenCount = sourceRecord.estimatedTokenCount;
 
   if (!isNonEmptyString(sourcePath)) {
     failures.push('malformed manifest: source.resolvedSpecPath must be a non-empty string');
@@ -744,16 +748,38 @@ async function verifyConfiguredSdkManifest(
     failures.push('malformed manifest: source.contentHash must be a sha256 hash');
   }
 
+  if ('lineCount' in sourceRecord && !isNonNegativeInteger(sourceLineCount)) {
+    failures.push(
+      'malformed manifest: source.lineCount must be a non-negative integer when present'
+    );
+  }
+
+  if (
+    'estimatedTokenCount' in sourceRecord &&
+    !isNonNegativeInteger(sourceEstimatedTokenCount)
+  ) {
+    failures.push(
+      'malformed manifest: source.estimatedTokenCount must be a non-negative integer when present'
+    );
+  }
+
   if (
     isNonEmptyString(sourcePath) &&
     isNonNegativeInteger(sourceByteSize) &&
     isSha256Hash(sourceHash)
   ) {
+    const hasValidSourceLineCount = isNonNegativeInteger(sourceLineCount);
+    const hasValidSourceEstimatedTokenCount = isNonNegativeInteger(sourceEstimatedTokenCount);
+
     fileChecks.push({
       label: 'source',
       path: resolveManifestSourcePath(sourcePath, manifestDir),
       expectedByteSize: sourceByteSize,
       expectedHash: sourceHash,
+      ...(hasValidSourceLineCount ? { expectedLineCount: sourceLineCount as number } : {}),
+      ...(hasValidSourceEstimatedTokenCount
+        ? { expectedEstimatedTokenCount: sourceEstimatedTokenCount as number }
+        : {}),
     });
   }
 
