@@ -40,6 +40,7 @@ import {
   writeGenerationManifest,
 } from './core/manifest.js';
 import { validateParserPluginManifestFile } from './core/parser-plugin-manifest.js';
+import { SOURCE_VERIFICATION_MODE } from './core/source-verification.js';
 import { fetchSpec } from './utils/fetcher.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
@@ -857,6 +858,36 @@ const CAPABILITIES_CONTRACT = {
       ],
     },
     {
+      id: 'refresh-source-verification-local-evidence',
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for source-verification-local-evidence',
+      status: 'implemented',
+      inputBoundary:
+        'existing successful source-verification-local-evidence manifest.json with a local source-verification-report.json',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: ['source-verification-report.json', 'manifest.json', 'failure.json'],
+      summary:
+        'deterministic rerun of explicit local source/docs lexical evidence from source-verification-report.json recorded source/docs paths into the same output directory, preserving prior docs traversal bounds and followed by manifest integrity verification on success',
+      limitations: [
+        'source-verification-local-evidence manifests only',
+        'uses only report.source.resolvedPath, report.docs.resolvedPath, and docs.traversal maxDepth/maxEntries/maxFiles/maxFileBytes from the existing local report',
+        'explicit local paths only',
+        'Markdown/MDX-style text docs only',
+        'exact matches are lexical exported-name evidence only',
+        'no broad official-docs claim checking',
+        'no source-code behavior validation',
+        'no freshness validation',
+        'no remote refresh',
+        'no repo cache update',
+        'no crawling',
+        'no source selection',
+        'no candidate report consumption',
+        'no candidate auto-selection',
+        'no source-truth decision or proof that docs statements are correct',
+        'no network access',
+      ],
+    },
+    {
       id: 'list-sdks',
       command: 'list-sdks',
       mode: 'list-sdks',
@@ -909,10 +940,10 @@ const CAPABILITIES_CONTRACT = {
     {
       id: 'refresh-unsupported-manifests',
       command:
-        'refresh for parser-plugin source-docs, repo/URL discovery reports, URL, repo, website, freshness, or verification workflows',
+        'refresh for parser-plugin source-docs, repo/URL discovery reports, URL, repo, website, freshness, broad verification, or source-code workflows',
       status: 'planned-unsupported',
       reason:
-        'only explicit built-in-parser local-source-docs, source-truth-local-docs, configured-sdk manifests with recorded absolute local spec paths, and local source discovery-report manifests can be refreshed; parser-plugin source-docs, repo/URL discovery-report refresh, remote freshness refresh, broad crawling, source-verification refresh, and source-code verification refresh remain planned',
+        'only explicit built-in-parser local-source-docs, source-truth-local-docs, configured-sdk manifests with recorded absolute local spec paths, local source discovery-report manifests, and source-verification-local-evidence manifests can be refreshed; parser-plugin source-docs, repo/URL discovery-report refresh, remote freshness refresh, broad crawling, broad official-docs behavior/API verification refresh, and source-code verification refresh remain planned',
     },
     {
       id: 'source-code-verification',
@@ -2306,7 +2337,7 @@ program
 program
   .command('refresh')
   .description(
-    'Refresh supported explicit local manifests, including local source discovery reports'
+    'Refresh supported explicit local manifests, including local source discovery and source/docs evidence reports'
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')
@@ -2347,6 +2378,22 @@ program
           console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
         }
         console.log('  Scope: candidate evidence only; no source selection or generation');
+      } else if (result.mode === SOURCE_VERIFICATION_MODE) {
+        if (result.docsPath !== undefined) {
+          console.log(`  Docs: ${result.docsPath}`);
+        }
+        console.log(`  Local source/docs evidence: refreshed`);
+        console.log(`  Source files: ${result.sourceFiles}`);
+        console.log(`  Evidence files: ${result.generatedOutputs}`);
+        console.log(`  Docs references: ${result.docsReferences ?? 0}`);
+        console.log(`  Exact export matches: ${result.exactMatches ?? 0}`);
+        console.log(`  Unmatched references: ${result.unmatchedReferences ?? 0}`);
+        if (result.reportPath !== undefined) {
+          console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
+        }
+        console.log(
+          '  Scope: explicit local lexical evidence only; no broad claim verification or source-truth proof'
+        );
       } else {
         console.log(`  Source files: ${result.sourceFiles}`);
         console.log(`  Generated files: ${result.generatedOutputs}`);

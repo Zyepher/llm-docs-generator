@@ -28,6 +28,12 @@ import {
   type SourceDocsPresetMetadata,
 } from './source-docs.js';
 import { generateSourceTruthDocs, SOURCE_TRUTH_DOCS_MODE } from './source-truth-docs.js';
+import {
+  SOURCE_VERIFICATION_MODE,
+  SOURCE_VERIFICATION_REPORT_SCHEMA_VERSION,
+  SourceVerificationNoDocsEvidenceError,
+  verifyDocsAgainstSource,
+} from './source-verification.js';
 import { OpenRefParser } from '../parsers/openref/parser.js';
 
 const SOURCE_DOCS_FORMAT_HINTS = new Set([
@@ -76,7 +82,8 @@ export interface RefreshManifestResult {
     | typeof CONFIGURED_SDK_MODE
     | typeof SOURCE_DOCS_MODE
     | typeof SOURCE_TRUTH_DOCS_MODE
-    | typeof DISCOVERY_REPORT_MODE;
+    | typeof DISCOVERY_REPORT_MODE
+    | typeof SOURCE_VERIFICATION_MODE;
   manifestPath: string;
   outputDir: string;
   sourcePath: string;
@@ -90,6 +97,10 @@ export interface RefreshManifestResult {
   candidateCount?: number;
   presetName?: string;
   reportPath?: string;
+  docsPath?: string;
+  docsReferences?: number;
+  exactMatches?: number;
+  unmatchedReferences?: number;
 }
 
 export async function refreshGenerationManifest(
@@ -126,11 +137,82 @@ export async function refreshGenerationManifest(
     });
   }
 
+  if (manifest.mode === SOURCE_VERIFICATION_MODE) {
+    return refreshSourceVerificationManifest({
+      manifestPath,
+      manifest,
+      generator: options.generator,
+    });
+  }
+
   throw new RefreshManifestError(
     `unsupported refresh manifest mode: ${String(
       manifest.mode
-    )}; supported modes are local-source-docs, source-truth-local-docs, and configured-sdk with an explicit local source.resolvedSpecPath`
+    )}; supported modes are local-source-docs, source-truth-local-docs, configured-sdk with an explicit local source.resolvedSpecPath, discovery-report source, and source-verification-local-evidence`
   );
+}
+
+async function refreshSourceVerificationManifest(options: {
+  manifestPath: string;
+  manifest: Record<string, unknown>;
+  generator: SourceDocsGeneratorMetadata;
+}): Promise<RefreshManifestResult> {
+  const sourceVerification = requiredObject(
+    options.manifest.sourceVerification,
+    'sourceVerification'
+  );
+  const outputDir = dirname(options.manifestPath);
+  const reportPath = sourceVerificationReportPathFromManifest(
+    sourceVerification.reportPath,
+    outputDir
+  );
+
+  await assertSafeSourceVerificationReportReadPath(reportPath);
+
+  const previousReport = await readSourceVerificationRefreshReport(reportPath);
+
+  await assertExistingLocalInputPath('source-verification source path', previousReport.sourcePath);
+  await assertExistingLocalInputPath('source-verification docs path', previousReport.docsPath);
+  await assertInputsOutsideRefreshOutput({
+    sourcePath: previousReport.sourcePath,
+    docsPath: previousReport.docsPath,
+    outputDir,
+  });
+
+  try {
+    const result = await verifyDocsAgainstSource({
+      source: previousReport.sourcePath,
+      docs: previousReport.docsPath,
+      outputDir,
+      docsMaxDepth: previousReport.docsTraversal.maxDepth,
+      docsMaxEntries: previousReport.docsTraversal.maxEntries,
+      docsMaxFiles: previousReport.docsTraversal.maxFiles,
+      docsMaxFileBytes: previousReport.docsTraversal.maxFileBytes,
+      generator: options.generator,
+    });
+
+    return withPostRefreshVerification({
+      mode: SOURCE_VERIFICATION_MODE,
+      manifestPath: result.manifestPath,
+      outputDir: result.outputDir,
+      sourcePath: result.report.source.resolvedPath,
+      docsPath: result.report.docs.resolvedPath,
+      sourceFiles: result.report.summary.sourceFileCount,
+      generatedOutputs: result.manifest.generatedOutputs.length,
+      reportPath: result.reportPath,
+      docsReferences: result.report.summary.docsReferenceCount,
+      exactMatches: result.report.summary.exactMatchCount,
+      unmatchedReferences: result.report.summary.unmatchedReferenceCount,
+    });
+  } catch (error) {
+    if (error instanceof SourceVerificationNoDocsEvidenceError) {
+      throw new RefreshManifestError(
+        `refreshed local source/docs evidence no longer has supported docs evidence; failure report: ${error.failurePath}; evidence report: ${error.reportPath}`
+      );
+    }
+
+    throw error;
+  }
 }
 
 async function refreshDiscoveryReportManifest(options: {
@@ -719,11 +801,50 @@ function discoveryReportPathFromManifest(value: unknown, outputDir: string): str
   return resolvedReportPath;
 }
 
+function sourceVerificationReportPathFromManifest(value: unknown, outputDir: string): string {
+  const reportPath = requiredNonEmptyString(value, 'sourceVerification.reportPath');
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(reportPath)) {
+    throw new RefreshManifestError(
+      'malformed manifest: sourceVerification.reportPath must be a relative local report path'
+    );
+  }
+
+  if (isAbsolute(reportPath)) {
+    throw new RefreshManifestError(
+      `malformed manifest: sourceVerification.reportPath must be relative: ${reportPath}`
+    );
+  }
+
+  if (reportPath.includes('\\')) {
+    throw new RefreshManifestError(
+      'malformed manifest: sourceVerification.reportPath must use forward slashes'
+    );
+  }
+
+  const resolvedReportPath = resolve(outputDir, reportPath);
+
+  if (!isSameOrDescendant(outputDir, resolvedReportPath)) {
+    throw new RefreshManifestError(
+      `malformed manifest: sourceVerification.reportPath escapes manifest directory: ${reportPath}`
+    );
+  }
+
+  return resolvedReportPath;
+}
+
 async function assertSafeDiscoveryReportReadPath(reportPath: string): Promise<void> {
   await assertSafeRefreshWritePath({
     path: reportPath,
     label: 'discovery report path',
     expectedType: 'file',
+  });
+}
+
+async function assertSafeSourceVerificationReportReadPath(reportPath: string): Promise<void> {
+  await assertSafeExistingRegularFilePath({
+    path: reportPath,
+    label: 'source-verification report path',
   });
 }
 
@@ -810,9 +931,169 @@ async function readSourceDiscoveryRefreshReport(reportPath: string): Promise<{
   };
 }
 
+async function readSourceVerificationRefreshReport(reportPath: string): Promise<{
+  sourcePath: string;
+  docsPath: string;
+  docsTraversal: {
+    maxDepth: number;
+    maxEntries: number;
+    maxFiles: number;
+    maxFileBytes: number;
+  };
+}> {
+  let report: unknown;
+
+  try {
+    report = JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+  } catch (error) {
+    throw new RefreshManifestError(
+      `malformed source-verification report JSON: ${errorMessage(error)}`
+    );
+  }
+
+  if (!isObjectRecord(report)) {
+    throw new RefreshManifestError('malformed source-verification report: root must be an object');
+  }
+
+  if (report.schemaVersion !== SOURCE_VERIFICATION_REPORT_SCHEMA_VERSION) {
+    throw new RefreshManifestError(
+      `malformed source-verification report: schemaVersion must be ${SOURCE_VERIFICATION_REPORT_SCHEMA_VERSION}`
+    );
+  }
+
+  if (report.mode !== SOURCE_VERIFICATION_MODE) {
+    throw new RefreshManifestError(
+      `malformed source-verification report: mode must be ${SOURCE_VERIFICATION_MODE}`
+    );
+  }
+
+  const source = requiredSourceVerificationReportObject(report.source, 'source');
+  requiredSourceVerificationReportNonEmptyString(source.input, 'source.input');
+  const sourcePath = requiredSourceVerificationReportAbsoluteLocalPath(
+    source.resolvedPath,
+    'source.resolvedPath'
+  );
+  const sourceType = requiredSourceVerificationReportNonEmptyString(source.type, 'source.type');
+
+  if (sourceType !== 'file' && sourceType !== 'directory') {
+    throw new RefreshManifestError(
+      'malformed source-verification report: source.type must be file or directory'
+    );
+  }
+
+  const docs = requiredSourceVerificationReportObject(report.docs, 'docs');
+  requiredSourceVerificationReportNonEmptyString(docs.input, 'docs.input');
+  const docsPath = requiredSourceVerificationReportAbsoluteLocalPath(
+    docs.resolvedPath,
+    'docs.resolvedPath'
+  );
+  const docsType = requiredSourceVerificationReportNonEmptyString(docs.type, 'docs.type');
+
+  if (docsType !== 'file' && docsType !== 'directory') {
+    throw new RefreshManifestError(
+      'malformed source-verification report: docs.type must be file or directory'
+    );
+  }
+
+  const traversal = requiredSourceVerificationReportObject(docs.traversal, 'docs.traversal');
+
+  if (traversal.followSymlinks !== false) {
+    throw new RefreshManifestError(
+      'malformed source-verification report: docs.traversal.followSymlinks must be false'
+    );
+  }
+
+  return {
+    sourcePath,
+    docsPath,
+    docsTraversal: {
+      maxDepth: requiredSourceVerificationTraversalBound(
+        traversal.maxDepth,
+        'docs.traversal.maxDepth',
+        true
+      ),
+      maxEntries: requiredSourceVerificationTraversalBound(
+        traversal.maxEntries,
+        'docs.traversal.maxEntries',
+        false
+      ),
+      maxFiles: requiredSourceVerificationTraversalBound(
+        traversal.maxFiles,
+        'docs.traversal.maxFiles',
+        false
+      ),
+      maxFileBytes: requiredSourceVerificationTraversalBound(
+        traversal.maxFileBytes,
+        'docs.traversal.maxFileBytes',
+        false
+      ),
+    },
+  };
+}
+
 function requiredDiscoveryReportObject(value: unknown, label: string): Record<string, unknown> {
   if (!isObjectRecord(value)) {
     throw new RefreshManifestError(`malformed discovery report: missing ${label} object`);
+  }
+
+  return value;
+}
+
+function requiredSourceVerificationReportObject(
+  value: unknown,
+  label: string
+): Record<string, unknown> {
+  if (!isObjectRecord(value)) {
+    throw new RefreshManifestError(`malformed source-verification report: missing ${label} object`);
+  }
+
+  return value;
+}
+
+function requiredSourceVerificationReportNonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new RefreshManifestError(
+      `malformed source-verification report: ${label} must be a non-empty string`
+    );
+  }
+
+  return value;
+}
+
+function requiredSourceVerificationReportAbsoluteLocalPath(value: unknown, label: string): string {
+  const path = requiredSourceVerificationReportNonEmptyString(value, label);
+
+  if (isUrlLikeInput(path)) {
+    throw new RefreshManifestError(
+      `malformed source-verification report: ${label} must be a local path`
+    );
+  }
+
+  if (!isAbsolute(path)) {
+    throw new RefreshManifestError(
+      `malformed source-verification report: ${label} must be absolute`
+    );
+  }
+
+  return path;
+}
+
+function requiredSourceVerificationTraversalBound(
+  value: unknown,
+  label: string,
+  allowZero: boolean
+): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    (!allowZero && value === 0)
+  ) {
+    const lowerBound = allowZero ? 'non-negative' : 'positive';
+
+    throw new RefreshManifestError(
+      `malformed source-verification report: ${label} must be a ${lowerBound} safe integer`
+    );
   }
 
   return value;
@@ -988,39 +1269,90 @@ async function assertSafeRefreshWritePath(options: {
   }
 }
 
-async function assertExistingLocalSourcePath(sourcePath: string): Promise<void> {
-  try {
-    const stats = await lstat(sourcePath);
+async function assertSafeExistingRegularFilePath(options: {
+  path: string;
+  label: string;
+}): Promise<void> {
+  const parsedPath = parse(options.path);
+  const parts = options.path.slice(parsedPath.root.length).split(sep).filter(Boolean);
+  let currentPath = parsedPath.root;
+
+  for (let index = 0; index < parts.length; index++) {
+    currentPath = join(currentPath, parts[index]!);
+
+    let stats;
+    try {
+      stats = await lstat(currentPath);
+    } catch (error) {
+      if (isFileNotFoundError(error)) {
+        throw new RefreshManifestError(`${options.label} not found: ${options.path}`);
+      }
+
+      throw new RefreshManifestError(
+        `${options.label} cannot be checked: ${currentPath}: ${errorMessage(error)}`
+      );
+    }
 
     if (stats.isSymbolicLink()) {
       throw new RefreshManifestError(
-        `manifest source path must not be a symbolic link: ${sourcePath}`
+        `${options.label}: symbolic links are not allowed in path: ${currentPath}`
       );
+    }
+
+    const isTarget = index === parts.length - 1;
+
+    if (isTarget) {
+      if (!stats.isFile()) {
+        throw new RefreshManifestError(`${options.label} must be a regular file: ${currentPath}`);
+      }
+    } else if (!stats.isDirectory()) {
+      throw new RefreshManifestError(
+        `${options.label} parent path must be a directory: ${currentPath}`
+      );
+    }
+  }
+}
+
+async function assertExistingLocalSourcePath(sourcePath: string): Promise<void> {
+  await assertExistingLocalInputPath('manifest source path', sourcePath);
+}
+
+async function assertExistingLocalInputPath(label: string, sourcePath: string): Promise<void> {
+  try {
+    if (isUrlLikeInput(sourcePath)) {
+      throw new RefreshManifestError(`${label} must be a local path: ${sourcePath}`);
+    }
+
+    const stats = await lstat(sourcePath);
+
+    if (stats.isSymbolicLink()) {
+      throw new RefreshManifestError(`${label} must not be a symbolic link: ${sourcePath}`);
     }
 
     if (!stats.isFile() && !stats.isDirectory()) {
-      throw new RefreshManifestError(
-        `manifest source path must be a local file or directory: ${sourcePath}`
-      );
+      throw new RefreshManifestError(`${label} must be a local file or directory: ${sourcePath}`);
     }
 
-    await assertNoSymlinkPathComponents(sourcePath);
+    await assertNoSymlinkPathComponents(sourcePath, label);
   } catch (error) {
     if (error instanceof RefreshManifestError) {
       throw error;
     }
 
     if (isFileNotFoundError(error)) {
-      throw new RefreshManifestError(`manifest source path not found: ${sourcePath}`);
+      throw new RefreshManifestError(`${label} not found: ${sourcePath}`);
     }
 
     throw new RefreshManifestError(
-      `manifest source path cannot be read: ${sourcePath}: ${errorMessage(error)}`
+      `${label} cannot be read: ${sourcePath}: ${errorMessage(error)}`
     );
   }
 }
 
-async function assertNoSymlinkPathComponents(sourcePath: string): Promise<void> {
+async function assertNoSymlinkPathComponents(
+  sourcePath: string,
+  label = 'manifest source path'
+): Promise<void> {
   const parsedPath = parse(sourcePath);
   const parts = sourcePath.slice(parsedPath.root.length).split(sep).filter(Boolean);
   let currentPath = parsedPath.root;
@@ -1032,7 +1364,29 @@ async function assertNoSymlinkPathComponents(sourcePath: string): Promise<void> 
 
     if (stats.isSymbolicLink()) {
       throw new RefreshManifestError(
-        `manifest source path must not contain a symbolic link component: ${currentPath}`
+        `${label} must not contain a symbolic link component: ${currentPath}`
+      );
+    }
+  }
+}
+
+async function assertInputsOutsideRefreshOutput(options: {
+  sourcePath: string;
+  docsPath: string;
+  outputDir: string;
+}): Promise<void> {
+  const resolvedOutputDir = resolve(options.outputDir);
+  const effectiveOutputPath = await resolveEffectiveOutputPath(resolvedOutputDir);
+
+  for (const inputPath of [options.sourcePath, options.docsPath]) {
+    const canonicalInputPath = await realpath(inputPath);
+
+    if (
+      isSameOrDescendant(inputPath, resolvedOutputDir) ||
+      isSameOrDescendant(canonicalInputPath, effectiveOutputPath)
+    ) {
+      throw new RefreshManifestError(
+        'manifest output directory must not be the same as, or inside, the source-verification source or docs path'
       );
     }
   }
