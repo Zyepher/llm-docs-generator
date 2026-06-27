@@ -23,7 +23,7 @@
           "CLI writes a candidate evidence report for agent review",
           "agent selects explicit source/candidate or documented automation flag",
           "parse/format Markdown pack",
-          "optionally verify claims against source code",
+          "optionally collect bounded local source/docs evidence",
           "write manifest",
           "verify or refresh"
         ],
@@ -38,9 +38,9 @@
           "official docs",
           "local docs",
           "repo docs",
-          "official docs verified against source code",
+          "official docs with bounded source evidence",
           "source-truth codebase docs",
-          "verify stale output"
+          "verify V2 docs-pack integrity"
         ],
         "mustBuild": [
           "input normalizer",
@@ -48,9 +48,9 @@
           "bounded discovery reporter",
           "candidate evidence report",
           "agent-markdown formatter",
-          "source verification overlay",
+          "local source/docs evidence overlay",
           "manifest writer",
-          "compatibility test baseline",
+          "configured SDK/OpenRef test baseline",
           "agent skill installer"
         ],
         "mustAvoid": [
@@ -897,13 +897,12 @@
                 </p>
               </div>
               <div class="flow-line">
-                <span class="label">Compatibility Baseline</span>
+                <span class="label">Configured SDK/OpenRef Baseline</span>
                 <p>
-                  Keep the proven Supabase/OpenRef workflow covered while the new input normalizer
-                  grows. The old
-                  <code>generate --sdk</code>, <code>list-sdks</code>, and
-                  <code>validate --sdk</code>
-                  behavior may become compatibility aliases later, but it must not break silently.
+                  Keep the configured SDK/OpenRef workflow covered while the new input normalizer
+                  grows. The existing <code>generate --sdk</code>, <code>list-sdks</code>, and
+                  <code>validate --sdk</code> command surface remains current feature support and
+                  must not break silently.
                 </p>
               </div>
               <div class="flow-line">
@@ -1472,10 +1471,11 @@ capabilities:
                   <td>5</td>
                   <td>Implementation source files</td>
                   <td>
-                    Authoritative for behavior and APIs when the user requests source-truth codebase
-                    docs or verification of official docs.
+                    Useful local evidence when the user requests explicit source-truth codebase docs
+                    or narrow source/docs comparison; current tooling extracts conservative observed
+                    facts, not behavior/API proof.
                   </td>
-                  <td>future source-truth codebase docs generator</td>
+                  <td>source-truth evidence workflow</td>
                 </tr>
               </tbody>
             </table>
@@ -1904,16 +1904,18 @@ failure:
                   the relevant workflow.
                 </li>
                 <li>
-                  Support source-code verification of official docs when the source repo is
-                  available and the user asks for source-truth confidence.
+                  Support narrow local source/docs evidence reports when explicit source and docs
+                  paths are available; keep broad official-docs behavior/API verification planned
+                  unless separately implemented.
                 </li>
                 <li>
                   Distinguish repo docs conversion from source-truth codebase docs generation, and
                   fail clearly if the requested mode is not implemented.
                 </li>
                 <li>
-                  Verify old outputs against source existence, commit hash, content hash, and parser
-                  success.
+                  Verify V2 docs packs and manifests against recorded source existence, commit hash
+                  when represented, content hash, and parser success; regenerate unsupported V1 or
+                  early next-gen packs with the V2 CLI.
                 </li>
               </ul>
             </article>
@@ -2079,17 +2081,17 @@ failure:
                     config, examples, tests, and behavior constraints into structured facts.
                   </li>
                   <li>
-                    Verify existing documentation claims against source code and flag conflicts
-                    where the implementation disagrees.
+                    Add planned broader documentation-claim comparison against source code, with
+                    conflicts flagged where implemented evidence supports them.
                   </li>
                   <li>
-                    Allow official-docs generation to request source-code verification for API and
-                    behavior claims without switching the whole run to code-only docs.
+                    Keep official-docs source-code verification requests explicit and gated by
+                    implemented capabilities, without switching the whole run to code-only docs.
                   </li>
                   <li>Record every source file used for each generated section.</li>
                   <li>
-                    Refuse unverified summaries when evidence is incomplete or source verification
-                    is missing.
+                    Refuse unsupported summaries when evidence is incomplete or the requested
+                    verification mode is missing.
                   </li>
                 </ul>
               </div>

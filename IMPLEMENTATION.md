@@ -16,7 +16,7 @@ llm-docs-generator/
 │   │   ├── detector.ts            ✅ Auto-detect format
 │   │   ├── chunker.ts             ✅ Deterministic DocNode semantic chunks
 │   │   ├── universal-formatter.ts ✅ IR → LLM-optimized output
-│   │   └── formatter.ts           ✅ Legacy OpenRef formatter (kept for backward compat)
+│   │   └── formatter.ts           ✅ OpenRef formatter for configured SDK output
 │   ├── parsers/
 │   │   ├── base.ts                ✅ Parser interface
 │   │   ├── openapi/
@@ -141,12 +141,12 @@ npx tsx test-swift-book.ts
 llm-docs generate --source ../TSPL.docc --preset swift-book --output-dir ./swift-book-agent-docs
 ```
 
-### For Supabase (OpenRef - Backward Compatible)
+### For Supabase (Configured SDK/OpenRef)
 
 ```bash
 # Existing Supabase workflow still works
 cd /path/to/supabase/apps/docs/scripts
-# The old OpenRef parser still works via adapter
+# The existing OpenRef parser works via adapter
 ```
 
 ## Architecture Highlights
@@ -218,7 +218,7 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 2. **Consistency**: Same LLM-optimized format across projects
 3. **Extensibility**: Easy to add RST, AsciiDoc, etc.
 4. **Intelligence**: Auto-detection reduces config burden
-5. **Backward Compatible**: Supabase OpenRef code still works
+5. **Configured SDK/OpenRef support**: Supabase OpenRef code path still works
 
 ## Next Steps (Future Work)
 
@@ -290,7 +290,8 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       strategy, input boundary, and limitations validated by `verify`
 - [x] Deterministic semantic chunk manifest-index metadata for opt-in
       source-docs `chunks/semantic-chunks.jsonl` exports
-- [ ] Full manifest expansion for RAG, discovery, and refresh systems
+- [x] V2 manifest expansion for currently supported generation, discovery,
+      source-verification, refresh, and opt-in semantic chunk modes
   - [x] Descriptive top-level `manifestContract` metadata for currently
         verified manifest modes, with deterministic CLI/agent boundary arrays
         required and validated by V2 `verify`
@@ -834,7 +835,7 @@ Current semantic chunking scope:
 ✅ Test passes with real swift-book markdown
 ✅ Output correctly formatted for LLMs
 ✅ Architecture extensible for new formats
-✅ Backward compatible with existing OpenRef code
+✅ Existing configured SDK/OpenRef code path remains covered
 
 ---
 
