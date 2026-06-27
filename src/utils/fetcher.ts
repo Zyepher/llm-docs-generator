@@ -20,7 +20,7 @@ import { info, warn, error as logError } from './logger.js';
 // ============================================================================
 
 const FETCH_TIMEOUT = 30000; // 30 seconds
-const USER_AGENT = 'supabase-llm-docs/1.0.0';
+const USER_AGENT = 'llm-docs/1.0.0';
 
 class SourceAvailabilityError extends Error {
   constructor(message: string) {
