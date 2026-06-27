@@ -281,8 +281,9 @@ source-code verification. Additional preset names remain planned/unsupported.
 The current `refresh --manifest <path>` / `refresh --output-dir <dir>` command
 supports current built-in-parser `local-source-docs`,
 `source-truth-local-docs`, configured OpenRef SDK manifests with recorded
-absolute local `source.resolvedSpecPath` values, and `discovery-report`
-manifests only when `discovery.kind` is `source`. Parser-plugin
+absolute local `source.resolvedSpecPath` values, `discovery-report` manifests
+only when `discovery.kind` is `source`, and existing successful
+`source-verification-local-evidence` manifests. Parser-plugin
 `local-source-docs` manifests are not refreshed yet; rerun the explicit
 parser-plugin generate command instead. Source-docs refresh reads the existing
 manifest, uses only the recorded absolute local source path,
@@ -304,15 +305,27 @@ local-bounded source report, uses only `report.source.resolvedPath`, preserves
 `traversal.maxDepth`, `traversal.maxEntries`, and `traversal.maxFiles`, reruns
 `discover --source` behavior into the same output directory, and rewrites
 `discovery-report.json` plus `manifest.json` as candidate evidence for agent
-review. After successful regeneration, refresh runs the existing manifest
-verifier over the newly written manifest outputs and reports the checked-file
-count. This is deterministic manifest/output integrity verification only; it
+review. Source-verification local evidence refresh reads the existing
+`source-verification-report.json` named by
+`manifest.sourceVerification.reportPath` only after relative forward-slash path
+containment and symlink-safe file checks, validates report schema/mode plus
+explicit local `source.resolvedPath`, `docs.resolvedPath`, and docs traversal
+bounds, preserves `docs.traversal.maxDepth`, `maxEntries`, `maxFiles`, and
+`maxFileBytes`, reruns the same narrow local source/docs lexical evidence
+workflow into the same output directory, and rewrites
+`source-verification-report.json` plus `manifest.json` on success. If refreshed
+docs no longer contain supported local evidence, it writes `failure.json` plus
+the report and does not leave a stale success manifest. After successful
+regeneration, refresh runs the existing manifest verifier over the newly
+written manifest outputs and reports the checked-file count. This is
+deterministic manifest/output integrity verification only; it
 does not claim freshness, source truth, source-code behavior, or runtime
 behavior. Refresh does not support repo/URL discovery-report refresh, remote
 freshness refresh, broad crawling, source selection, source-code verification,
 behavior validation, remote network work, registry lookup, candidate report
-consumption, candidate auto-selection, source-verification refresh, parser-plugin
-source-docs refresh, or source project script execution.
+consumption, candidate auto-selection, parser-plugin source-docs refresh,
+source project script execution, broad official-docs behavior/API claim
+verification, or source-code behavior validation.
 
 The current CLI exposes only narrow explicit-local source/docs lexical evidence
 through `source-truth verify-docs`; broad official-docs behavior/API claim
@@ -492,14 +505,15 @@ agent intent/source/scope resolution
   available through `source-truth verify-docs --source --docs --output-dir`.
   Explicit local manifest refresh for current built-in-parser
   `local-source-docs`, `source-truth-local-docs`, configured OpenRef SDK
-  manifests with recorded absolute local source paths, and local source
-  `discovery-report` manifests is available through
+  manifests with recorded absolute local source paths, local source
+  `discovery-report` manifests, and `source-verification-local-evidence`
+  manifests is available through
   `refresh --manifest <path>` or `refresh --output-dir <dir>`, with
   deterministic post-refresh manifest/output integrity verification.
   Parser-plugin `local-source-docs` refresh, broader crawling,
   repo/URL discovery-report refresh, remote freshness refresh, broad
-  official-docs behavior/API claim verification, and behavior-level source
-  documentation remain planned.
+  official-docs behavior/API claim verification, source-code verification, and
+  behavior-level source documentation remain planned.
 - Every generated output should eventually include full manifest provenance:
   - source URL or path
   - repo URL

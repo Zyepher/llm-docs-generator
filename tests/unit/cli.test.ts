@@ -1820,7 +1820,7 @@ describe('CLI compatibility behavior', () => {
       'Print the deterministic machine-readable capabilities contract'
     );
     expect(refreshHelp.stdout).toMatch(
-      /Refresh supported explicit local manifests, including local source discovery\s+reports/
+      /Refresh supported explicit local manifests, including local source discovery\s+and source\/docs evidence reports/
     );
     expect(refreshHelp.stdout).toContain('--manifest <path>');
     expect(refreshHelp.stdout).toContain('--output-dir <dir>');
@@ -2225,6 +2225,7 @@ describe('CLI compatibility behavior', () => {
       'refresh-source-truth-docs',
       'refresh-configured-sdk',
       'refresh-source-discovery-report',
+      'refresh-source-verification-local-evidence',
       'list-sdks',
       'validate-sdk',
     ]);
@@ -2609,6 +2610,31 @@ describe('CLI compatibility behavior', () => {
         'no network access',
       ]),
     });
+    expect(implemented.get('refresh-source-verification-local-evidence')).toMatchObject({
+      command: 'refresh',
+      mode: 'refresh --manifest or refresh --output-dir for source-verification-local-evidence',
+      status: 'implemented',
+      inputBoundary:
+        'existing successful source-verification-local-evidence manifest.json with a local source-verification-report.json',
+      options: ['--manifest <path>', '--output-dir <dir>'],
+      outputFiles: ['source-verification-report.json', 'manifest.json', 'failure.json'],
+      summary: expect.stringContaining('preserving prior docs traversal bounds'),
+      limitations: expect.arrayContaining([
+        'source-verification-local-evidence manifests only',
+        'uses only report.source.resolvedPath, report.docs.resolvedPath, and docs.traversal maxDepth/maxEntries/maxFiles/maxFileBytes from the existing local report',
+        'explicit local paths only',
+        'exact matches are lexical exported-name evidence only',
+        'no broad official-docs claim checking',
+        'no source-code behavior validation',
+        'no freshness validation',
+        'no remote refresh',
+        'no crawling',
+        'no source selection',
+        'no candidate report consumption',
+        'no candidate auto-selection',
+        'no network access',
+      ]),
+    });
     expect(planned.has('generate-source')).toBe(false);
     expect(planned.get('generate-preset-additional')?.reason).toBe(
       'only --preset swift-book over an explicit local --source path is implemented; additional presets remain planned'
@@ -2617,12 +2643,15 @@ describe('CLI compatibility behavior', () => {
       'generate --source'
     );
     expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
-      'local source discovery-report manifests can be refreshed'
+      'local source discovery-report manifests, and source-verification-local-evidence manifests can be refreshed'
     );
     expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
       'repo/URL discovery-report refresh'
     );
     expect(planned.get('refresh-unsupported-manifests')?.reason).toContain(
+      'broad official-docs behavior/API verification refresh'
+    );
+    expect(planned.get('refresh-unsupported-manifests')?.reason).not.toContain(
       'source-verification refresh'
     );
     expect(planned.get('source-code-verification')?.reason).toContain(
@@ -2723,9 +2752,29 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
     expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
-    expect(stdout).toContain('Implemented modes: 24');
+    expect(stdout).toContain('Implemented modes: 25');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
+  });
+
+  it('documents source-verification local evidence refresh without broad verification claims', async () => {
+    const docs = await Promise.all(
+      ['README.md', 'index.md', 'AGENT_CONTEXT.md', 'IMPLEMENTATION.md'].map(async (path) => ({
+        path,
+        text: await readFile(join(repoRoot, path), 'utf-8'),
+      }))
+    );
+
+    for (const doc of docs) {
+      expect(doc.text, doc.path).toContain('source-verification-local-evidence');
+      expect(doc.text, doc.path).toMatch(/source-verification-local-evidence[\s\S]{0,240}refresh/i);
+      expect(doc.text, doc.path).toMatch(/broad official-docs behavior\/API claim\s+verification/i);
+      expect(doc.text, doc.path).toMatch(
+        /source-code behavior validation|source-code verification/i
+      );
+      expect(doc.text, doc.path).toMatch(/planned|unsupported|not implemented|does not support/i);
+      expect(doc.text, doc.path).not.toMatch(/source-verification refresh remains planned/i);
+    }
   });
 
   it('validates parser plugin manifests with human output without loading plugin code', async () => {
@@ -7127,7 +7176,7 @@ describe('CLI compatibility behavior', () => {
       expect(result.stderr, testCase.name).toContain(testCase.expected);
       expect(result.stdout, testCase.name).not.toContain('Local source docs generated');
     }
-  });
+  }, 15000);
 
   it('rejects invalid parser plugin manifests modules exports detection and DocNode output', async () => {
     const cases: Array<{
@@ -7360,7 +7409,7 @@ describe('CLI compatibility behavior', () => {
       expect(result.stderr, testCase.name).toContain(expected);
       expect(result.stdout, testCase.name).not.toContain('Local source docs generated');
     }
-  });
+  }, 15000);
 
   it('generates swift-book preset docs from an explicit nested DocC-style Markdown directory', async () => {
     const { sourceDir, outputDir } = await createSwiftBookSourceFixture();
@@ -9322,6 +9371,398 @@ describe('CLI compatibility behavior', () => {
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
   });
+
+  it('refreshes local source/docs evidence after source and docs changes', async () => {
+    const { manifestPath, outputDir, reportPath, sourceDir, docsDir } =
+      await createSourceVerificationVerifyFixture('llm-docs-refresh-source-verification-');
+
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      [
+        'export function makeClient(): Client {',
+        '  return {} as Client;',
+        '}',
+        'export function makeAdvancedClient(): Client {',
+        '  return makeClient();',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    await writeFile(
+      join(docsDir, 'guide.md'),
+      ['# Guide', '', 'Call `makeClient()` and `makeAdvancedClient()`.', ''].join('\n'),
+      'utf-8'
+    );
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(refreshResult.stdout).toContain('Mode: source-verification-local-evidence');
+    expect(refreshResult.stdout).toContain('Local source/docs evidence: refreshed');
+    expect(refreshResult.stdout).toContain(`Source: ${sourceDir}`);
+    expect(refreshResult.stdout).toContain(`Docs: ${docsDir}`);
+    expect(refreshResult.stdout).toContain('Docs references: 2');
+    expect(refreshResult.stdout).toContain('Exact export matches: 2');
+    expect(refreshResult.stdout).toContain(
+      'Scope: explicit local lexical evidence only; no broad claim verification or source-truth proof'
+    );
+    expect(refreshResult.stdout).toContain('Post-refresh verification: passed');
+    expect(refreshResult.stdout).toContain('Checked files: 1');
+    expect(report.summary).toMatchObject({
+      docsReferenceCount: 2,
+      exactMatchCount: 2,
+      unmatchedReferenceCount: 0,
+    });
+    expect(report.source.resolvedPath).toBe(sourceDir);
+    expect(report.docs.resolvedPath).toBe(docsDir);
+    expect(manifest.sourceVerification.summary).toEqual(report.summary);
+    expect(manifest.generatedOutputs[0]?.hash).toBe(await sha256File(reportPath));
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('refreshes local source/docs evidence when source and docs are explicit files', async () => {
+    const dir = await mkdtemp(
+      join(await realpath(tmpdir()), 'llm-docs-refresh-source-verification-files-')
+    );
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'client.ts');
+    const docsPath = join(dir, 'guide.md');
+    const outputDir = join(dir, 'reports');
+    const reportPath = join(outputDir, 'source-verification-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await writeFile(
+      sourcePath,
+      ['export function makeClient(): Client {', '  return {} as Client;', '}', ''].join('\n'),
+      'utf-8'
+    );
+    await writeFile(docsPath, '# Guide\n\nCall `makeClient()`.\n', 'utf-8');
+    await runCli([
+      'source-truth',
+      'verify-docs',
+      '--source',
+      sourcePath,
+      '--docs',
+      docsPath,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    await writeFile(
+      sourcePath,
+      [
+        'export function makeClient(): Client {',
+        '  return {} as Client;',
+        '}',
+        'export function makeFileClient(): Client {',
+        '  return makeClient();',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    await writeFile(docsPath, '# Guide\n\nCall `makeClient()` and `makeFileClient()`.\n', 'utf-8');
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
+    const manifest = JSON.parse(
+      await readFile(manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
+
+    expect(refreshResult.stdout).toContain('Mode: source-verification-local-evidence');
+    expect(refreshResult.stdout).toContain(`Source: ${sourcePath}`);
+    expect(refreshResult.stdout).toContain(`Docs: ${docsPath}`);
+    expect(refreshResult.stdout).toContain('Docs references: 2');
+    expect(refreshResult.stdout).toContain('Exact export matches: 2');
+    expect(report.source).toMatchObject({
+      input: sourcePath,
+      resolvedPath: sourcePath,
+      type: 'file',
+    });
+    expect(report.docs).toMatchObject({
+      input: docsPath,
+      resolvedPath: docsPath,
+      type: 'file',
+    });
+    expect(report.summary).toMatchObject({
+      docsReferenceCount: 2,
+      exactMatchCount: 2,
+      unmatchedReferenceCount: 0,
+    });
+    expect(manifest.sourceVerification.source).toMatchObject({
+      input: sourcePath,
+      resolvedPath: sourcePath,
+      type: 'file',
+    });
+    expect(manifest.sourceVerification.docs).toMatchObject({
+      input: docsPath,
+      resolvedPath: docsPath,
+      type: 'file',
+    });
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('refresh preserves source-verification docs traversal bounds from the prior report', async () => {
+    const { manifestPath, reportPath, sourceDir, docsDir } =
+      await createSourceVerificationVerifyFixture('llm-docs-refresh-source-verification-bounds-');
+    const priorReport = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
+
+    await mkdir(join(docsDir, 'nested'), { recursive: true });
+    await writeFile(join(docsDir, 'nested', 'extra.md'), 'Use `makeNestedClient()`.\n', 'utf-8');
+    await writeFile(
+      join(sourceDir, 'nested.ts'),
+      'export function makeNestedClient() { return {}; }\n',
+      'utf-8'
+    );
+    priorReport.docs.traversal.maxDepth = 0;
+    priorReport.docs.traversal.maxEntries = 9;
+    priorReport.docs.traversal.maxFiles = 4;
+    priorReport.docs.traversal.maxFileBytes = 4096;
+    await writeFile(reportPath, `${JSON.stringify(priorReport, null, 2)}\n`, 'utf-8');
+
+    const refreshResult = await runCli(['refresh', '--manifest', manifestPath]);
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
+
+    expect(refreshResult.stdout).toContain('Mode: source-verification-local-evidence');
+    expect(report.docs.traversal.maxDepth).toBe(0);
+    expect(report.docs.traversal.maxEntries).toBe(9);
+    expect(report.docs.traversal.maxFiles).toBe(4);
+    expect(report.docs.traversal.maxFileBytes).toBe(4096);
+    expect(report.docs.traversal.truncated).toBe(true);
+    expect(report.docs.files.map((file) => file.path)).not.toContain('nested/extra.md');
+    expect(report.docs.references.map((reference) => reference.identifier)).not.toContain(
+      'makeNestedClient'
+    );
+  });
+
+  it('refresh removes a stale source-verification success manifest when rerun has no docs evidence', async () => {
+    const { manifestPath, outputDir, reportPath, docsDir } =
+      await createSourceVerificationVerifyFixture(
+        'llm-docs-refresh-source-verification-no-evidence-'
+      );
+
+    await writeFile(join(docsDir, 'guide.md'), '# Guide\n\nNo inline code references.\n', 'utf-8');
+
+    const result = await runCliWithExit(['refresh', '--output-dir', outputDir]);
+    const report = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
+    const failure = JSON.parse(
+      await readFile(join(outputDir, 'failure.json'), 'utf-8')
+    ) as SourceVerificationFailure;
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Refresh failed: refreshed local source/docs evidence');
+    expect(result.stderr).toContain('no longer has supported docs evidence');
+    expect(result.stderr).toContain('failure report:');
+    expect(result.stderr).toContain('evidence report:');
+    expect(report.summary.docsReferenceCount).toBe(0);
+    expect(failure.reason).toBe('no-doc-reference-evidence');
+    expect(await pathExists(manifestPath)).toBe(false);
+  });
+
+  it('refresh rejects missing malformed and symlinked source-verification report paths before rerun', async () => {
+    const missingFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-missing-report-'
+    );
+    await rm(missingFixture.reportPath, { force: true });
+
+    const malformedFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-malformed-path-'
+    );
+    const malformedManifest = JSON.parse(
+      await readFile(malformedFixture.manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    malformedManifest.sourceVerification.reportPath = 'nested\\source-verification-report.json';
+    await writeFile(
+      malformedFixture.manifestPath,
+      `${JSON.stringify(malformedManifest, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const symlinkFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-report-symlink-'
+    );
+    const outsideFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-report-outside-'
+    );
+    const originalManifestText = await readFile(symlinkFixture.manifestPath, 'utf-8');
+    const outsideReportText = await readFile(outsideFixture.reportPath, 'utf-8');
+    await rm(symlinkFixture.reportPath, { force: true });
+    await symlink(outsideFixture.reportPath, symlinkFixture.reportPath, 'file');
+
+    const missingResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      missingFixture.manifestPath,
+    ]);
+    const malformedResult = await runCliWithExit([
+      'refresh',
+      '--output-dir',
+      malformedFixture.outputDir,
+    ]);
+    const symlinkResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      symlinkFixture.manifestPath,
+    ]);
+    const linkedReportStats = await lstat(symlinkFixture.reportPath);
+
+    expect(missingResult.exitCode).toBe(1);
+    expect(missingResult.stderr).toContain('source-verification report path not found');
+    expect(malformedResult.exitCode).toBe(1);
+    expect(malformedResult.stderr).toContain(
+      'sourceVerification.reportPath must use forward slashes'
+    );
+    expect(symlinkResult.exitCode).toBe(1);
+    expect(symlinkResult.stderr).toContain(
+      'source-verification report path: symbolic links are not allowed'
+    );
+    expect(linkedReportStats.isSymbolicLink()).toBe(true);
+    expect(await readFile(outsideFixture.reportPath, 'utf-8')).toBe(outsideReportText);
+    expect(await readFile(symlinkFixture.manifestPath, 'utf-8')).toBe(originalManifestText);
+  }, 15000);
+
+  it('refresh rejects scheme-looking source-verification report paths before reading local files', async () => {
+    const fixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-scheme-report-'
+    );
+    const manifest = JSON.parse(
+      await readFile(fixture.manifestPath, 'utf-8')
+    ) as SourceVerificationManifest;
+    const schemeReportPath = 'https:source-verification-report.json';
+    const schemeLocalReportPath = join(fixture.outputDir, schemeReportPath);
+
+    manifest.sourceVerification.reportPath = schemeReportPath;
+    await writeFile(schemeLocalReportPath, await readFile(fixture.reportPath, 'utf-8'), 'utf-8');
+    await writeFile(fixture.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['refresh', '--manifest', fixture.manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'sourceVerification.reportPath must be a relative local report path'
+    );
+    expect(await pathExists(schemeLocalReportPath)).toBe(true);
+  });
+
+  it('refresh rejects malformed source-verification reports and bad source docs paths', async () => {
+    const badBoundsFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-bad-bounds-'
+    );
+    const badBoundsReport = JSON.parse(
+      await readFile(badBoundsFixture.reportPath, 'utf-8')
+    ) as SourceVerificationReport;
+    badBoundsReport.docs.traversal.maxFileBytes = 0;
+    await writeFile(
+      badBoundsFixture.reportPath,
+      `${JSON.stringify(badBoundsReport, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const urlSourceFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-url-source-'
+    );
+    const urlSourceReport = JSON.parse(
+      await readFile(urlSourceFixture.reportPath, 'utf-8')
+    ) as SourceVerificationReport;
+    urlSourceReport.source.resolvedPath = 'https://example.com/source';
+    await writeFile(
+      urlSourceFixture.reportPath,
+      `${JSON.stringify(urlSourceReport, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const missingDocsFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-missing-docs-'
+    );
+    const missingDocsReport = JSON.parse(
+      await readFile(missingDocsFixture.reportPath, 'utf-8')
+    ) as SourceVerificationReport;
+    missingDocsReport.docs.resolvedPath = join(missingDocsFixture.dir, 'missing-docs');
+    await writeFile(
+      missingDocsFixture.reportPath,
+      `${JSON.stringify(missingDocsReport, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const symlinkDocsFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-symlink-docs-'
+    );
+    const symlinkDocsReport = JSON.parse(
+      await readFile(symlinkDocsFixture.reportPath, 'utf-8')
+    ) as SourceVerificationReport;
+    const linkedDocsDir = join(symlinkDocsFixture.dir, 'linked-docs');
+    await symlink(symlinkDocsFixture.docsDir, linkedDocsDir, 'dir');
+    symlinkDocsReport.docs.resolvedPath = linkedDocsDir;
+    await writeFile(
+      symlinkDocsFixture.reportPath,
+      `${JSON.stringify(symlinkDocsReport, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const outputInsideFixture = await createSourceVerificationVerifyFixture(
+      'llm-docs-refresh-source-verification-output-inside-'
+    );
+    const outputInsideReport = JSON.parse(
+      await readFile(outputInsideFixture.reportPath, 'utf-8')
+    ) as SourceVerificationReport;
+    outputInsideReport.source.resolvedPath = outputInsideFixture.dir;
+    await writeFile(
+      outputInsideFixture.reportPath,
+      `${JSON.stringify(outputInsideReport, null, 2)}\n`,
+      'utf-8'
+    );
+
+    const badBoundsResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      badBoundsFixture.manifestPath,
+    ]);
+    const urlSourceResult = await runCliWithExit([
+      'refresh',
+      '--output-dir',
+      urlSourceFixture.outputDir,
+    ]);
+    const missingDocsResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      missingDocsFixture.manifestPath,
+    ]);
+    const symlinkDocsResult = await runCliWithExit([
+      'refresh',
+      '--manifest',
+      symlinkDocsFixture.manifestPath,
+    ]);
+    const outputInsideResult = await runCliWithExit([
+      'refresh',
+      '--output-dir',
+      outputInsideFixture.outputDir,
+    ]);
+
+    expect(badBoundsResult.exitCode).toBe(1);
+    expect(badBoundsResult.stderr).toContain(
+      'docs.traversal.maxFileBytes must be a positive safe integer'
+    );
+    expect(urlSourceResult.exitCode).toBe(1);
+    expect(urlSourceResult.stderr).toContain('source.resolvedPath must be a local path');
+    expect(missingDocsResult.exitCode).toBe(1);
+    expect(missingDocsResult.stderr).toContain('source-verification docs path not found');
+    expect(symlinkDocsResult.exitCode).toBe(1);
+    expect(symlinkDocsResult.stderr).toContain(
+      'source-verification docs path must not be a symbolic link'
+    );
+    expect(outputInsideResult.exitCode).toBe(1);
+    expect(outputInsideResult.stderr).toContain(
+      'manifest output directory must not be the same as, or inside, the source-verification source or docs path'
+    );
+  }, 15000);
 
   it('refreshes configured SDK docs from the manifest recorded local OpenRef spec path', async () => {
     const { manifestPath, outputDir } = await generateSwiftFixture();
@@ -11709,7 +12150,7 @@ describe('CLI compatibility behavior', () => {
       }
       expect(result.stderr, scenario.name).not.toContain('hash mismatch');
     }
-  });
+  }, 15000);
 
   it('requires source docs generated output line and token metadata before file checks', async () => {
     const { manifestPath, manifest } = await generateSourceDocsFixture();
