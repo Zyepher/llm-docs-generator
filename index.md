@@ -167,6 +167,16 @@ authority, prove source truth, validate freshness, or select sources. `verify`
 accepts older manifests without this block and validates its schema, manifest
 mode, artifact role, static arrays, and supported keys when present.
 
+New successful manifests for those same modes also include a top-level
+`artifactSummary` block. It is deterministic content-free manifest metadata:
+generated-output counts, kinds, byte/line/token totals where present,
+aggregate hashes over existing manifest file metadata, warning counts,
+source-file totals where already represented, and compact index counters. It
+does not include raw content, excerpts, new paths, scores, ranking, authority,
+task-fit, freshness proof, source-truth proof, or source-selection judgment.
+`verify` accepts older manifests without this block and validates supported
+keys, mode, counts, totals, and aggregate hashes when present.
+
 The current `agent context` command prints read-only metadata for packaged
 agent context and skill artifacts. The JSON form reports schema version
 `0.2.0`, package name/version metadata, the `llm-docs` binary,
@@ -374,11 +384,13 @@ deterministic report-path, source/docs provenance, summary metadata, report
 body count, and `sourceInspection.source` consistency for
 `source-verification-report.json`, plus optional compact content-free
 source/docs file evidence index metadata rebuilt from that report. When
-present, top-level `refresh` provenance is validated for timestamp, mode,
-strategy, input boundary, limitations, and unsupported keys; it does not
-refresh outputs or sources, inspect additional source/docs files, perform broad
-official-docs claim checking, validate source-code behavior, decide task
-fit/source truth/source selection, or prove docs correctness.
+present, top-level `artifactSummary` metadata is validated against existing
+manifest arrays and metadata, and top-level `refresh` provenance is validated
+for timestamp, mode, strategy, input boundary, limitations, and unsupported
+keys; these checks do not refresh outputs or sources, inspect additional
+source/docs files, perform broad official-docs claim checking, validate
+source-code behavior, decide task fit/source truth/source selection, or prove
+docs correctness.
 Discovery candidates are ordered deterministically for agent review only.
 Semantic chunking exists as a library API for existing DocNode IR and as an
 opt-in JSONL export for explicit `generate --source` outputs. It emits stable

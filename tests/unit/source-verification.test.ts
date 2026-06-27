@@ -634,6 +634,7 @@ describe('source verification evidence', () => {
       ...manifest.generatedOutputs[0]!,
       ...refreshedReportMetadata,
     };
+    delete manifest.artifactSummary;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const verification = await verifyGenerationManifest({ manifestPath });
