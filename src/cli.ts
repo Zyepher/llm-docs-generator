@@ -676,10 +676,11 @@ const CAPABILITIES_CONTRACT = {
       inputBoundary: 'configured-sdk manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'recorded generator/sdk/parser/formatter metadata, source file, generated output hash, byte-size, and manifest-recorded line/token verification when present for configured SDK manifests',
+        'recorded generator/sdk/parser/formatter metadata, source file hash, byte-size, optional content-free source line/token metadata, generated output hash, byte-size, and manifest-recorded output line/token verification when present for configured SDK manifests',
       limitations: [
         'configured-sdk manifest mode only',
         'only verifies existing source and generated output files recorded in the manifest',
+        'source line/token metadata is deterministic content-free text metadata only',
         'verify does not refresh configured SDK outputs',
         'no repo freshness check',
         'no source-code verification',
@@ -804,7 +805,7 @@ const CAPABILITIES_CONTRACT = {
         'llm-docs/*-llms.txt',
       ],
       summary:
-        'deterministic regeneration of configured OpenRef SDK docs from the manifest-recorded absolute local spec path followed by manifest integrity verification of regenerated outputs',
+        'deterministic regeneration of configured OpenRef SDK docs and content-free source spec line/token manifest metadata from the manifest-recorded absolute local spec path followed by manifest integrity verification of regenerated outputs',
       limitations: [
         'configured-sdk manifests only',
         'requires source.resolvedSpecPath to be an absolute local non-symlink file outside the output directory',
@@ -2167,6 +2168,7 @@ program
               config,
               options.force
             );
+            const resolvedSpecPath = resolve(specPath);
             const versionConfig = config.getSDKVersionConfig(sdkName, resolvedVersion);
             const manifestSpecFormat = canonicalizeConfiguredSdkManifestFormat(
               versionConfig.spec.format
@@ -2207,7 +2209,7 @@ program
               source: {
                 configuredUrl: versionConfig.spec.url,
                 configuredLocalPath: versionConfig.spec.localPath,
-                resolvedSpecPath: specPath,
+                resolvedSpecPath,
                 format: manifestSpecFormat,
               },
               parser: {
