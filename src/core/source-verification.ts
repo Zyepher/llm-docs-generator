@@ -14,6 +14,7 @@ import {
 } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
+import { buildManifestContract, type ManifestContract } from './manifest.js';
 import {
   buildSourceVerificationFileEvidenceIndex,
   type SourceVerificationFileEvidenceIndex,
@@ -209,6 +210,7 @@ export interface SourceVerificationGeneratedOutput {
 export interface SourceVerificationManifest {
   schemaVersion: typeof SOURCE_VERIFICATION_MANIFEST_SCHEMA_VERSION;
   mode: typeof SOURCE_VERIFICATION_MODE;
+  manifestContract?: ManifestContract;
   generator: SourceVerificationGeneratorMetadata;
   sourceVerification: {
     reportPath: string;
@@ -973,6 +975,7 @@ function buildManifest(options: {
   return {
     schemaVersion: SOURCE_VERIFICATION_MANIFEST_SCHEMA_VERSION,
     mode: SOURCE_VERIFICATION_MODE,
+    manifestContract: buildManifestContract(SOURCE_VERIFICATION_MODE),
     generator: options.generator,
     sourceVerification: {
       reportPath: options.report.output.reportPath,

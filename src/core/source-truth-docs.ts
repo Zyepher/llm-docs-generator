@@ -2,6 +2,7 @@ import { mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
+import { buildManifestContract, type ManifestContract } from './manifest.js';
 import {
   inspectSourceTruth,
   type InspectSourceTruthOptions,
@@ -51,6 +52,7 @@ export interface SourceTruthManifestSourceFile {
 export interface SourceTruthDocsManifest {
   schemaVersion: typeof SOURCE_TRUTH_DOCS_SCHEMA_VERSION;
   mode: typeof SOURCE_TRUTH_DOCS_MODE;
+  manifestContract?: ManifestContract;
   source: {
     input: string;
     resolvedPath: string;
@@ -447,6 +449,7 @@ async function buildManifest(
   return {
     schemaVersion: SOURCE_TRUTH_DOCS_SCHEMA_VERSION,
     mode: SOURCE_TRUTH_DOCS_MODE,
+    manifestContract: buildManifestContract(SOURCE_TRUTH_DOCS_MODE),
     source: {
       input: report.source.input,
       resolvedPath: report.source.resolvedPath,

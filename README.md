@@ -84,8 +84,9 @@ Current implemented capabilities include:
 - a scoped `swift-book` preset that adds deterministic Markdown output
   defaults only when the agent or user supplies the exact local source path
 - opt-in semantic chunk JSONL output for explicit local source generation
-- manifests with source or discovery provenance, content hashes, generated file
-  hashes, parser/formatter metadata, and warnings
+- manifests with source or discovery provenance, descriptive top-level
+  `manifestContract` metadata, content hashes, generated file hashes,
+  parser/formatter metadata, and warnings
 - configured OpenRef SDK generation plus configured-SDK, source-docs,
   source-truth docs, discovery-report, and source-verification manifest
   verification, including recorded generator/sdk/parser/formatter metadata
@@ -329,7 +330,11 @@ summary consistency with body arrays, `sourceInspection.source` consistency,
 and optional compact content-free source/docs file evidence index metadata
 rebuilt from `source-verification-report.json`. When a top-level `refresh`
 provenance block is present, verification validates its mode, timestamp,
-strategy, deterministic input boundary, limitations, and supported keys. These checks do not refresh
+strategy, deterministic input boundary, limitations, and supported keys. New
+successful manifests also include a top-level `manifestContract` block that
+describes the deterministic CLI/agent boundary for the manifest mode; `verify`
+accepts older manifests without it and validates its schema, mode, artifact
+role, static arrays, and supported keys when present. These checks do not refresh
 outputs or sources, inspect additional source/docs files, perform broad
 official-docs claim checking, validate source-code behavior or runtime
 behavior, validate freshness, refresh remote resources, decide candidate
