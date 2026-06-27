@@ -180,6 +180,76 @@ export const SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS = [
   'Does not claim source truth.',
 ] as const;
 
+const REFRESH_PROVENANCE_KEYS = new Set([
+  'refreshedAt',
+  'sourceManifestMode',
+  'strategy',
+  'inputBoundary',
+  'limitations',
+]);
+const REFRESH_PROVENANCE_ISO_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const REFRESH_PROVENANCE_BY_MODE = {
+  [SOURCE_DOCS_MODE]: {
+    strategy: 'explicit-local-source-docs',
+    inputBoundary:
+      'Existing built-in-parser local-source-docs manifest with recorded local source path.',
+    limitations: [
+      'Records refresh provenance only; it does not validate freshness or source truth.',
+      'Uses only the manifest-recorded local source path, format hint, preset metadata, and prior chunk output presence.',
+      'Does not refresh parser-plugin manifests, fetch URLs, crawl, select sources, or verify source-code behavior.',
+    ],
+  },
+  [SOURCE_TRUTH_DOCS_MODE]: {
+    strategy: 'explicit-local-source-truth-docs',
+    inputBoundary: 'Existing source-truth-local-docs manifest with recorded local source path.',
+    limitations: [
+      'Records refresh provenance only; it does not prove source truth or validate freshness.',
+      'Uses only the manifest-recorded local source path.',
+      'Does not fetch URLs, crawl, select sources, run source project scripts, verify broad official-docs claims, or validate runtime behavior.',
+    ],
+  },
+  [CONFIGURED_SDK_MODE]: {
+    strategy: 'configured-sdk-local-openref',
+    inputBoundary:
+      'Existing configured-sdk manifest with recorded absolute local OpenRef spec path.',
+    limitations: [
+      'Records refresh provenance only; it does not validate freshness or source truth.',
+      'Uses only the manifest-recorded local spec path, SDK metadata, parser/formatter metadata, and filename prefix.',
+      'Does not fetch URLs, query registries, crawl, select candidates, refresh remote freshness, or verify source-code behavior.',
+    ],
+  },
+  [DISCOVERY_REPORT_MODE]: {
+    strategy: 'local-source-discovery-report',
+    inputBoundary:
+      'Existing discovery-report manifest whose report is local-bounded source discovery.',
+    limitations: [
+      'Records refresh provenance only; candidate evidence remains for agent review.',
+      'Uses only the local report source path and traversal bounds from discovery-report.json.',
+      'Does not generate docs, select sources, consume candidates, refresh repo or URL reports, validate freshness, crawl, or access the network.',
+    ],
+  },
+  [SOURCE_VERIFICATION_MODE]: {
+    strategy: 'local-source-verification-evidence',
+    inputBoundary:
+      'Existing source-verification-local-evidence manifest with local source-verification report paths.',
+    limitations: [
+      'Records refresh provenance only; local source/docs evidence is not source-truth proof.',
+      'Uses only the local report source/docs paths and docs traversal bounds from source-verification-report.json.',
+      'Does not perform broad official-docs claim verification, source-code behavior validation, freshness validation, crawling, source selection, or network access.',
+    ],
+  },
+} as const;
+
+export type RefreshSourceManifestMode = keyof typeof REFRESH_PROVENANCE_BY_MODE;
+
+export interface RefreshProvenance {
+  refreshedAt: string;
+  sourceManifestMode: RefreshSourceManifestMode;
+  strategy: (typeof REFRESH_PROVENANCE_BY_MODE)[RefreshSourceManifestMode]['strategy'];
+  inputBoundary: string;
+  limitations: string[];
+}
+
 export type GeneratedOutputKind = 'parsed-spec-json' | 'llm-docs';
 export type DiscoveryReportKind = keyof typeof DISCOVERY_REPORT_MODE_BY_KIND;
 
@@ -429,6 +499,30 @@ export async function writeDiscoveryReportManifest(
   await writeTextFileSafely(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+export async function recordRefreshProvenanceInManifest(options: {
+  manifestPath: string;
+  mode: RefreshSourceManifestMode;
+  refreshedAt?: Date;
+}): Promise<RefreshProvenance> {
+  const manifest = JSON.parse(await readFile(options.manifestPath, 'utf-8')) as unknown;
+
+  if (!isObjectRecord(manifest)) {
+    throw new Error('refreshed manifest must be an object before recording refresh provenance');
+  }
+
+  if (manifest.mode !== options.mode) {
+    throw new Error(
+      `refreshed manifest mode ${String(manifest.mode)} does not match refresh mode ${options.mode}`
+    );
+  }
+
+  const refresh = buildRefreshProvenance(options.mode, options.refreshedAt ?? new Date());
+  manifest.refresh = refresh;
+  await writeTextFileSafely(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  return refresh;
+}
+
 export async function verifyGenerationManifest(
   options: VerifyGenerationManifestOptions
 ): Promise<VerifyGenerationManifestResult> {
@@ -559,6 +653,16 @@ async function verifyDiscoveryReportManifest(
 
   if (!isDiscoveryReportKind(discoveryKind)) {
     failures.push('malformed manifest: discovery.kind must be source, repo, or url');
+  }
+
+  if (manifest.refresh !== undefined) {
+    if (discoveryKind !== 'source') {
+      failures.push(
+        'malformed manifest: refresh is supported for discovery-report manifests only when discovery.kind is source'
+      );
+    } else {
+      validateRefreshProvenance(manifest.refresh, DISCOVERY_REPORT_MODE, failures);
+    }
   }
 
   if (!isNonEmptyString(reportPath)) {
@@ -718,6 +822,8 @@ async function verifyConfiguredSdkManifest(
     failures.push('malformed manifest: missing generatedOutputs array');
   }
 
+  validateRefreshProvenance(manifest.refresh, CONFIGURED_SDK_MODE, failures);
+
   if (failures.length > 0) {
     return {
       manifestPath,
@@ -754,10 +860,7 @@ async function verifyConfiguredSdkManifest(
     );
   }
 
-  if (
-    'estimatedTokenCount' in sourceRecord &&
-    !isNonNegativeInteger(sourceEstimatedTokenCount)
-  ) {
+  if ('estimatedTokenCount' in sourceRecord && !isNonNegativeInteger(sourceEstimatedTokenCount)) {
     failures.push(
       'malformed manifest: source.estimatedTokenCount must be a non-negative integer when present'
     );
@@ -837,6 +940,19 @@ async function verifySourceDocsManifest(
     failures.push('malformed manifest: missing generatedOutputs array');
   }
 
+  const hasParserPluginMetadata =
+    isObjectRecord(parser) && (parser as Record<string, unknown>).plugin !== undefined;
+
+  if (manifest.refresh !== undefined) {
+    if (hasParserPluginMetadata) {
+      failures.push(
+        'malformed manifest: refresh is supported for local-source-docs manifests only when generated by the built-in parser'
+      );
+    } else {
+      validateRefreshProvenance(manifest.refresh, SOURCE_DOCS_MODE, failures);
+    }
+  }
+
   if (failures.length > 0) {
     return {
       manifestPath,
@@ -867,7 +983,6 @@ async function verifySourceDocsManifest(
     fileChecks
   );
   const parserPluginFormatId = parserPluginMetadata?.format.id;
-  const hasParserPluginMetadata = parserRecord.plugin !== undefined;
 
   if (!isNonEmptyString(sourceInput)) {
     failures.push('malformed manifest: source.input must be a non-empty string');
@@ -1096,6 +1211,8 @@ async function verifySourceTruthDocsManifest(
     failures.push('malformed manifest: missing generatedOutputs array');
   }
 
+  validateRefreshProvenance(manifest.refresh, SOURCE_TRUTH_DOCS_MODE, failures);
+
   if (failures.length > 0) {
     return {
       manifestPath,
@@ -1234,6 +1351,8 @@ async function verifySourceVerificationManifest(
   if (!Array.isArray(generatedOutputs)) {
     failures.push('malformed manifest: missing generatedOutputs array');
   }
+
+  validateRefreshProvenance(manifest.refresh, SOURCE_VERIFICATION_MODE, failures);
 
   if (failures.length > 0) {
     return {
@@ -1883,6 +2002,102 @@ function requireStringArray(values: unknown[], label: string): string[] {
   }
 
   return values;
+}
+
+function buildRefreshProvenance(
+  mode: RefreshSourceManifestMode,
+  refreshedAt: Date
+): RefreshProvenance {
+  const contract = REFRESH_PROVENANCE_BY_MODE[mode];
+
+  return {
+    refreshedAt: refreshedAt.toISOString(),
+    sourceManifestMode: mode,
+    strategy: contract.strategy,
+    inputBoundary: contract.inputBoundary,
+    limitations: [...contract.limitations],
+  };
+}
+
+function validateRefreshProvenance(
+  refresh: unknown,
+  expectedMode: RefreshSourceManifestMode,
+  failures: string[]
+): void {
+  if (refresh === undefined) {
+    return;
+  }
+
+  if (!isObjectRecord(refresh)) {
+    failures.push('malformed manifest: refresh must be an object when present');
+    return;
+  }
+
+  for (const key of Object.keys(refresh)) {
+    if (!REFRESH_PROVENANCE_KEYS.has(key)) {
+      failures.push(`malformed manifest: refresh.${key} is not supported`);
+    }
+  }
+
+  const expected = REFRESH_PROVENANCE_BY_MODE[expectedMode];
+
+  if (!isRefreshIsoDatetimeString(refresh.refreshedAt)) {
+    failures.push('malformed manifest: refresh.refreshedAt must be an ISO datetime string');
+  }
+
+  if (refresh.sourceManifestMode !== expectedMode) {
+    failures.push(
+      `malformed manifest: refresh.sourceManifestMode must match manifest mode ${expectedMode}`
+    );
+  }
+
+  if (refresh.strategy !== expected.strategy) {
+    failures.push(
+      `malformed manifest: refresh.strategy must be ${expected.strategy} for ${expectedMode}`
+    );
+  }
+
+  if (refresh.inputBoundary !== expected.inputBoundary) {
+    failures.push(
+      `malformed manifest: refresh.inputBoundary must match the expected boundary for ${expectedMode}`
+    );
+  }
+
+  if (!Array.isArray(refresh.limitations) || refresh.limitations.length === 0) {
+    failures.push('malformed manifest: refresh.limitations must be a non-empty array');
+    return;
+  }
+
+  if (
+    refresh.limitations.some(
+      (limitation) => typeof limitation !== 'string' || limitation.length === 0
+    )
+  ) {
+    failures.push('malformed manifest: refresh.limitations must contain only non-empty strings');
+    return;
+  }
+
+  if (!stringArraysEqual(refresh.limitations, expected.limitations)) {
+    failures.push(
+      `malformed manifest: refresh.limitations must match the expected limitations for ${expectedMode}`
+    );
+  }
+}
+
+function isRefreshIsoDatetimeString(value: unknown): value is string {
+  if (typeof value !== 'string' || !REFRESH_PROVENANCE_ISO_DATETIME_PATTERN.test(value)) {
+    return false;
+  }
+
+  const time = Date.parse(value);
+
+  return Number.isFinite(time) && new Date(time).toISOString() === value;
+}
+
+function stringArraysEqual(actual: string[], expected: readonly string[]): boolean {
+  return (
+    actual.length === expected.length && actual.every((value, index) => value === expected[index])
+  );
 }
 
 function validateGeneratorMetadata(generator: Record<string, unknown>, failures: string[]): void {

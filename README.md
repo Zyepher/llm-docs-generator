@@ -98,7 +98,7 @@ Current implemented capabilities include:
   docs, configured OpenRef SDK manifests that already record an absolute local
   source path, local source discovery-report manifests, and
   `source-verification-local-evidence` manifests, with post-refresh manifest
-  integrity verification
+  integrity verification and verified refresh provenance metadata
 - conservative source-truth evidence inspection and evidence Markdown for local
   TypeScript/JavaScript/package/config files
 - narrow explicit-local source/docs evidence reports that compare Markdown/MDX
@@ -327,7 +327,9 @@ report schema/mode/output path consistency, source/docs endpoint provenance
 against the report, manifest summary consistency with report metadata, report
 summary consistency with body arrays, `sourceInspection.source` consistency,
 and optional compact content-free source/docs file evidence index metadata
-rebuilt from `source-verification-report.json`. These checks do not refresh
+rebuilt from `source-verification-report.json`. When a top-level `refresh`
+provenance block is present, verification validates its mode, timestamp,
+strategy, deterministic input boundary, limitations, and supported keys. These checks do not refresh
 outputs or sources, inspect additional source/docs files, perform broad
 official-docs claim checking, validate source-code behavior or runtime
 behavior, validate freshness, refresh remote resources, decide candidate
@@ -358,8 +360,10 @@ uses only `report.source.resolvedPath`, preserves `traversal.maxDepth`,
 `traversal.maxEntries`, and `traversal.maxFiles`, reruns local source discovery
 into the same output directory, and rewrites `discovery-report.json` plus
 `manifest.json` as candidate evidence for agent review. After successful
-regeneration, refresh runs the existing manifest verifier over the newly
-written manifest and reports the checked-file count. For
+regeneration, refresh records a top-level `refresh` provenance block with the
+source manifest mode, static strategy, input boundary, limitations, and refresh
+timestamp, then runs the existing manifest verifier over the newly written
+manifest and reports the checked-file count. For
 `source-verification-local-evidence`, refresh reads the existing
 `source-verification-report.json` named by
 `manifest.sourceVerification.reportPath` only after relative forward-slash path

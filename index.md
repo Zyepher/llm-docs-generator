@@ -317,7 +317,10 @@ workflow into the same output directory, and rewrites
 docs no longer contain supported local evidence, it writes `failure.json` plus
 the report and does not leave a stale success manifest. After successful
 regeneration, refresh runs the existing manifest verifier over the newly
-written manifest outputs and reports the checked-file count. This is
+written manifest outputs and reports the checked-file count. Successful
+regeneration also records a top-level `refresh` provenance block with
+`refreshedAt`, source manifest mode, static strategy, deterministic input
+boundary, and limitations before post-refresh verification. This is
 deterministic manifest/output integrity verification only; it
 does not claim freshness, source truth, source-code behavior, or runtime
 behavior. Refresh does not support repo/URL discovery-report refresh, remote
@@ -361,7 +364,9 @@ Source-verification manifest verification checks report file integrity and
 deterministic report-path, source/docs provenance, summary metadata, report
 body count, and `sourceInspection.source` consistency for
 `source-verification-report.json`, plus optional compact content-free
-source/docs file evidence index metadata rebuilt from that report; it does not
+source/docs file evidence index metadata rebuilt from that report. When
+present, top-level `refresh` provenance is validated for timestamp, mode,
+strategy, input boundary, limitations, and unsupported keys; it does not
 refresh outputs or sources, inspect additional source/docs files, perform broad
 official-docs claim checking, validate source-code behavior, decide task
 fit/source truth/source selection, or prove docs correctness.
@@ -509,7 +514,8 @@ agent intent/source/scope resolution
   `discovery-report` manifests, and `source-verification-local-evidence`
   manifests is available through
   `refresh --manifest <path>` or `refresh --output-dir <dir>`, with
-  deterministic post-refresh manifest/output integrity verification.
+  deterministic post-refresh manifest/output integrity verification and
+  verified refresh provenance metadata.
   Parser-plugin `local-source-docs` refresh, broader crawling,
   repo/URL discovery-report refresh, remote freshness refresh, broad
   official-docs behavior/API claim verification, source-code verification, and

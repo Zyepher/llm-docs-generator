@@ -226,9 +226,10 @@ Current implementation:
   reparses that exact recorded path, rewrites
   `parsed/<sdk>-<resolvedVersion>-spec.json`, regenerates legacy LLM docs in
   the manifest directory, and rewrites `manifest.json`. After regeneration,
-  refresh runs the existing manifest verifier against the newly written
-  manifest outputs and reports the checked-file count. The rewritten manifest
-  includes current deterministic content-free source spec line/token metadata.
+  refresh records a top-level `refresh` provenance block and runs the existing
+  manifest verifier against the newly written manifest outputs and reports the
+  checked-file count. The rewritten manifest includes current deterministic
+  content-free source spec line/token metadata.
   Source discovery-report refresh reads the existing `discovery-report.json`
   named by `manifest.discovery.reportPath`, validates it is a local-bounded
   source report, uses only `report.source.resolvedPath`, preserves
@@ -247,8 +248,11 @@ Current implementation:
   `source-verification-report.json` plus `manifest.json` on success. If the
   refreshed docs no longer contain supported local evidence, it writes
   `failure.json` plus the report and does not leave a stale success manifest.
-  This is deterministic post-refresh integrity verification only; it does not
-  claim freshness, source truth, source-code behavior, or runtime behavior.
+  The `refresh` block records only `refreshedAt`, source manifest mode, static
+  strategy, deterministic input boundary, and limitations after successful
+  regeneration and before post-refresh verification. This is deterministic
+  post-refresh integrity verification only; it does not claim freshness, source
+  truth, source-code behavior, or runtime behavior.
   Refresh does not support parser-plugin source-docs manifests, repo/URL
   discovery-report refresh, remote freshness refresh, broad website crawling,
   source selection, source-code verification, behavior validation, remote
@@ -540,10 +544,15 @@ Agent workflow:
    evidence remains, it writes `failure.json` and the report without leaving a
    stale success manifest. This is not broad official-docs behavior/API claim
    verification or source-code behavior validation.
-7. If the manifest is repo/URL `discovery-report`, URL/repo/website,
+7. Successful refresh regeneration records a top-level `refresh` provenance
+   block with the refresh timestamp, source manifest mode, static strategy,
+   deterministic input boundary, and limitations before post-refresh
+   verification. The block is provenance only, not freshness validation or
+   source-truth proof.
+8. If the manifest is repo/URL `discovery-report`, URL/repo/website,
    parser-plugin source-docs, or requires freshness/source-code verification,
    treat refresh as planned and unsupported in the CLI.
-8. For future remote/freshness workflows, re-resolve source URL, repo, path,
+9. For future remote/freshness workflows, re-resolve source URL, repo, path,
    branch, tag, or commit as the agent, respect pinned versions, and report
    what changed before regenerating.
 
@@ -866,7 +875,9 @@ consistency, source/docs endpoint provenance against the report, manifest
 summary consistency with report metadata, report summary consistency with body
 arrays, `sourceInspection.source` consistency, and optional compact
 content-free source/docs file evidence index metadata rebuilt from the report.
-It does not perform refresh, inspect additional source/docs files, verify repo
+When a top-level `refresh` provenance block is present, verification validates
+its timestamp, source manifest mode, static strategy, deterministic input
+boundary, non-empty limitations, and unsupported keys. It does not perform refresh, inspect additional source/docs files, verify repo
 freshness, perform broad official-docs claim verification, validate source-code
 behavior, make candidate selection, validate HTTP freshness, refresh remote
 resources, make task-fit judgments, resolve source truth, make source selection
@@ -889,10 +900,11 @@ non-symlink OpenRef spec file outside the output directory; it reparses exactly
 that recorded file and rewrites `parsed/<sdk>-<resolvedVersion>-spec.json`,
 legacy LLM docs, and `manifest.json`, including current deterministic
 content-free source spec line/token metadata. After successful regeneration,
-refresh runs the existing manifest verifier over the newly written manifest
-outputs and reports the checked-file count. This is deterministic
-manifest/output integrity verification only, not freshness, source truth,
-source-code behavior, or runtime behavior verification. Source discovery-report
+refresh records a top-level verified refresh provenance block, then runs the
+existing manifest verifier over the newly written manifest outputs and reports
+the checked-file count. This is deterministic manifest/output integrity
+verification only, not freshness, source truth, source-code behavior, or
+runtime behavior verification. Source discovery-report
 refresh reads the local report path from `manifest.discovery.reportPath`, uses
 only `report.source.resolvedPath`, preserves valid prior traversal bounds, and
 rewrites candidate evidence only. Source-verification local evidence refresh

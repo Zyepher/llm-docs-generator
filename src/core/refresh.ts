@@ -15,10 +15,12 @@ import {
   DISCOVERY_REPORT_MODE,
   CONFIGURED_SDK_MODE,
   MANIFEST_SCHEMA_VERSION,
+  recordRefreshProvenanceInManifest,
   validateSourceDocsPresetContract,
   verifyGenerationManifest,
   writeDiscoveryReportManifest,
   writeGenerationManifest,
+  type RefreshSourceManifestMode,
   type VerifyGenerationManifestResult,
 } from './manifest.js';
 import {
@@ -468,6 +470,11 @@ async function refreshConfiguredSdkManifest(options: {
 async function withPostRefreshVerification(
   result: Omit<RefreshManifestResult, 'postRefreshVerification'>
 ): Promise<RefreshManifestResult> {
+  await recordRefreshProvenanceInManifest({
+    manifestPath: result.manifestPath,
+    mode: result.mode as RefreshSourceManifestMode,
+  });
+
   const verification = await verifyGenerationManifest({ manifestPath: result.manifestPath });
 
   if (verification.failures.length > 0) {

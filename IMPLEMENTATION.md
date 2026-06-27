@@ -285,6 +285,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
       `source-verification-local-evidence` manifests, preserving explicit local
       source/docs resolved paths and docs traversal bounds from
       `source-verification-report.json`
+- [x] Verified refresh provenance metadata for successful regeneration of all
+      currently supported refresh modes, with static source manifest mode,
+      strategy, input boundary, and limitations validated by `verify`
 - [x] Deterministic semantic chunk manifest-index metadata for opt-in
       source-docs `chunks/semantic-chunks.jsonl` exports
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
@@ -602,6 +605,10 @@ Current explicit local source docs generation scope:
   source/docs files, parse behavior claims, perform broad official-docs claim
   checking, validate source-code behavior, decide task fit/source truth/source
   selection, or prove docs correctness.
+  When optional top-level `refresh` provenance metadata is present on any
+  supported manifest mode, verification checks its timestamp, source manifest
+  mode, static strategy, deterministic input boundary, non-empty limitations,
+  and unsupported keys.
 
 - `refresh --manifest <path>` / `refresh --output-dir <dir>` supports only
   current built-in-parser `local-source-docs`, `source-truth-local-docs`,
@@ -643,8 +650,9 @@ Current explicit local source docs generation scope:
   `source-verification-report.json` plus `manifest.json` on success. If the
   rerun has no supported docs evidence, it writes `failure.json` plus the
   report and removes the stale success manifest.
-  After successful regeneration, it runs the existing manifest verifier over
-  the newly written manifest outputs and reports the checked-file count. This
+  After successful regeneration, it records top-level verified refresh
+  provenance metadata, then runs the existing manifest verifier over the newly
+  written manifest outputs and reports the checked-file count. This
   post-refresh check is deterministic manifest/output integrity verification
   only; it does not claim freshness, source truth, source-code behavior, or
   runtime behavior. It rejects parser-plugin source-docs manifests, repo/URL
