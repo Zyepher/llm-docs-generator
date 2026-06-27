@@ -73,6 +73,93 @@ interface RefreshProvenance {
   limitations: string[];
 }
 
+interface ManifestContract {
+  schema: string;
+  manifestMode: string;
+  artifactRole: string;
+  cliGuarantees: string[];
+  agentResponsibilities: string[];
+  unsupportedAutomation: string[];
+}
+
+const manifestContractExpectations = {
+  'configured-sdk': {
+    artifactRole: 'generated-docs',
+    cliGuarantees: [
+      'Writes docs from one configured SDK manifest entry using recorded parser and formatter metadata.',
+      'Records deterministic file metadata for the explicit local spec and generated outputs.',
+    ],
+    agentResponsibilities: [
+      'Choose the SDK version and decide whether generated docs fit the user task.',
+      'Determine source authority and freshness outside this manifest.',
+    ],
+    unsupportedAutomation: [
+      'No discovery report consumption or candidate selection.',
+      'No source-code behavior validation or remote freshness proof.',
+    ],
+  },
+  'local-source-docs': {
+    artifactRole: 'generated-docs',
+    cliGuarantees: [
+      'Writes docs from one explicit local source path using the selected parser and formatter.',
+      'Records deterministic file metadata for source files and generated outputs.',
+    ],
+    agentResponsibilities: [
+      'Choose the source path and decide whether generated docs fit the user task.',
+      'Determine source authority, source truth, and freshness outside this manifest.',
+    ],
+    unsupportedAutomation: [
+      'No automatic source selection or discovery report consumption.',
+      'No source-code behavior validation, broad crawling, or remote freshness proof.',
+    ],
+  },
+  'source-truth-local-docs': {
+    artifactRole: 'local-source-evidence-report',
+    cliGuarantees: [
+      'Writes local evidence reports from one explicit local source inspection.',
+      'Records deterministic file metadata for reported source files and generated outputs.',
+    ],
+    agentResponsibilities: [
+      'Decide whether observed evidence is relevant to the user task.',
+      'Use evidence as local observations, not source truth proof.',
+    ],
+    unsupportedAutomation: [
+      'No runtime inference or test execution.',
+      'No broad docs claim verification, source selection, or freshness proof.',
+    ],
+  },
+  'discovery-report': {
+    artifactRole: 'candidate-evidence-report',
+    cliGuarantees: [
+      'Writes deterministic candidate evidence for agent review only from the explicit discovery input.',
+      'Records content-free candidate evidence index metadata derived from discovery-report.json.',
+    ],
+    agentResponsibilities: [
+      'Review candidates and explicitly choose any source used for generation.',
+      'Decide source authority, source truth, freshness, and task fit outside this manifest.',
+    ],
+    unsupportedAutomation: [
+      'No authoritative source selection, candidate scoring, or candidate consumption.',
+      'No docs generation, broad crawling, behavior verification, or remote freshness proof.',
+    ],
+  },
+  'source-verification-local-evidence': {
+    artifactRole: 'local-source-evidence-report',
+    cliGuarantees: [
+      'Writes local lexical source/docs evidence from explicit local source and docs paths.',
+      'Records deterministic report metadata and content-free source/docs file evidence indexes.',
+    ],
+    agentResponsibilities: [
+      'Decide whether lexical matches and unmatched references matter for the user task.',
+      'Treat evidence as local observations, not source truth proof or docs correctness proof.',
+    ],
+    unsupportedAutomation: [
+      'No broad docs claim verification or source-code runtime validation.',
+      'No source selection, freshness proof, crawling, or network work.',
+    ],
+  },
+} as const;
+
 const refreshProvenanceExpectations = {
   'local-source-docs': {
     strategy: 'explicit-local-source-docs',
@@ -207,6 +294,7 @@ interface GenerationManifest {
   };
   generatedOutputs: ManifestFileEntry[];
   warnings: string[];
+  manifestContract?: ManifestContract;
   refresh?: RefreshProvenance;
 }
 
@@ -292,6 +380,7 @@ interface SourceDocsManifest {
     limitations: string[];
   };
   warnings: string[];
+  manifestContract?: ManifestContract;
   refresh?: RefreshProvenance;
 }
 
@@ -450,6 +539,7 @@ interface DiscoveryReportManifest {
   };
   candidateEvidenceIndex?: CandidateEvidenceManifestIndex;
   generatedOutputs: ManifestFileEntry[];
+  manifestContract?: ManifestContract;
   refresh?: RefreshProvenance;
 }
 
@@ -1206,6 +1296,31 @@ function expectRefreshProvenance(
     limitations: [...expected.limitations],
   });
   expect(JSON.stringify(refresh)).not.toMatch(/authority|confidence/i);
+}
+
+function expectManifestContract(
+  manifest: { mode: string; manifestContract?: ManifestContract },
+  mode: keyof typeof manifestContractExpectations
+): void {
+  const expected = manifestContractExpectations[mode];
+  const contract = manifest.manifestContract;
+
+  expect(manifest.mode).toBe(mode);
+  expect(contract).toBeDefined();
+
+  if (contract === undefined) {
+    throw new Error('expected manifest contract');
+  }
+
+  expect(contract).toEqual({
+    schema: 'llm-docs-generator.manifest-contract.v1',
+    manifestMode: mode,
+    artifactRole: expected.artifactRole,
+    cliGuarantees: [...expected.cliGuarantees],
+    agentResponsibilities: [...expected.agentResponsibilities],
+    unsupportedAutomation: [...expected.unsupportedAutomation],
+  });
+  expect(JSON.stringify(contract)).not.toMatch(/confidence|score|sha256:|rawText|contentHash/i);
 }
 
 async function git(args: string[], cwd: string): Promise<void> {
@@ -2366,6 +2481,9 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('source-truth-generate')?.summary).toEqual(
       expect.stringContaining('content-free source-file line/token metadata')
     );
+    expect(implemented.get('source-truth-generate')?.summary).toEqual(
+      expect.stringContaining('descriptive manifest contract metadata')
+    );
     expect(implemented.get('source-truth-generate')?.limitations).toContain(
       'manifest source-file line/token metadata is content-free text metadata, not behavior verification'
     );
@@ -2456,6 +2574,9 @@ describe('CLI compatibility behavior', () => {
         'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
       ])
     );
+    expect(implemented.get('generate-source')?.summary).toContain(
+      'descriptive manifest contract metadata'
+    );
     expect(implemented.get('parser-plugin-execution')).toMatchObject({
       command: 'generate',
       mode: 'generate --source <local-file-or-directory> --parser-plugin-manifest <path> --format <plugin-format-id>',
@@ -2513,8 +2634,14 @@ describe('CLI compatibility behavior', () => {
       '--format openref|openref-0.1',
     ]);
     expect(implemented.get('generate-sdk')?.limitations).toContain('no preset generation');
+    expect(implemented.get('generate-sdk')?.summary).toContain(
+      'descriptive manifest contract metadata'
+    );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain(
       'recorded generator/sdk/parser/formatter metadata'
+    );
+    expect(implemented.get('verify-configured-sdk')?.summary).toContain(
+      'manifest contract validation'
     );
     expect(implemented.get('verify-configured-sdk')?.summary).toContain(
       'optional content-free source line/token metadata'
@@ -2544,6 +2671,9 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('verify-discovery-report')?.summary).toContain(
       'refresh provenance validation'
     );
+    expect(implemented.get('verify-discovery-report')?.summary).toContain(
+      'manifest contract validation'
+    );
     expect(implemented.get('verify-source-docs')?.inputBoundary).toBe(
       'local-source-docs manifest.json'
     );
@@ -2555,6 +2685,9 @@ describe('CLI compatibility behavior', () => {
     );
     expect(implemented.get('verify-source-docs')?.summary).toContain(
       'refresh provenance validation'
+    );
+    expect(implemented.get('verify-source-docs')?.summary).toContain(
+      'manifest contract validation'
     );
     expect(implemented.get('verify-source-docs')?.limitations).toEqual(
       expect.arrayContaining([
@@ -2583,6 +2716,9 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('verify-source-truth-docs')?.summary).toContain(
       'refresh provenance validation'
     );
+    expect(implemented.get('verify-source-truth-docs')?.summary).toContain(
+      'manifest contract validation'
+    );
     const sourceVerificationVerify = implemented.get('verify-source-verification');
     expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('report integrity'));
     expect(sourceVerificationVerify?.summary).toEqual(expect.stringContaining('provenance'));
@@ -2598,6 +2734,9 @@ describe('CLI compatibility behavior', () => {
     );
     expect(sourceVerificationVerify?.summary).toEqual(
       expect.stringContaining('refresh provenance validation')
+    );
+    expect(sourceVerificationVerify?.summary).toEqual(
+      expect.stringContaining('manifest contract validation')
     );
     expect(sourceVerificationVerify).toMatchObject({
       command: 'verify',
@@ -3606,6 +3745,7 @@ describe('CLI compatibility behavior', () => {
         },
       ],
     });
+    expectManifestContract(manifest, 'discovery-report');
     expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
     expectLocalCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report, {
       source: {
@@ -4733,6 +4873,7 @@ describe('CLI compatibility behavior', () => {
         },
       ],
     });
+    expectManifestContract(manifest, 'discovery-report');
     expectWebsiteCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report);
     expectCandidateEvidenceIndexHasNoReportContent(manifest.candidateEvidenceIndex);
     const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
@@ -5495,6 +5636,7 @@ describe('CLI compatibility behavior', () => {
         },
       ],
     });
+    expectManifestContract(manifest, 'discovery-report');
     expect(manifest.discovery).not.toHaveProperty('urlResourceCount');
     expectLocalCandidateEvidenceIndex(manifest.candidateEvidenceIndex, report, {
       repo: {
@@ -6561,6 +6703,7 @@ describe('CLI compatibility behavior', () => {
         format: 'universal-llm-docs',
       },
     });
+    expectManifestContract(manifest, 'local-source-docs');
     expect(manifest.parser.plugin?.execution.statement).toContain('not sandboxed');
     expect(manifest.sourceFiles).toEqual([
       {
@@ -6637,6 +6780,7 @@ describe('CLI compatibility behavior', () => {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
 
     expect(manifest.parser.plugin).toBeDefined();
+    expectManifestContract(manifest, 'local-source-docs');
     expect(manifest.refresh).toBeUndefined();
 
     await writeFile(
@@ -7180,7 +7324,7 @@ describe('CLI compatibility behavior', () => {
     expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
   });
 
-  it('refresh rejects parser plugin local-source-docs manifests without executing plugin code', async () => {
+  it('refresh rejects parser plugin local-source-docs manifests with manifest contract without executing plugin code', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-refresh-'));
     tempDirs.push(dir);
     const sourcePath = join(dir, 'source.fixture');
@@ -7222,7 +7366,14 @@ describe('CLI compatibility behavior', () => {
       '--manifest',
       join(outputDir, 'manifest.json'),
     ]);
+    const manifest = JSON.parse(
+      await readFile(join(outputDir, 'manifest.json'), 'utf-8')
+    ) as SourceDocsManifest;
+    const verifyResult = await runCli(['verify', '--manifest', join(outputDir, 'manifest.json')]);
 
+    expectManifestContract(manifest, 'local-source-docs');
+    expect(verifyResult.stdout).toContain('Failures: 0');
+    expect(verifyResult.stdout).toContain('Verification passed');
     expect(refreshResult.exitCode).toBe(1);
     expect(refreshResult.stderr).toContain(
       'refresh does not support parser-plugin local-source-docs manifests'
@@ -9295,7 +9446,7 @@ describe('CLI compatibility behavior', () => {
     expect(verifyResult.stdout).toContain('Verification passed');
   });
 
-  it('refreshes a local source docs manifest after output tamper and source edit', async () => {
+  it('refreshes a local source docs manifest and preserves manifest contract after output tamper and source edit', async () => {
     const {
       manifestPath,
       sourceDir,
@@ -9351,6 +9502,7 @@ describe('CLI compatibility behavior', () => {
     expect(refreshedSourceFile.byteSize).toBe(await byteSize(refreshedSourcePath));
     expect(refreshedSourceFile.lineCount).toBe(countTextLines(refreshedSourceText));
     expect(refreshedSourceFile.estimatedTokenCount).toBe(estimateTextTokens(refreshedSourceText));
+    expectManifestContract(refreshedManifest, 'local-source-docs');
     expectRefreshProvenance(refreshedManifest, 'local-source-docs');
     expect(refreshedText).toContain('refreshed local docs');
     expect(refreshedText).not.toContain('tampered output');
@@ -10915,21 +11067,24 @@ describe('CLI compatibility behavior', () => {
   }, 15000);
 
   it('verifies a generated configured SDK manifest by output directory', async () => {
-    const { outputDir } = await generateSwiftFixture();
+    const { outputDir, manifestPath } = await generateSwiftFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
 
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
+    expectManifestContract(manifest, 'configured-sdk');
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain('Checked files: 4');
     expect(result.stdout).toContain('Failures: 0');
     expect(result.stdout).toContain('Verification passed');
   });
 
-  it('verifies a generated local source docs manifest by output directory', async () => {
+  it('verifies a generated local source docs manifest contract by output directory', async () => {
     const { outputDir, manifest } = await generateSourceDocsFixture();
 
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
+    expectManifestContract(manifest, 'local-source-docs');
     expect(result.stdout).toContain('Manifest verification');
     expect(result.stdout).toContain(
       `Checked files: ${manifest.sourceFiles.length + manifest.generatedOutputs.length}`
@@ -10938,17 +11093,130 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).toContain('Verification passed');
   });
 
-  it('accepts older generated manifests without refresh provenance', async () => {
+  it('accepts older generated manifests without manifest contract or refresh provenance', async () => {
     const { outputDir, manifestPath } = await generateSourceDocsFixture();
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
 
+    expect(manifest.manifestContract).toBeDefined();
     expect(manifest.refresh).toBeUndefined();
+
+    delete manifest.manifestContract;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
     expect(result.stdout).toContain('Failures: 0');
     expect(result.stdout).toContain('Verification passed');
   });
+
+  it.each([
+    {
+      name: 'non-object value',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        manifest.manifestContract = [] as unknown as ManifestContract;
+      },
+      expected: 'manifestContract must be an object when present',
+    },
+    {
+      name: 'unsupported extra key',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract & Record<string, unknown>;
+        contract.confidence = 1;
+      },
+      expected: 'manifestContract.confidence is not supported',
+    },
+    {
+      name: 'bad schema',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract;
+        contract.schema = 'llm-docs-generator.manifest-contract.v2';
+      },
+      expected: 'manifestContract.schema must be llm-docs-generator.manifest-contract.v1',
+    },
+    {
+      name: 'bad manifest mode',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract;
+        contract.manifestMode = 'unknown-mode';
+      },
+      expected: 'manifestContract.manifestMode must be a supported mode',
+    },
+    {
+      name: 'wrong manifest mode',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract;
+        contract.manifestMode = 'configured-sdk';
+      },
+      expected: 'manifestContract.manifestMode must match manifest mode local-source-docs',
+    },
+    {
+      name: 'unknown artifact role',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract;
+        contract.artifactRole = 'authority-proof';
+      },
+      expected:
+        'manifestContract.artifactRole must be generated-docs, candidate-evidence-report, or local-source-evidence-report',
+    },
+    {
+      name: 'missing array',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract & Record<string, unknown>;
+        delete contract.cliGuarantees;
+      },
+      expected: 'manifestContract.cliGuarantees must be a non-empty array',
+    },
+    {
+      name: 'empty array',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract;
+        contract.agentResponsibilities = [];
+      },
+      expected: 'manifestContract.agentResponsibilities must be a non-empty array',
+    },
+    {
+      name: 'non-string array value',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract & Record<string, unknown>;
+        contract.unsupportedAutomation = ['No automatic source selection.', 1] as unknown;
+      },
+      expected: 'manifestContract.unsupportedAutomation must contain only non-empty strings',
+    },
+    {
+      name: 'mismatched static array',
+      mutate(manifest: SourceDocsManifest & Record<string, unknown>): void {
+        const contract = manifest.manifestContract as ManifestContract;
+        contract.cliGuarantees = [
+          'Writes docs after deciding the best source automatically.',
+          ...contract.cliGuarantees.slice(1),
+        ];
+      },
+      expected:
+        'manifestContract.cliGuarantees must match the expected cliGuarantees for local-source-docs',
+    },
+  ])(
+    'rejects malformed manifest contract: $name',
+    async (testCase) => {
+      const { manifestPath } = await generateSourceDocsFixture();
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest &
+        Record<string, unknown>;
+
+      if (manifest.manifestContract === undefined) {
+        throw new Error('expected generated manifest contract before tampering');
+      }
+
+      testCase.mutate(manifest);
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+      expect(result.exitCode, testCase.name).toBe(1);
+      expect(result.stdout, testCase.name).toContain('Checked files: 0');
+      expect(result.stderr, testCase.name).toContain(testCase.expected);
+      expect(result.stderr, testCase.name).not.toContain('hash mismatch');
+    },
+    15000
+  );
 
   it.each([
     {
@@ -11034,6 +11302,7 @@ describe('CLI compatibility behavior', () => {
     const manifestResult = await runCli(['verify', '--manifest', manifestPath]);
     const expectedCheckedFiles = manifest.sourceFiles.length + manifest.generatedOutputs.length;
 
+    expectManifestContract(manifest, 'source-truth-local-docs');
     expect(outputDirResult.stdout).toContain('Manifest verification');
     expect(outputDirResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
     expect(outputDirResult.stdout).toContain('Failures: 0');
@@ -11066,10 +11335,16 @@ describe('CLI compatibility behavior', () => {
     expect(result.stdout).toContain('Verification passed');
   });
 
-  it('verifies a source discovery manifest and rejects a tampered report', async () => {
-    const { outputDir, reportPath } = await createSourceDiscoveryVerifyFixture();
+  it('verifies a source discovery manifest contract and rejects a tampered report', async () => {
+    const { outputDir, reportPath, manifestPath } = await createSourceDiscoveryVerifyFixture();
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as DiscoveryReportManifest;
 
     const passResult = await runCli(['verify', '--output-dir', outputDir]);
+    expectManifestContract(manifest, 'discovery-report');
+    expect(manifest.manifestContract?.artifactRole).toBe('candidate-evidence-report');
+    expect(manifest.manifestContract?.cliGuarantees.join(' ')).toContain(
+      'candidate evidence for agent review only'
+    );
     expect(passResult.stdout).toContain('Manifest verification');
     expect(passResult.stdout).toContain('Checked files: 1');
     expect(passResult.stdout).toContain('Failures: 0');
@@ -11096,6 +11371,7 @@ describe('CLI compatibility behavior', () => {
     const report = JSON.parse(await readFile(reportPath, 'utf-8')) as SourceVerificationReport;
     const result = await runCli(['verify', '--output-dir', outputDir]);
 
+    expectManifestContract(manifest, 'source-verification-local-evidence');
     expectSourceVerificationFileEvidenceIndex(
       manifest.sourceVerification.fileEvidenceIndex,
       report
@@ -13195,7 +13471,7 @@ describe('CLI compatibility behavior', () => {
       `output ${outputLinkFile.path}: symbolic links are not allowed`
     );
     expect(outputLinkResult.stderr).not.toContain('hash mismatch');
-  });
+  }, 15000);
 
   it('rejects invalid generated output kinds before checking files', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-cli-'));

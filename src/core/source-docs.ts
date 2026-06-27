@@ -17,6 +17,7 @@ import {
   buildSemanticChunkJsonlManifestIndex,
   type SemanticChunkManifestIndex,
 } from './semantic-chunk-index.js';
+import { buildManifestContract, type ManifestContract } from './manifest.js';
 import { formatDocNode } from './universal-formatter.js';
 import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
@@ -147,6 +148,7 @@ export interface SourceDocsManifest {
   generatedAt: string;
   generator: SourceDocsGeneratorMetadata;
   mode: typeof SOURCE_DOCS_MODE;
+  manifestContract?: ManifestContract;
   source: {
     input: string;
     resolvedPath: string;
@@ -1326,6 +1328,7 @@ function buildSourceDocsManifest(options: {
     generatedAt: new Date().toISOString(),
     generator: options.generator,
     mode: SOURCE_DOCS_MODE,
+    manifestContract: buildManifestContract(SOURCE_DOCS_MODE),
     source: {
       input: options.source.input,
       resolvedPath: options.source.resolvedPath,

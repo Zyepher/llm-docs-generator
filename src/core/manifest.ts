@@ -180,6 +180,109 @@ export const SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS = [
   'Does not claim source truth.',
 ] as const;
 
+const MANIFEST_CONTRACT_SCHEMA = 'llm-docs-generator.manifest-contract.v1';
+const MANIFEST_CONTRACT_KEYS = new Set([
+  'schema',
+  'manifestMode',
+  'artifactRole',
+  'cliGuarantees',
+  'agentResponsibilities',
+  'unsupportedAutomation',
+]);
+const MANIFEST_CONTRACT_ARTIFACT_ROLES = new Set([
+  'generated-docs',
+  'candidate-evidence-report',
+  'local-source-evidence-report',
+]);
+const MANIFEST_CONTRACT_BY_MODE = {
+  [CONFIGURED_SDK_MODE]: {
+    artifactRole: 'generated-docs',
+    cliGuarantees: [
+      'Writes docs from one configured SDK manifest entry using recorded parser and formatter metadata.',
+      'Records deterministic file metadata for the explicit local spec and generated outputs.',
+    ],
+    agentResponsibilities: [
+      'Choose the SDK version and decide whether generated docs fit the user task.',
+      'Determine source authority and freshness outside this manifest.',
+    ],
+    unsupportedAutomation: [
+      'No discovery report consumption or candidate selection.',
+      'No source-code behavior validation or remote freshness proof.',
+    ],
+  },
+  [SOURCE_DOCS_MODE]: {
+    artifactRole: 'generated-docs',
+    cliGuarantees: [
+      'Writes docs from one explicit local source path using the selected parser and formatter.',
+      'Records deterministic file metadata for source files and generated outputs.',
+    ],
+    agentResponsibilities: [
+      'Choose the source path and decide whether generated docs fit the user task.',
+      'Determine source authority, source truth, and freshness outside this manifest.',
+    ],
+    unsupportedAutomation: [
+      'No automatic source selection or discovery report consumption.',
+      'No source-code behavior validation, broad crawling, or remote freshness proof.',
+    ],
+  },
+  [SOURCE_TRUTH_DOCS_MODE]: {
+    artifactRole: 'local-source-evidence-report',
+    cliGuarantees: [
+      'Writes local evidence reports from one explicit local source inspection.',
+      'Records deterministic file metadata for reported source files and generated outputs.',
+    ],
+    agentResponsibilities: [
+      'Decide whether observed evidence is relevant to the user task.',
+      'Use evidence as local observations, not source truth proof.',
+    ],
+    unsupportedAutomation: [
+      'No runtime inference or test execution.',
+      'No broad docs claim verification, source selection, or freshness proof.',
+    ],
+  },
+  [DISCOVERY_REPORT_MODE]: {
+    artifactRole: 'candidate-evidence-report',
+    cliGuarantees: [
+      'Writes deterministic candidate evidence for agent review only from the explicit discovery input.',
+      'Records content-free candidate evidence index metadata derived from discovery-report.json.',
+    ],
+    agentResponsibilities: [
+      'Review candidates and explicitly choose any source used for generation.',
+      'Decide source authority, source truth, freshness, and task fit outside this manifest.',
+    ],
+    unsupportedAutomation: [
+      'No authoritative source selection, candidate scoring, or candidate consumption.',
+      'No docs generation, broad crawling, behavior verification, or remote freshness proof.',
+    ],
+  },
+  [SOURCE_VERIFICATION_MODE]: {
+    artifactRole: 'local-source-evidence-report',
+    cliGuarantees: [
+      'Writes local lexical source/docs evidence from explicit local source and docs paths.',
+      'Records deterministic report metadata and content-free source/docs file evidence indexes.',
+    ],
+    agentResponsibilities: [
+      'Decide whether lexical matches and unmatched references matter for the user task.',
+      'Treat evidence as local observations, not source truth proof or docs correctness proof.',
+    ],
+    unsupportedAutomation: [
+      'No broad docs claim verification or source-code runtime validation.',
+      'No source selection, freshness proof, crawling, or network work.',
+    ],
+  },
+} as const;
+
+export type ManifestContractMode = keyof typeof MANIFEST_CONTRACT_BY_MODE;
+
+export interface ManifestContract {
+  schema: typeof MANIFEST_CONTRACT_SCHEMA;
+  manifestMode: ManifestContractMode;
+  artifactRole: (typeof MANIFEST_CONTRACT_BY_MODE)[ManifestContractMode]['artifactRole'];
+  cliGuarantees: string[];
+  agentResponsibilities: string[];
+  unsupportedAutomation: string[];
+}
+
 const REFRESH_PROVENANCE_KEYS = new Set([
   'refreshedAt',
   'sourceManifestMode',
@@ -248,6 +351,19 @@ export interface RefreshProvenance {
   strategy: (typeof REFRESH_PROVENANCE_BY_MODE)[RefreshSourceManifestMode]['strategy'];
   inputBoundary: string;
   limitations: string[];
+}
+
+export function buildManifestContract(mode: ManifestContractMode): ManifestContract {
+  const contract = MANIFEST_CONTRACT_BY_MODE[mode];
+
+  return {
+    schema: MANIFEST_CONTRACT_SCHEMA,
+    manifestMode: mode,
+    artifactRole: contract.artifactRole,
+    cliGuarantees: [...contract.cliGuarantees],
+    agentResponsibilities: [...contract.agentResponsibilities],
+    unsupportedAutomation: [...contract.unsupportedAutomation],
+  };
 }
 
 export type GeneratedOutputKind = 'parsed-spec-json' | 'llm-docs';
@@ -436,6 +552,7 @@ export async function writeGenerationManifest(
     generatedAt: options.generatedAt.toISOString(),
     generator: options.generator,
     mode: CONFIGURED_SDK_MODE,
+    manifestContract: buildManifestContract(CONFIGURED_SDK_MODE),
     sdk: options.sdk,
     source: {
       ...options.source,
@@ -481,6 +598,7 @@ export async function writeDiscoveryReportManifest(
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     generator: options.generator,
     mode: DISCOVERY_REPORT_MODE,
+    manifestContract: buildManifestContract(DISCOVERY_REPORT_MODE),
     discovery,
     candidateEvidenceIndex,
     generatedOutputs: [
@@ -623,6 +741,8 @@ async function verifyDiscoveryReportManifest(
   if (!Array.isArray(generatedOutputs)) {
     failures.push('malformed manifest: missing generatedOutputs array');
   }
+
+  validateManifestContract(manifest.manifestContract, DISCOVERY_REPORT_MODE, failures);
 
   if (failures.length > 0) {
     return {
@@ -822,6 +942,7 @@ async function verifyConfiguredSdkManifest(
     failures.push('malformed manifest: missing generatedOutputs array');
   }
 
+  validateManifestContract(manifest.manifestContract, CONFIGURED_SDK_MODE, failures);
   validateRefreshProvenance(manifest.refresh, CONFIGURED_SDK_MODE, failures);
 
   if (failures.length > 0) {
@@ -939,6 +1060,8 @@ async function verifySourceDocsManifest(
   if (!Array.isArray(generatedOutputs)) {
     failures.push('malformed manifest: missing generatedOutputs array');
   }
+
+  validateManifestContract(manifest.manifestContract, SOURCE_DOCS_MODE, failures);
 
   const hasParserPluginMetadata =
     isObjectRecord(parser) && (parser as Record<string, unknown>).plugin !== undefined;
@@ -1211,6 +1334,7 @@ async function verifySourceTruthDocsManifest(
     failures.push('malformed manifest: missing generatedOutputs array');
   }
 
+  validateManifestContract(manifest.manifestContract, SOURCE_TRUTH_DOCS_MODE, failures);
   validateRefreshProvenance(manifest.refresh, SOURCE_TRUTH_DOCS_MODE, failures);
 
   if (failures.length > 0) {
@@ -1352,6 +1476,7 @@ async function verifySourceVerificationManifest(
     failures.push('malformed manifest: missing generatedOutputs array');
   }
 
+  validateManifestContract(manifest.manifestContract, SOURCE_VERIFICATION_MODE, failures);
   validateRefreshProvenance(manifest.refresh, SOURCE_VERIFICATION_MODE, failures);
 
   if (failures.length > 0) {
@@ -2017,6 +2142,106 @@ function buildRefreshProvenance(
     inputBoundary: contract.inputBoundary,
     limitations: [...contract.limitations],
   };
+}
+
+function validateManifestContract(
+  contract: unknown,
+  expectedMode: ManifestContractMode,
+  failures: string[]
+): void {
+  if (contract === undefined) {
+    return;
+  }
+
+  if (!isObjectRecord(contract)) {
+    failures.push('malformed manifest: manifestContract must be an object when present');
+    return;
+  }
+
+  validateAllowedKeys(contract, MANIFEST_CONTRACT_KEYS, 'manifestContract', failures);
+
+  const expected = MANIFEST_CONTRACT_BY_MODE[expectedMode];
+
+  if (contract.schema !== MANIFEST_CONTRACT_SCHEMA) {
+    failures.push(
+      `malformed manifest: manifestContract.schema must be ${MANIFEST_CONTRACT_SCHEMA}`
+    );
+  }
+
+  if (!isNonEmptyString(contract.manifestMode) || !isManifestContractMode(contract.manifestMode)) {
+    failures.push('malformed manifest: manifestContract.manifestMode must be a supported mode');
+  } else if (contract.manifestMode !== expectedMode) {
+    failures.push(
+      `malformed manifest: manifestContract.manifestMode must match manifest mode ${expectedMode}`
+    );
+  }
+
+  if (
+    !isNonEmptyString(contract.artifactRole) ||
+    !MANIFEST_CONTRACT_ARTIFACT_ROLES.has(contract.artifactRole)
+  ) {
+    failures.push(
+      'malformed manifest: manifestContract.artifactRole must be generated-docs, candidate-evidence-report, or local-source-evidence-report'
+    );
+  } else if (contract.artifactRole !== expected.artifactRole) {
+    failures.push(
+      `malformed manifest: manifestContract.artifactRole must be ${expected.artifactRole} for ${expectedMode}`
+    );
+  }
+
+  validateManifestContractStringArray(
+    contract.cliGuarantees,
+    expected.cliGuarantees,
+    'cliGuarantees',
+    expectedMode,
+    failures
+  );
+  validateManifestContractStringArray(
+    contract.agentResponsibilities,
+    expected.agentResponsibilities,
+    'agentResponsibilities',
+    expectedMode,
+    failures
+  );
+  validateManifestContractStringArray(
+    contract.unsupportedAutomation,
+    expected.unsupportedAutomation,
+    'unsupportedAutomation',
+    expectedMode,
+    failures
+  );
+}
+
+function validateManifestContractStringArray(
+  value: unknown,
+  expected: readonly string[],
+  key: 'cliGuarantees' | 'agentResponsibilities' | 'unsupportedAutomation',
+  expectedMode: ManifestContractMode,
+  failures: string[]
+): void {
+  if (!Array.isArray(value) || value.length === 0) {
+    failures.push(`malformed manifest: manifestContract.${key} must be a non-empty array`);
+    return;
+  }
+
+  if (value.some((entry) => !isNonEmptyString(entry))) {
+    failures.push(
+      `malformed manifest: manifestContract.${key} must contain only non-empty strings`
+    );
+    return;
+  }
+
+  const entries = value as string[];
+
+  if (!stringArraysEqual(entries, expected)) {
+    failures.push(
+      `malformed manifest: manifestContract.${key} must match the expected ${key} for ${expectedMode}`
+    );
+  }
+}
+
+function isManifestContractMode(value: string): value is ManifestContractMode {
+  return Object.prototype.hasOwnProperty.call(MANIFEST_CONTRACT_BY_MODE, value);
 }
 
 function validateRefreshProvenance(

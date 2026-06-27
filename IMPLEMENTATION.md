@@ -291,6 +291,9 @@ Input Sources → Auto-Detect → Parser → Unified IR → Formatter → Output
 - [x] Deterministic semantic chunk manifest-index metadata for opt-in
       source-docs `chunks/semantic-chunks.jsonl` exports
 - [ ] Full manifest expansion for RAG, discovery, and refresh systems
+  - [x] Descriptive top-level `manifestContract` metadata for currently
+        verified manifest modes, with deterministic CLI/agent boundary arrays
+        validated by `verify` when present
 - [ ] Broad official-docs behavior/API claim verification, broad website
       crawling, repo/URL discovery-report refresh, source-code behavior
       validation, and remote freshness refresh
@@ -410,9 +413,17 @@ Current capabilities contract scope:
   refresh, broad official-docs behavior/API claim verification, broad crawling,
   source-code behavior validation, or CLI source selection without explicit
   candidate input.
-- The contract intentionally omits `generatedAt`. The command does not inspect
-  sources, load config, write files, perform network work, or probe hidden
-  environment state.
+- New successful `configured-sdk`, `local-source-docs`,
+  `source-truth-local-docs`, `discovery-report`, and
+  `source-verification-local-evidence` manifests include a top-level
+  `manifestContract` block. This is descriptive validation metadata for the
+  deterministic CLI/agent boundary only; it does not score candidates, prove
+  authority, prove source truth, validate freshness, or select sources. The
+  verifier accepts older manifests without it and validates supported keys,
+  schema, mode, artifact role, and static arrays when it is present.
+- The capabilities contract intentionally omits `generatedAt`. The command
+  does not inspect sources, load config, write files, perform network work, or
+  probe hidden environment state.
 
 Current agent context metadata scope:
 

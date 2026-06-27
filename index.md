@@ -158,6 +158,15 @@ capabilities, and stable output file names where they exist. It intentionally
 omits `generatedAt` and does not inspect sources, load config, write files, or
 perform network work.
 
+New successful `configured-sdk`, `local-source-docs`,
+`source-truth-local-docs`, `discovery-report`, and
+`source-verification-local-evidence` manifests include a top-level
+`manifestContract` block. It is descriptive validation metadata for the
+deterministic CLI/agent boundary only; it does not score candidates, prove
+authority, prove source truth, validate freshness, or select sources. `verify`
+accepts older manifests without this block and validates its schema, manifest
+mode, artifact role, static arrays, and supported keys when present.
+
 The current `agent context` command prints read-only metadata for packaged
 agent context and skill artifacts. The JSON form reports schema version
 `0.2.0`, package name/version metadata, the `llm-docs` binary,

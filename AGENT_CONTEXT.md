@@ -84,6 +84,12 @@ Current implementation:
   deterministic content-free source spec line count and estimated token count,
   generated output hashes, byte sizes, line counts, and deterministic
   estimated token counts.
+- Writes a top-level `manifestContract` block on new successful
+  `configured-sdk`, `local-source-docs`, `source-truth-local-docs`,
+  `discovery-report`, and `source-verification-local-evidence` manifests. This
+  block is descriptive validation metadata for the deterministic CLI/agent
+  boundary only; it does not score candidates, prove authority, prove source
+  truth, validate freshness, or select sources.
 - Verifies current `configured-sdk` manifests by checking the recorded
   generator metadata, sdk name/resolvedVersion/displayName, OpenRef parser
   metadata, legacy formatter metadata, configured source hash and byte size,
@@ -881,8 +887,11 @@ boundary, non-empty limitations, and unsupported keys. It does not perform refre
 freshness, perform broad official-docs claim verification, validate source-code
 behavior, make candidate selection, validate HTTP freshness, refresh remote
 resources, make task-fit judgments, resolve source truth, make source selection
-decisions, or prove docs correctness. The current
-`refresh` command
+decisions, or prove docs correctness.
+When a top-level `manifestContract` block is present, verification validates
+its schema, manifest mode, artifact role, static arrays, and unsupported keys.
+Older manifests without the block remain valid for backward compatibility.
+The current `refresh` command
 supports only built-in-parser `local-source-docs`, `source-truth-local-docs`,
 configured OpenRef SDK manifests that already record explicit absolute local
 source paths, local source `discovery-report` manifests, and
