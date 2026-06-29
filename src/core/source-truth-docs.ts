@@ -1,5 +1,5 @@
-import { mkdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
@@ -23,7 +23,7 @@ import {
 } from './source-truth.js';
 import { HASH_PREFIX } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
-import { isFileNotFoundError } from '../utils/guards.js';
+import { isSameOrDescendant, realpathIfExists, resolveEffectiveOutputPath } from '../utils/fs-path.js';
 
 export const SOURCE_TRUTH_DOCS_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_TRUTH_DOCS_MODE = 'source-truth-local-docs';
@@ -610,52 +610,6 @@ async function assertOutputDirOutsideSource(options: {
       'source-truth generate --output-dir must not be the same as, or inside, the explicit --source path'
     );
   }
-}
-
-async function realpathIfExists(path: string): Promise<string | undefined> {
-  try {
-    return await realpath(path);
-  } catch {
-    return undefined;
-  }
-}
-
-async function resolveEffectiveOutputPath(outputDir: string): Promise<string> {
-  const resolvedOutputDir = resolve(outputDir);
-  const missingSegments: string[] = [];
-  let currentPath = resolvedOutputDir;
-
-  while (true) {
-    try {
-      const canonicalExistingPath = await realpath(currentPath);
-
-      return missingSegments.length === 0
-        ? canonicalExistingPath
-        : join(canonicalExistingPath, ...missingSegments.reverse());
-    } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        throw error;
-      }
-    }
-
-    const parentPath = dirname(currentPath);
-
-    if (parentPath === currentPath) {
-      return resolvedOutputDir;
-    }
-
-    missingSegments.push(basename(currentPath));
-    currentPath = parentPath;
-  }
-}
-
-function isSameOrDescendant(parentPath: string, candidatePath: string): boolean {
-  const relativePath = relative(parentPath, candidatePath);
-
-  return (
-    relativePath === '' ||
-    (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
-  );
 }
 
 function relativeOutputPath(outputDir: string, outputPath: string): string {

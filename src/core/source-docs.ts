@@ -29,6 +29,7 @@ import { FormatType, type Parser } from '../parsers/base.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { isRecord, isFileNotFoundError } from '../utils/guards.js';
+import { isSameOrDescendant, resolveEffectiveOutputPath } from '../utils/fs-path.js';
 import { sha256File } from '../utils/hash.js';
 
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
@@ -1643,35 +1644,6 @@ async function assertOutputDirOutsideSource(
   }
 }
 
-async function resolveEffectiveOutputPath(outputDir: string): Promise<string> {
-  const resolvedOutputDir = resolve(outputDir);
-  const missingSegments: string[] = [];
-  let currentPath = resolvedOutputDir;
-
-  while (true) {
-    try {
-      const canonicalExistingPath = await realpath(currentPath);
-
-      return missingSegments.length === 0
-        ? canonicalExistingPath
-        : join(canonicalExistingPath, ...missingSegments.reverse());
-    } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        throw error;
-      }
-    }
-
-    const parentPath = dirname(currentPath);
-
-    if (parentPath === currentPath) {
-      return resolvedOutputDir;
-    }
-
-    missingSegments.push(basename(currentPath));
-    currentPath = parentPath;
-  }
-}
-
 function relativeSourcePath(rootPath: string, filePath: string): string {
   return normalizeManifestPath(relative(rootPath, filePath));
 }
@@ -1688,16 +1660,6 @@ function relativeOutputPath(outputDir: string, outputPath: string): string {
 
 function normalizeManifestPath(path: string): string {
   return path.split(sep).join('/');
-}
-
-function isSameOrDescendant(parentPath: string, candidatePath: string): boolean {
-  const relativePath = relative(parentPath, candidatePath);
-
-  return relativePath === '' || (!isParentRelativePath(relativePath) && !isAbsolute(relativePath));
-}
-
-function isParentRelativePath(path: string): boolean {
-  return path === '..' || path.startsWith(`..${sep}`);
 }
 
 function isDocNodeLike(value: unknown): value is {

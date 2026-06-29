@@ -2,7 +2,6 @@ import type { Dirent, Stats } from 'node:fs';
 import { lstat, mkdir, opendir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import {
   basename,
-  dirname,
   extname,
   isAbsolute,
   join,
@@ -13,6 +12,7 @@ import {
 } from 'node:path';
 
 import { isObjectRecord, isFileNotFoundError } from '../utils/guards.js';
+import { isSameOrDescendant, resolveEffectiveOutputPath } from '../utils/fs-path.js';
 import { sha256Hex } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
@@ -1250,35 +1250,6 @@ async function assertNoExistingSymlinkPathComponents(options: {
   }
 }
 
-async function resolveEffectiveOutputPath(outputDir: string): Promise<string> {
-  const resolvedOutputDir = resolve(outputDir);
-  const missingSegments: string[] = [];
-  let currentPath = resolvedOutputDir;
-
-  while (true) {
-    try {
-      const canonicalExistingPath = await realpath(currentPath);
-
-      return missingSegments.length === 0
-        ? canonicalExistingPath
-        : join(canonicalExistingPath, ...missingSegments.reverse());
-    } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        throw error;
-      }
-    }
-
-    const parentPath = dirname(currentPath);
-
-    if (parentPath === currentPath) {
-      return resolvedOutputDir;
-    }
-
-    missingSegments.push(basename(currentPath));
-    currentPath = parentPath;
-  }
-}
-
 async function readDirectoryEntries(options: {
   rootPath: string;
   directoryPath: string;
@@ -1626,13 +1597,4 @@ function relativeOutputPath(outputDir: string, outputPath: string): string {
   }
 
   return normalizePathForReport(relativePath);
-}
-
-function isSameOrDescendant(parentPath: string, candidatePath: string): boolean {
-  const relativePath = relative(parentPath, candidatePath);
-
-  return (
-    relativePath === '' ||
-    (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
-  );
 }
