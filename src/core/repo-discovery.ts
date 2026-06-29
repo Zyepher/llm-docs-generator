@@ -19,6 +19,9 @@ const execFileAsync = promisify(execFile);
 
 export const REPO_BOUNDED_INSPECTION_MODE = 'repo-bounded-inspection';
 export const DEFAULT_REPO_CACHE_ROOT = join(homedir(), '.explore', 'repos');
+// Upper bound for any single git invocation. With GIT_TERMINAL_PROMPT=0 git
+// fails fast on auth, so this is a secondary safety net against a hung remote.
+const GIT_COMMAND_TIMEOUT_MS = 300_000;
 
 export interface DiscoverRepoOptions {
   repo: string;
@@ -167,14 +170,18 @@ export async function discoverRepo(options: DiscoverRepoOptions): Promise<Discov
     mode: REPO_BOUNDED_INSPECTION_MODE,
     generatedAt: new Date().toISOString(),
     repo: {
-      input: options.repo,
-      normalizedInput,
+      // Scrub embedded credentials from anything persisted to the report.
+      input: scrubUrlCredentials(options.repo),
+      normalizedInput: scrubUrlCredentials(normalizedInput),
       cacheDir,
       cacheKey,
       cachePath,
       cloned,
       existingCache,
-      git,
+      git: {
+        ...git,
+        remoteUrl: git.remoteUrl === null ? null : scrubUrlCredentials(git.remoteUrl),
+      },
       update,
     },
     scope: {
@@ -304,14 +311,47 @@ async function gitTextOrNull(
 }
 
 async function git(args: string[]): Promise<GitCommandResult> {
-  const result = await execFileAsync('git', args, {
+  const result = await execFileAsync('git', ['-c', 'protocol.ext.allow=never', ...args], {
     maxBuffer: 10 * 1024 * 1024,
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+    env: {
+      ...process.env,
+      // Keep git non-interactive and scriptable: never block on a terminal
+      // credential prompt (fail fast instead), and never spawn an askpass or
+      // interactive credential helper. `-c protocol.ext.allow=never` disables
+      // the ext:: remote-helper transport (a command-execution vector) as
+      // defense-in-depth; file/https/ssh/git transports are unaffected.
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: '',
+      GCM_INTERACTIVE: 'never',
+    },
   });
 
   return {
     stdout: result.stdout.toString(),
     stderr: result.stderr.toString(),
   };
+}
+
+/**
+ * Remove embedded userinfo (user:token@) from a URL-like value so credentials
+ * are never persisted to the on-disk discovery report. The original input is
+ * still used for the actual clone; only the report copy is scrubbed. scp-like
+ * inputs (git@host:path) carry no secret and are returned unchanged.
+ */
+function scrubUrlCredentials(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.username !== '' || url.password !== '') {
+      url.username = '';
+      url.password = '';
+      return url.toString();
+    }
+  } catch {
+    // Not a standard URL (e.g. scp-like git@host:path); nothing to scrub.
+  }
+
+  return value;
 }
 
 function resolveScopePath(cachePath: string, scopeInput: string): string {

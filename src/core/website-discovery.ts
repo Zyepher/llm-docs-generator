@@ -763,17 +763,85 @@ function finalizeCandidates(
     }));
 }
 
+function isAttributeNameChar(ch: string): boolean {
+  return !/\s/.test(ch) && !'"\'=<>`'.includes(ch);
+}
+
+/**
+ * Parse name="value" attributes from a tag in a single linear pass.
+ *
+ * The previous regex `([^\s"'=<>`]+)\s*=\s*(...)` backtracked quadratically:
+ * a long run of name characters with no following `=` made the engine rescan
+ * from each position, so one ~64KB tag could burn seconds. This hand-written
+ * scanner is O(tag length) and preserves the same name/value semantics
+ * (quoted or unquoted values; boolean attributes without a value are skipped).
+ */
 function parseHtmlAttributes(tag: string): Map<string, string> {
   const attributes = new Map<string, string>();
-  const attributePattern = /([^\s"'=<>`]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+  const length = tag.length;
+  let index = 0;
 
-  for (const match of tag.matchAll(attributePattern)) {
-    const name = match[1]?.toLowerCase();
-    const value = match[3] ?? match[4] ?? match[5];
-
-    if (name !== undefined && value !== undefined) {
-      attributes.set(name, decodeHtmlEntities(value));
+  while (index < length) {
+    // Skip separators (whitespace and stray '/').
+    while (index < length && (/\s/.test(tag[index]!) || tag[index] === '/')) {
+      index += 1;
     }
+    if (index >= length) {
+      break;
+    }
+
+    const nameStart = index;
+    while (index < length && isAttributeNameChar(tag[index]!)) {
+      index += 1;
+    }
+
+    if (index === nameStart) {
+      // Not a name character (e.g. '<', '>', a stray quote/'='); advance past it.
+      index += 1;
+      continue;
+    }
+
+    const name = tag.slice(nameStart, index).toLowerCase();
+
+    while (index < length && /\s/.test(tag[index]!)) {
+      index += 1;
+    }
+
+    if (index >= length || tag[index] !== '=') {
+      // Boolean attribute with no value; matches the old regex (which required
+      // a value) by simply not recording it.
+      continue;
+    }
+
+    index += 1; // consume '='
+    while (index < length && /\s/.test(tag[index]!)) {
+      index += 1;
+    }
+
+    let value: string;
+    const quote = tag[index];
+    if (quote === '"' || quote === "'") {
+      index += 1;
+      const valueStart = index;
+      while (index < length && tag[index] !== quote) {
+        index += 1;
+      }
+      value = tag.slice(valueStart, index);
+      if (index < length) {
+        index += 1; // consume closing quote
+      }
+    } else {
+      const valueStart = index;
+      while (index < length && isAttributeNameChar(tag[index]!)) {
+        index += 1;
+      }
+      value = tag.slice(valueStart, index);
+      if (value === '') {
+        continue;
+      }
+    }
+
+    attributes.set(name, decodeHtmlEntities(value));
   }
 
   return attributes;

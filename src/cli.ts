@@ -52,6 +52,11 @@ const program = new Command();
 const CLI_NAME = 'llm-docs';
 const GENERATOR_NAME = packageJson.name;
 const GENERATOR_VERSION = packageJson.version;
+// Mode-aware `generate --output-dir` defaults. The legacy configured-SDK
+// default writes to a Supabase-monorepo path; generic source generation must
+// not inherit it (it escapes the CWD), so it defaults to a CWD-local dir.
+const SDK_DEFAULT_OUTPUT_DIR = '../../public/llms-openref';
+const SOURCE_DEFAULT_OUTPUT_DIR = './llm-docs';
 const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';
 const CAPABILITIES_SCHEMA_VERSION = '0.1.0';
 const AGENT_CONTEXT_SCHEMA_VERSION = '0.2.0';
@@ -1608,18 +1613,22 @@ async function resolveSourceGeneratePreset(options: {
 
 async function cleanupStaleSourceArtifactsForFailedSourceRequest(options: {
   source?: string;
-  outputDir: string;
+  outputDir?: string;
   parserPluginManifest?: string;
 }): Promise<void> {
   if (options.parserPluginManifest !== undefined) {
     return;
   }
 
+  // A failed request may have no explicit --output-dir; clean the source-mode
+  // default (the destination source generation would have used).
+  const outputDir = options.outputDir ?? SOURCE_DEFAULT_OUTPUT_DIR;
+
   try {
     const { cleanupStaleSourceDocsArtifacts } = await import('./core/source-docs.js');
 
     await cleanupStaleSourceDocsArtifacts(
-      options.outputDir,
+      outputDir,
       options.source === undefined ? {} : { protectedSourcePath: options.source }
     );
   } catch (error) {
@@ -2107,7 +2116,10 @@ program
   .option('--preset <name>', 'Source-only deterministic preset: swift-book')
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
   .option('--config-dir <dir>', 'Configuration directory', 'config')
-  .option('--output-dir <dir>', 'Output directory', '../../public/llms-openref')
+  .option(
+    '--output-dir <dir>',
+    'Output directory (defaults to ./llm-docs for --source, ../../public/llms-openref for --sdk)'
+  )
   .option('-v, --verbose', 'Enable verbose logging', false)
   .option('--force', 'Force re-download specs (ignore cache)', false)
   .action(
@@ -2120,7 +2132,7 @@ program
       preset?: string;
       sdkVersion: string;
       configDir: string;
-      outputDir: string;
+      outputDir?: string;
       verbose: boolean;
       force: boolean;
     }) => {
@@ -2138,13 +2150,20 @@ program
         throw error;
       }
 
+      // Apply a mode-aware default so generic `generate --source` no longer
+      // inherits the Supabase-monorepo default (../../public/llms-openref), which
+      // resolves two directories ABOVE the CWD and is then mkdir'd + cleared.
+      const resolvedOutputDir =
+        options.outputDir ??
+        (generateMode === 'source' ? SOURCE_DEFAULT_OUTPUT_DIR : SDK_DEFAULT_OUTPUT_DIR);
+
       if (generateMode === 'source') {
         try {
           const sourcePreset = await resolveSourceGeneratePreset(options);
           const { generateSourceDocs } = await import('./core/source-docs.js');
           const sourceDocsOptions: Parameters<typeof generateSourceDocs>[0] = {
             source: options.source ?? '',
-            outputDir: options.outputDir,
+            outputDir: resolvedOutputDir,
             generator: {
               name: GENERATOR_NAME,
               version: GENERATOR_VERSION,
@@ -2253,7 +2272,7 @@ program
 
           try {
             const plannedVersion = resolvePlannedOutputVersion(sdkName, ver, config);
-            const plannedOutputDir = `${options.outputDir}/${sdkName}/${plannedVersion}`;
+            const plannedOutputDir = `${resolvedOutputDir}/${sdkName}/${plannedVersion}`;
             await removeScopedManifest(plannedOutputDir);
 
             // Fetch spec (uses cache by default) - returns [specPath, resolvedVersion]
@@ -2274,7 +2293,7 @@ program
             const parsedData = await parser.parse();
 
             // Save parsed JSON using resolved version
-            const outputDir = `${options.outputDir}/${sdkName}/${resolvedVersion}`;
+            const outputDir = `${resolvedOutputDir}/${sdkName}/${resolvedVersion}`;
             const parsedSpecPath = `${outputDir}/parsed/${sdkName}-${resolvedVersion}-spec.json`;
             await parser.saveJSON(parsedData, parsedSpecPath);
 
@@ -2346,7 +2365,7 @@ program
         if (failureCount > 0) {
           console.log(chalk.red(`  Failed: ${failureCount}`));
         }
-        console.log(`\nOutput location: ${chalk.cyan(options.outputDir)}`);
+        console.log(`\nOutput location: ${chalk.cyan(resolvedOutputDir)}`);
 
         process.exit(failureCount > 0 ? 1 : 0);
       } catch (error) {

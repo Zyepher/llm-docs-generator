@@ -6458,6 +6458,36 @@ describe('CLI compatibility behavior', () => {
     ]);
   });
 
+  it('scrubs embedded credentials from the persisted repo discovery report (regression)', async () => {
+    const repoDir = await createLocalGitRepo();
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-scrub-'));
+    tempDirs.push(dir);
+    const cacheDir = join(dir, 'cache');
+
+    const first = await discoverRepo({
+      repo: repoDir,
+      cacheDir,
+      outputDir: join(dir, 'reports-first'),
+    });
+
+    // Repoint the cached clone's origin at a URL that embeds credentials, then
+    // re-inspect: the report must not persist the userinfo.
+    await git(
+      ['remote', 'set-url', 'origin', 'https://user:secret-token@example.com/owner/repo.git'],
+      first.report.repo.cachePath
+    );
+
+    const second = await discoverRepo({
+      repo: repoDir,
+      cacheDir,
+      outputDir: join(dir, 'reports-second'),
+    });
+    const reportText = await readFile(second.reportPath, 'utf-8');
+
+    expect(second.report.repo.git.remoteUrl).toBe('https://example.com/owner/repo.git');
+    expect(reportText).not.toContain('secret-token');
+  });
+
   it('fetches clean existing caches without changing checkout or inspected candidates', async () => {
     const repoDir = await createLocalGitRepo();
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-repo-fetch-only-cache-'));
@@ -7245,6 +7275,29 @@ describe('CLI compatibility behavior', () => {
     expect(verifyResult.stdout).toContain(`Checked files: ${manifest.generatedOutputs.length + 1}`);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
+  });
+
+  it('defaults source generation to a CWD-local ./llm-docs directory (regression: legacy default escaped the project)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-default-'));
+    tempDirs.push(dir);
+    await mkdir(join(dir, 'src'), { recursive: true });
+    await writeFile(
+      join(dir, 'src', 'guide.md'),
+      ['# Guide', '', 'Body text.', ''].join('\n'),
+      'utf-8'
+    );
+
+    // No --output-dir: run with cwd=dir and assert output lands in ./llm-docs,
+    // not the legacy configured-SDK default ../../public/llms-openref (which
+    // resolves two directories above the CWD).
+    const { stdout } = await runCli(['generate', '--source', './src/guide.md'], dir);
+
+    const manifest = JSON.parse(
+      await readFile(join(dir, 'llm-docs', 'manifest.json'), 'utf-8')
+    ) as SourceDocsManifest;
+
+    expect(manifest.mode).toBe('local-source-docs');
+    expect(stdout).toContain('llm-docs');
   });
 
   it('generates local Markdown and MDX directory source docs with manifest provenance', async () => {
