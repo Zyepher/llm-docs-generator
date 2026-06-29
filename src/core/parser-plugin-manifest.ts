@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, resolve, win32 } from 'node:path';
 
+import { isObjectRecord } from '../utils/guards.js';
+
 export const PARSER_PLUGIN_MANIFEST_SCHEMA_VERSION = '0.1.0';
 export const PARSER_PLUGIN_MANIFEST_KIND = 'parser-plugin';
 
@@ -437,10 +439,6 @@ function buildInvalidResult(
     errors,
     warnings: [],
   };
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isUrlLikePath(value: string): boolean {

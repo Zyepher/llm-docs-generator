@@ -5,6 +5,8 @@ import { basename, extname, join, parse, relative, resolve, sep } from 'node:pat
 
 import ts from 'typescript';
 
+import { isRecord } from '../utils/guards.js';
+
 export const SOURCE_TRUTH_REPORT_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_TRUTH_INSPECTION_MODE = 'source-truth-local-evidence';
 export const DEFAULT_SOURCE_TRUTH_MAX_DEPTH = 8;
@@ -1515,10 +1517,6 @@ function valueAtPath(object: Record<string, unknown>, path: string[]): unknown {
   }
 
   return current;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function sortedKeys(value: Record<string, unknown>): string[] {

@@ -29,6 +29,7 @@ import { formatDocNode } from './universal-formatter.js';
 import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
+import { isRecord } from '../utils/guards.js';
 
 const HASH_PREFIX = 'sha256:';
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
@@ -1734,10 +1735,6 @@ function isNotFoundError(error: unknown): boolean {
     ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
       (error as NodeJS.ErrnoException).code === 'ENOTDIR')
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isDocNodeLike(value: unknown): value is {

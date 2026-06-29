@@ -13,6 +13,7 @@ import {
   sep,
 } from 'node:path';
 
+import { isObjectRecord } from '../utils/guards.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
   buildArtifactSummaryForManifest,
@@ -1642,10 +1643,6 @@ function isNotFoundError(error: unknown): boolean {
     ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
       (error as NodeJS.ErrnoException).code === 'ENOTDIR')
   );
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function compareStringsByCodeUnit(a: string, b: string): number {

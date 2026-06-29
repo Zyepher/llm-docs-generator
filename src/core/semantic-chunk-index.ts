@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { isObjectRecord, errorMessage } from '../utils/guards.js';
 
 const HASH_PREFIX = 'sha256:';
 const SEMANTIC_CHUNK_INDEX_HASH_CONTEXT =
@@ -334,12 +335,4 @@ function optionalStringField(
   }
 
   return { [field]: value };
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

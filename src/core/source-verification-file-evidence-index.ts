@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isObjectRecord, isNonEmptyString, isNonNegativeInteger } from '../utils/guards.js';
 
 const HASH_SEED = 'llm-docs-generator:source-verification-file-evidence-index:v1\n';
 const HASH_PREFIX = 'sha256:';
@@ -749,18 +750,6 @@ function compareDocsFileEntries(
 
 function compareStringsByCodeUnit(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-
-function isNonNegativeInteger(value: unknown): value is number {
-  return Number.isInteger(value) && typeof value === 'number' && value >= 0;
 }
 
 function isFileStatus(value: unknown): value is string {

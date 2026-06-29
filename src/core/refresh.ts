@@ -2,6 +2,7 @@ import { lstat, readFile, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 import { writeTextFileSafely } from '../utils/safe-write.js';
+import { isObjectRecord, errorMessage } from '../utils/guards.js';
 
 import categoriesConfig from '../../config/categories.json';
 import type { CategoryConfig, SDKVersionConfig } from '../config/schemas.js';
@@ -1539,18 +1540,10 @@ function isSameOrDescendant(parentPath: string, candidatePath: string): boolean 
   );
 }
 
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function isFileNotFoundError(error: unknown): boolean {
   return (
     error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT'
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 class ConfiguredSdkRefreshFormatterConfig implements LLMFormatterConfig {
