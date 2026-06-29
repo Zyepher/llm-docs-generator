@@ -10,6 +10,7 @@ import type { DocNode } from '../../core/models.js';
 import { load as yamlLoad } from 'js-yaml';
 import { OpenRefParser } from './parser.js';
 import { openRefToDocNode } from './adapter.js';
+import { isRecord } from '../../utils/guards.js';
 
 /**
  * OpenRef format parser
@@ -96,7 +97,3 @@ export const openRefParser = new OpenRefFormatParser();
 export { OpenRefParser } from './parser.js';
 export { openRefToDocNode, convertOperation, convertExample } from './adapter.js';
 export type { SpecData, Operation, Example, SpecInfo } from '../../core/models.js';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

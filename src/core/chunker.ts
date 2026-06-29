@@ -7,6 +7,7 @@
 
 import { createHash } from 'node:crypto';
 
+import { isRecord } from '../utils/guards.js';
 import { ContentBlockType, type ContentBlock, type DocNode } from './models.js';
 
 const DOUBLE_NEWLINE = '\n\n';
@@ -952,8 +953,4 @@ function withChunkId(warning: SemanticChunkWarning, chunkId: string): SemanticCh
     ...warning,
     chunkId,
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

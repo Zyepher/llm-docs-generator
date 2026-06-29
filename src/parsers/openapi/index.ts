@@ -20,6 +20,7 @@ import {
   type DocNode,
 } from '../../core/models.js';
 import { BaseParser, FormatType, ParserError } from '../base.js';
+import { isRecord } from '../../utils/guards.js';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 const PARAMETER_LOCATION_ORDER = ['path', 'query', 'header', 'cookie', 'formData', 'body'] as const;
@@ -1282,8 +1283,4 @@ function getOpenApiFileFormat(sourcePath: string, parserName: string): ApiFileFo
 
 function hasOwn(value: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

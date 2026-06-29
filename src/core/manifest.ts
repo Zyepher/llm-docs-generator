@@ -26,6 +26,7 @@ import {
   type ParserPluginFormatMetadata,
   type ParserPluginManifestMetadata,
 } from './parser-plugin-manifest.js';
+import { isObjectRecord, isNonEmptyString, isNonNegativeInteger, errorMessage } from '../utils/guards.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 
@@ -7416,14 +7417,6 @@ async function verifyPathType(check: PathTypeCheck, failures: string[]): Promise
 }
 
 
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-
 function isIsoTimestampString(value: unknown): value is string {
   if (typeof value !== 'string') {
     return false;
@@ -7432,10 +7425,6 @@ function isIsoTimestampString(value: unknown): value is string {
   const date = new Date(value);
 
   return !Number.isNaN(date.valueOf()) && date.toISOString() === value;
-}
-
-function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -7497,6 +7486,3 @@ function isFileNotFoundError(error: unknown): boolean {
   return isObjectRecord(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR');
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

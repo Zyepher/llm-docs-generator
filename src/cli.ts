@@ -42,6 +42,7 @@ import {
 import { validateParserPluginManifestFile } from './core/parser-plugin-manifest.js';
 import { SOURCE_VERIFICATION_MODE } from './core/source-verification.js';
 import { fetchSpec } from './utils/fetcher.js';
+import { isObjectRecord, isNonNegativeInteger } from './utils/guards.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
 // ============================================================================
@@ -316,14 +317,6 @@ function isDiscoveryManifestArtifact(value: unknown): boolean {
     firstOutput.kind === DISCOVERY_REPORT_OUTPUT_KIND &&
     firstOutput.path === discovery.reportPath
   );
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
 function isPathNotFoundError(error: unknown): boolean {
