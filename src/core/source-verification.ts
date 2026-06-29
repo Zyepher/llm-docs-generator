@@ -12,7 +12,7 @@ import {
   sep,
 } from 'node:path';
 
-import { isObjectRecord } from '../utils/guards.js';
+import { isObjectRecord, isFileNotFoundError } from '../utils/guards.js';
 import { sha256Hex } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
@@ -1227,7 +1227,7 @@ async function assertNoExistingSymlinkPathComponents(options: {
     try {
       stats = await lstat(currentPath);
     } catch (error) {
-      if (isNotFoundError(error)) {
+      if (isFileNotFoundError(error)) {
         return;
       }
 
@@ -1263,7 +1263,7 @@ async function resolveEffectiveOutputPath(outputDir: string): Promise<string> {
         ? canonicalExistingPath
         : join(canonicalExistingPath, ...missingSegments.reverse());
     } catch (error) {
-      if (!isNotFoundError(error)) {
+      if (!isFileNotFoundError(error)) {
         throw error;
       }
     }
@@ -1509,7 +1509,7 @@ async function removeOwnedJsonFile(
       return;
     }
   } catch (error) {
-    if (isNotFoundError(error)) {
+    if (isFileNotFoundError(error)) {
       return;
     }
 
@@ -1634,14 +1634,5 @@ function isSameOrDescendant(parentPath: string, candidatePath: string): boolean 
   return (
     relativePath === '' ||
     (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
-  );
-}
-
-function isNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
-      (error as NodeJS.ErrnoException).code === 'ENOTDIR')
   );
 }

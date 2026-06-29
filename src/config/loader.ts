@@ -20,6 +20,7 @@ import {
   SDKsConfigSchema,
   type SDKVersionConfig,
 } from './schemas.js';
+import { isFileNotFoundError } from '../utils/guards.js';
 
 // ============================================================================
 // CONFIG LOADER CLASS
@@ -398,15 +399,6 @@ function presetConfigContainsSourceSelection(value: unknown): boolean {
   }
 
   return false;
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
-      (error as NodeJS.ErrnoException).code === 'ENOTDIR')
-  );
 }
 
 // ============================================================================

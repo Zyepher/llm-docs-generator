@@ -41,7 +41,7 @@ import {
 import { validateParserPluginManifestFile } from './core/parser-plugin-manifest.js';
 import { SOURCE_VERIFICATION_MODE } from './core/source-verification.js';
 import { fetchSpec } from './utils/fetcher.js';
-import { isObjectRecord, isNonNegativeInteger } from './utils/guards.js';
+import { isObjectRecord, isNonNegativeInteger, isFileNotFoundError } from './utils/guards.js';
 import { sha256Hex } from './utils/hash.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
@@ -233,7 +233,7 @@ async function removeOwnedJsonFile(
       return;
     }
   } catch (error) {
-    if (isPathNotFoundError(error)) {
+    if (isFileNotFoundError(error)) {
       return;
     }
 
@@ -263,7 +263,7 @@ async function removeJustWrittenDiscoveryReport(path: string): Promise<void> {
       return;
     }
   } catch (error) {
-    if (isPathNotFoundError(error)) {
+    if (isFileNotFoundError(error)) {
       return;
     }
 
@@ -316,15 +316,6 @@ function isDiscoveryManifestArtifact(value: unknown): boolean {
     isObjectRecord(firstOutput) &&
     firstOutput.kind === DISCOVERY_REPORT_OUTPUT_KIND &&
     firstOutput.path === discovery.reportPath
-  );
-}
-
-function isPathNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
   );
 }
 
@@ -1139,7 +1130,7 @@ async function isExecutableFile(path: string): Promise<boolean> {
     await access(path, process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK);
     return true;
   } catch (error) {
-    if (isPathNotFoundError(error)) {
+    if (isFileNotFoundError(error)) {
       return false;
     }
 
