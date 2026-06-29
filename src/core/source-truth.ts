@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { Dirent, Stats } from 'node:fs';
 import { lstat, opendir, readFile } from 'node:fs/promises';
 import { basename, extname, join, parse, relative, resolve, sep } from 'node:path';
@@ -6,6 +5,7 @@ import { basename, extname, join, parse, relative, resolve, sep } from 'node:pat
 import ts from 'typescript';
 
 import { isRecord } from '../utils/guards.js';
+import { sha256Hex } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 
 export const SOURCE_TRUTH_REPORT_SCHEMA_VERSION = '0.1.0';
@@ -632,7 +632,7 @@ async function inspectFile(options: {
   try {
     const contentBytes = await readFile(absolutePath);
     const content = contentBytes.toString('utf-8');
-    const sha256 = createHash('sha256').update(contentBytes).digest('hex');
+    const sha256 = sha256Hex(contentBytes);
     const extraction = isSupportedSourceFile(pathForReport)
       ? extractTypeScriptJavaScriptFacts(pathForReport, content)
       : { facts: [], parseDiagnostics: [] };

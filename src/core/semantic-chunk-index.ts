@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { isObjectRecord, errorMessage } from '../utils/guards.js';
+import { HASH_PREFIX, sha256Hex, isUnprefixedSha256Hash } from '../utils/hash.js';
 
-const HASH_PREFIX = 'sha256:';
 const SEMANTIC_CHUNK_INDEX_HASH_CONTEXT =
   'llm-docs-generator:source-docs-semantic-chunks-jsonl-index:v1';
 const SEMANTIC_CHUNK_JSONL_FORMAT = 'jsonl';
@@ -192,7 +192,7 @@ function parseSemanticChunkJsonlLine(
     );
   }
 
-  const actualContentHash = createHash('sha256').update(content).digest('hex');
+  const actualContentHash = sha256Hex(content);
   if (contentHash !== actualContentHash) {
     throw new Error(`${outputPath}: line ${lineNumber} contentHash does not match content`);
   }
@@ -311,7 +311,7 @@ function requiredSha256Hex(
   lineNumber: number,
   field: string
 ): string {
-  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+  if (typeof value !== 'string' || !isUnprefixedSha256Hash(value)) {
     throw new Error(`${outputPath}: line ${lineNumber} ${field} must be a sha256 hex digest`);
   }
 

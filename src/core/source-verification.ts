@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { Dirent, Stats } from 'node:fs';
 import { lstat, mkdir, opendir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import {
@@ -14,6 +13,7 @@ import {
 } from 'node:path';
 
 import { isObjectRecord } from '../utils/guards.js';
+import { sha256Hex } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
@@ -714,7 +714,7 @@ async function inspectDocsFile(options: {
   try {
     const contentBytes = await readFile(options.absolutePath);
     const content = contentBytes.toString('utf-8');
-    const sha256 = createHash('sha256').update(contentBytes).digest('hex');
+    const sha256 = sha256Hex(contentBytes);
     const references = extractDocsReferences(pathForReport, content);
 
     options.state.inspectedFiles++;

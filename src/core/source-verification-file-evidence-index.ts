@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { isObjectRecord, isNonEmptyString, isNonNegativeInteger } from '../utils/guards.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
+import { HASH_PREFIX, isSha256Hash, isUnprefixedSha256Hash } from '../utils/hash.js';
 
 const HASH_SEED = 'llm-docs-generator:source-verification-file-evidence-index:v1\n';
-const HASH_PREFIX = 'sha256:';
 const INDEX_KEYS = new Set([
   'sourceFileCount',
   'docsFileCount',
@@ -751,12 +751,4 @@ function compareDocsFileEntries(
 
 function isFileStatus(value: unknown): value is string {
   return typeof value === 'string' && FILE_STATUSES.has(value);
-}
-
-function isSha256Hash(value: unknown): value is string {
-  return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
-}
-
-function isUnprefixedSha256Hash(value: unknown): value is string {
-  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 }

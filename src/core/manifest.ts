@@ -2,7 +2,6 @@
  * Generation manifest writer for the configured SDK compatibility flow.
  */
 
-import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, parse, relative, resolve, sep, win32 } from 'node:path';
@@ -30,8 +29,12 @@ import { isObjectRecord, isNonEmptyString, isNonNegativeInteger, errorMessage } 
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
-
-const HASH_PREFIX = 'sha256:';
+import {
+  HASH_PREFIX,
+  sha256File,
+  isSha256Hash,
+  isUnprefixedSha256Hash,
+} from '../utils/hash.js';
 
 export const MANIFEST_SCHEMA_VERSION = '0.1.0';
 export const CONFIGURED_SDK_MODE = 'configured-sdk';
@@ -7078,19 +7081,6 @@ async function describeFile(path: string): Promise<{ byteSize: number; hash: str
   };
 }
 
-async function sha256File(path: string): Promise<string> {
-  const hash = createHash('sha256');
-  const stream = createReadStream(path);
-
-  await new Promise<void>((resolve, reject) => {
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('error', reject);
-    stream.on('end', resolve);
-  });
-
-  return `${HASH_PREFIX}${hash.digest('hex')}`;
-}
-
 function toManifestRelativePath(manifestDir: string, outputPath: string): string {
   return relative(manifestDir, outputPath).split(sep).join('/');
 }
@@ -7420,14 +7410,6 @@ function isPositiveInteger(value: unknown): value is number {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
-}
-
-function isSha256Hash(value: unknown): value is string {
-  return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/.test(value);
-}
-
-function isUnprefixedSha256Hash(value: unknown): value is string {
-  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 }
 
 function isAllowedOutputKind(value: unknown, allowedKinds: ReadonlySet<string>): value is string {

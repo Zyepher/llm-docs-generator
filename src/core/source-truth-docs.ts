@@ -21,6 +21,7 @@ import {
   type SourceTruthSourceType,
   type SourceTruthTraversalSettings,
 } from './source-truth.js';
+import { HASH_PREFIX } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 
 export const SOURCE_TRUTH_DOCS_SCHEMA_VERSION = '0.1.0';
@@ -704,7 +705,7 @@ async function writeJsonFile(path: string, value: unknown): Promise<void> {
 }
 
 function formatHash(hash: string): string {
-  return `sha256:${hash}`;
+  return `${HASH_PREFIX}${hash}`;
 }
 
 function formatLineRange(start: number, end: number): string {
