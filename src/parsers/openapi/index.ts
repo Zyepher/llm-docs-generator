@@ -25,6 +25,11 @@ const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch'
 const PARAMETER_LOCATION_ORDER = ['path', 'query', 'header', 'cookie', 'formData', 'body'] as const;
 const FALLBACK_CATEGORY_TITLE = 'Untagged';
 const MAX_EXAMPLE_LENGTH = 300;
+// Cap each schema summary. Composition keywords (allOf/oneOf/anyOf) nest their
+// child summaries, so a YAML-anchor doubling DAG would otherwise produce an
+// O(2^depth)-length string (V8 throws "Invalid string length") even with
+// memoized walking. Legitimate summaries are far shorter than this.
+const MAX_SCHEMA_SUMMARY_LENGTH = 200;
 
 type HttpMethod = (typeof HTTP_METHODS)[number];
 type ApiSourceKind = 'openapi' | 'swagger';
@@ -89,7 +94,21 @@ export class OpenApiFormatParser extends BaseParser {
       throw new ParserError('OpenAPI / Swagger document must contain a paths object', this.name);
     }
 
-    return this.convertDocument(document, paths, versionInfo, sourcePath);
+    try {
+      return this.convertDocument(document, paths, versionInfo, sourcePath);
+    } catch (error) {
+      if (error instanceof ParserError) {
+        throw error;
+      }
+      // Surface unexpected conversion failures (e.g. a RangeError from deeply
+      // nested schemas exhausting the call stack) as an honest ParserError
+      // instead of leaking a raw runtime error.
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ParserError(
+        `Failed to convert OpenAPI / Swagger document: ${message}`,
+        this.name
+      );
+    }
   }
 
   private async loadDocument(sourcePath: string): Promise<ApiDocument> {
@@ -601,7 +620,11 @@ function summarizeSwaggerExamples(examples: unknown): string[] {
   return lines;
 }
 
-function summarizeSchema(schema: unknown, seen = new WeakSet<object>()): string | undefined {
+function summarizeSchema(
+  schema: unknown,
+  seen = new WeakSet<object>(),
+  memo = new WeakMap<object, string | undefined>()
+): string | undefined {
   const ref = readRef(schema);
   if (ref !== undefined) {
     return ref;
@@ -610,49 +633,67 @@ function summarizeSchema(schema: unknown, seen = new WeakSet<object>()): string 
     return undefined;
   }
 
+  // Memoize the per-object summary so a schema shared via YAML anchors/aliases
+  // (which js-yaml resolves to the SAME object) is summarized exactly once.
+  // `seen` (deleted on exit) only detects ancestor cycles, so without this a
+  // doubling anchor DAG was re-walked O(2^depth) times.
+  if (memo.has(schema)) {
+    return memo.get(schema);
+  }
   if (seen.has(schema)) {
     return 'circular schema';
   }
   seen.add(schema);
 
+  let result: string | undefined;
   try {
-    for (const compositionKey of ['oneOf', 'anyOf', 'allOf'] as const) {
-      const values = schema[compositionKey];
-      if (Array.isArray(values) && values.length > 0) {
-        const summaries = values
-          .map((value) => summarizeSchema(value, seen))
-          .filter((summary): summary is string => summary !== undefined);
-        if (summaries.length > 0) {
-          return `${compositionKey}<${summaries.join(' | ')}>`;
+    result = ((): string | undefined => {
+      for (const compositionKey of ['oneOf', 'anyOf', 'allOf'] as const) {
+        const values = schema[compositionKey];
+        if (Array.isArray(values) && values.length > 0) {
+          const summaries = values
+            .map((value) => summarizeSchema(value, seen, memo))
+            .filter((summary): summary is string => summary !== undefined);
+          if (summaries.length > 0) {
+            return `${compositionKey}<${summaries.join(' | ')}>`;
+          }
         }
       }
-    }
 
-    const enumValues = Array.isArray(schema.enum)
-      ? schema.enum
-          .map((value) => stringifySimpleExample(value))
-          .filter((value): value is string => value !== undefined)
-      : [];
-    if (enumValues.length > 0) {
-      return `enum<${enumValues.join(' | ')}>`;
-    }
+      const enumValues = Array.isArray(schema.enum)
+        ? schema.enum
+            .map((value) => stringifySimpleExample(value))
+            .filter((value): value is string => value !== undefined)
+        : [];
+      if (enumValues.length > 0) {
+        return `enum<${enumValues.join(' | ')}>`;
+      }
 
-    const type = readTrimmedString(schema.type);
-    const format = readTrimmedString(schema.format);
-    if (type === 'array') {
-      return `array<${summarizeSchema(schema.items, seen) ?? 'unknown'}>`;
-    }
-    if (type !== undefined) {
-      return format !== undefined ? `${type}(${format})` : type;
-    }
-    if (isRecord(schema.properties)) {
-      return 'object';
-    }
+      const type = readTrimmedString(schema.type);
+      const format = readTrimmedString(schema.format);
+      if (type === 'array') {
+        return `array<${summarizeSchema(schema.items, seen, memo) ?? 'unknown'}>`;
+      }
+      if (type !== undefined) {
+        return format !== undefined ? `${type}(${format})` : type;
+      }
+      if (isRecord(schema.properties)) {
+        return 'object';
+      }
 
-    return 'inline schema';
+      return 'inline schema';
+    })();
   } finally {
     seen.delete(schema);
   }
+
+  // Bound the summary length so nested composition cannot grow it exponentially.
+  if (result !== undefined && result.length > MAX_SCHEMA_SUMMARY_LENGTH) {
+    result = `${result.slice(0, MAX_SCHEMA_SUMMARY_LENGTH - 1)}…`;
+  }
+
+  memo.set(schema, result);
+  return result;
 }
 
 function readParameterArray(value: unknown, context: string): unknown[] {
@@ -853,38 +894,38 @@ function validateSchemaRefs(schema: unknown, context: string, seen = new WeakSet
     return;
   }
 
+  // `seen` is a permanent visited set: validation is idempotent, so each unique
+  // schema object is checked once. This both detects cycles and collapses
+  // anchor/alias DAG sharing, which previously caused O(2^depth) re-walking
+  // because the node was removed from `seen` on exit.
   if (seen.has(schema)) {
     return;
   }
   seen.add(schema);
 
-  try {
-    if (hasOwn(schema, '$ref') && readRef(schema) === undefined) {
-      throw new ParserError(`${context} has an invalid $ref value`, 'OpenAPI / Swagger Parser');
-    }
+  if (hasOwn(schema, '$ref') && readRef(schema) === undefined) {
+    throw new ParserError(`${context} has an invalid $ref value`, 'OpenAPI / Swagger Parser');
+  }
 
-    for (const compositionKey of ['oneOf', 'anyOf', 'allOf'] as const) {
-      const values = schema[compositionKey];
-      if (Array.isArray(values)) {
-        values.forEach((value, index) =>
-          validateSchemaRefs(value, `${context}.${compositionKey}[${index}]`, seen)
-        );
-      }
+  for (const compositionKey of ['oneOf', 'anyOf', 'allOf'] as const) {
+    const values = schema[compositionKey];
+    if (Array.isArray(values)) {
+      values.forEach((value, index) =>
+        validateSchemaRefs(value, `${context}.${compositionKey}[${index}]`, seen)
+      );
     }
+  }
 
-    validateSchemaRefs(schema.items, `${context}.items`, seen);
+  validateSchemaRefs(schema.items, `${context}.items`, seen);
 
-    if (isRecord(schema.properties)) {
-      for (const propertyName of Object.keys(schema.properties)) {
-        validateSchemaRefs(
-          schema.properties[propertyName],
-          `${context}.properties.${propertyName}`,
-          seen
-        );
-      }
+  if (isRecord(schema.properties)) {
+    for (const propertyName of Object.keys(schema.properties)) {
+      validateSchemaRefs(
+        schema.properties[propertyName],
+        `${context}.properties.${propertyName}`,
+        seen
+      );
     }
-  } finally {
-    seen.delete(schema);
   }
 }
 
@@ -1000,48 +1041,95 @@ function readTrimmedString(value: unknown): string | undefined {
 }
 
 function stringifySimpleExample(value: unknown): string | undefined {
-  const json = stableJsonStringify(value, new WeakSet<object>());
+  const json = stableJsonStringify(value, new WeakSet<object>(), new WeakMap<object, string | undefined>());
   if (json === undefined || json.length > MAX_EXAMPLE_LENGTH) {
     return undefined;
   }
   return json;
 }
 
-function stableJsonStringify(value: unknown, seen: WeakSet<object>): string | undefined {
+function stableJsonStringify(
+  value: unknown,
+  seen: WeakSet<object>,
+  memo: WeakMap<object, string | undefined>,
+  maxLength = MAX_EXAMPLE_LENGTH
+): string | undefined {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-    return JSON.stringify(value);
+    const serialized = JSON.stringify(value);
+    return serialized.length > maxLength ? undefined : serialized;
   }
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? JSON.stringify(value) : undefined;
-  }
-  if (Array.isArray(value)) {
-    if (seen.has(value)) {
+    if (!Number.isFinite(value)) {
       return undefined;
     }
-    seen.add(value);
-    const items = value.map((item) => stableJsonStringify(item, seen));
-    seen.delete(value);
-    return items.some((item) => item === undefined) ? undefined : `[${items.join(',')}]`;
+    const serialized = JSON.stringify(value);
+    return serialized.length > maxLength ? undefined : serialized;
   }
-  if (isRecord(value)) {
-    if (seen.has(value)) {
-      return undefined;
-    }
-    seen.add(value);
-    const properties: string[] = [];
-    for (const key of Object.keys(value).sort(compareText)) {
-      const serialized = stableJsonStringify(value[key], seen);
-      if (serialized === undefined) {
-        seen.delete(value);
-        return undefined;
-      }
-      properties.push(`${JSON.stringify(key)}:${serialized}`);
-    }
-    seen.delete(value);
-    return `{${properties.join(',')}}`;
+  if (!Array.isArray(value) && !isRecord(value)) {
+    return undefined;
   }
 
-  return undefined;
+  // Memoize per-object so a value shared via YAML anchors/aliases is serialized
+  // once (the previous `seen.delete` made shared nodes re-serialize O(2^depth)
+  // times), and bail as soon as the accumulated output exceeds the cap so a
+  // doubling structure cannot build an O(2^depth)-length string before the
+  // length check at the call site. The result is discarded anyway when it
+  // exceeds MAX_EXAMPLE_LENGTH.
+  if (memo.has(value)) {
+    return memo.get(value);
+  }
+  if (seen.has(value)) {
+    return undefined;
+  }
+  seen.add(value);
+
+  let result: string | undefined;
+  try {
+    if (Array.isArray(value)) {
+      const items: string[] = [];
+      let accumulated = 2; // surrounding []
+      result = `[]`;
+      let bailed = false;
+      for (const item of value) {
+        const serialized = stableJsonStringify(item, seen, memo, maxLength);
+        if (serialized === undefined) {
+          bailed = true;
+          break;
+        }
+        accumulated += serialized.length + 1;
+        if (accumulated > maxLength) {
+          bailed = true;
+          break;
+        }
+        items.push(serialized);
+      }
+      result = bailed ? undefined : `[${items.join(',')}]`;
+    } else {
+      const properties: string[] = [];
+      let accumulated = 2; // surrounding {}
+      let bailed = false;
+      for (const key of Object.keys(value).sort(compareText)) {
+        const serialized = stableJsonStringify(value[key], seen, memo, maxLength);
+        if (serialized === undefined) {
+          bailed = true;
+          break;
+        }
+        const keyJson = JSON.stringify(key);
+        accumulated += keyJson.length + serialized.length + 2;
+        if (accumulated > maxLength) {
+          bailed = true;
+          break;
+        }
+        properties.push(`${keyJson}:${serialized}`);
+      }
+      result = bailed ? undefined : `{${properties.join(',')}}`;
+    }
+  } finally {
+    seen.delete(value);
+  }
+
+  memo.set(value, result);
+  return result;
 }
 
 function fallbackOperationId(method: HttpMethod, path: string): string {
