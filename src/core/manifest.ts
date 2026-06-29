@@ -35,6 +35,7 @@ import {
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
+import { isParentRelativePath } from '../utils/fs-path.js';
 import {
   HASH_PREFIX,
   sha256File,
@@ -7451,9 +7452,5 @@ function isInsideDirectory(parentDir: string, childPath: string): boolean {
   const relativePath = relative(parentDir, childPath);
 
   return relativePath === '' || (!isParentRelativePath(relativePath) && !isAbsolute(relativePath));
-}
-
-function isParentRelativePath(path: string): boolean {
-  return path === '..' || path.startsWith(`..${sep}`);
 }
 

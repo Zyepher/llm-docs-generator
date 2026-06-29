@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { isObjectRecord, errorMessage, isFileNotFoundError } from '../utils/guards.js';
+import { isSameOrDescendant, realpathIfExists, resolveEffectiveOutputPath } from '../utils/fs-path.js';
 import { isSha256Hash } from '../utils/hash.js';
 
 import categoriesConfig from '../../config/categories.json';
@@ -1493,52 +1494,6 @@ async function assertSourceOutsideRefreshOutput(options: {
       'manifest source path must not be the same as, or inside, the manifest output directory'
     );
   }
-}
-
-async function realpathIfExists(path: string): Promise<string | undefined> {
-  try {
-    return await realpath(path);
-  } catch {
-    return undefined;
-  }
-}
-
-async function resolveEffectiveOutputPath(outputDir: string): Promise<string> {
-  const resolvedOutputDir = resolve(outputDir);
-  const missingSegments: string[] = [];
-  let currentPath = resolvedOutputDir;
-
-  while (true) {
-    try {
-      const canonicalExistingPath = await realpath(currentPath);
-
-      return missingSegments.length === 0
-        ? canonicalExistingPath
-        : join(canonicalExistingPath, ...missingSegments.reverse());
-    } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        throw error;
-      }
-    }
-
-    const parentPath = dirname(currentPath);
-
-    if (parentPath === currentPath) {
-      return resolvedOutputDir;
-    }
-
-    missingSegments.push(basename(currentPath));
-    currentPath = parentPath;
-  }
-}
-
-function isSameOrDescendant(parentPath: string, candidatePath: string): boolean {
-  const relativePath = relative(parentPath, candidatePath);
-
-  return (
-    relativePath === '' ||
-    (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
-  );
 }
 
 class ConfiguredSdkRefreshFormatterConfig implements LLMFormatterConfig {
