@@ -1,0 +1,43 @@
+name: CI
+
+# Enforces the pre-merge gate: type-check, build, and the full test suite.
+# FORCE_COLOR is pinned to 0 so the suite is hermetic (ANSI never leaks into
+# CLI stdout, which the assertions compare against).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: '0'
+  NO_COLOR: '1'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      # package-lock.json is intentionally git-ignored, so `npm install` is used
+      # instead of `npm ci`.
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
