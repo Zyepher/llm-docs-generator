@@ -208,11 +208,29 @@ export class ConfigLoader {
       throw new Error(`SDK '${sdk.name}' has no versions configured`);
     }
 
-    // Sort versions by number (extract v1, v2, etc.)
-    const sorted = versions.sort((a, b) => {
-      const aNum = parseInt(a.replace(/\D/g, ''), 10) || 0;
-      const bNum = parseInt(b.replace(/\D/g, ''), 10) || 0;
-      return bNum - aNum; // Descending order
+    // Compare versions component-wise (so v2.0 > v1.10 > v1.9, and v10 > v2).
+    // The previous heuristic collapsed all digits with parseInt(replace(/\D/g)),
+    // making v1.10 -> 110 rank above v2.0 -> 20. Unparseable/equal keys fall
+    // back to deterministic lexical order.
+    const toComponents = (value: string): number[] =>
+      value
+        .split(/[^0-9]+/)
+        .filter((part) => part !== '')
+        .map((part) => Number.parseInt(part, 10));
+
+    const sorted = [...versions].sort((a, b) => {
+      const aParts = toComponents(a);
+      const bParts = toComponents(b);
+      const length = Math.max(aParts.length, bParts.length);
+
+      for (let index = 0; index < length; index += 1) {
+        const diff = (bParts[index] ?? 0) - (aParts[index] ?? 0); // descending
+        if (diff !== 0) {
+          return diff;
+        }
+      }
+
+      return a < b ? 1 : a > b ? -1 : 0; // descending lexical tiebreak
     });
 
     return sorted[0]!;

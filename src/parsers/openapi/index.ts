@@ -1147,10 +1147,10 @@ function defaultRootTitle(sourceKind: ApiSourceKind): string {
 }
 
 function uniqueSlug(value: string, used: Map<string, number>): string {
-  const base = slugify(value);
-  const count = used.get(base) ?? 0;
-  used.set(base, count + 1);
-  return count === 0 ? base : `${base}-${count + 1}`;
+  // Route through uniqueId so a slugified id that collides with an already-used
+  // id (e.g. an explicit category whose name slugs to `foo-bar-2`) is
+  // disambiguated by the same while-loop guard, instead of silently colliding.
+  return uniqueId(slugify(value), used);
 }
 
 function uniqueId(value: string, used: Map<string, number>): string {

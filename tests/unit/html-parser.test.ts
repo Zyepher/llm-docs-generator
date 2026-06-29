@@ -379,6 +379,63 @@ describe('static HTML parser foundation', () => {
     await expect(parseHtmlFile(symlinkPath)).rejects.toThrow(/Invalid HTML file path/);
   });
 
+  it('preserves nested list items with indentation (regression: nested lists dropped)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'nested-list.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<title>List</title>',
+        '<ul>',
+        '<li>Top item',
+        '<ul><li>Nested item one</li><li>Nested item two</li></ul>',
+        '</li>',
+        '<li>Second top item</li>',
+        '</ul>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('Top item');
+    expect(text).toContain('Nested item one');
+    expect(text).toContain('Nested item two');
+    expect(text).toContain('Second top item');
+  });
+
+  it('does not flatten or duplicate nested table rows into the outer table (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'nested-table.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<title>Tables</title>',
+        '<table>',
+        '<tr><td>Outer A</td><td><table><tr><td>Inner X</td></tr></table></td></tr>',
+        '</table>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const tableBlocks = collectContentBlocks(root).filter(
+      (block) => block.type === ContentBlockType.DATA && block.annotations?.get('type') === 'table'
+    );
+
+    expect(tableBlocks).toHaveLength(2); // outer + nested, rendered separately
+    const outer = tableBlocks.find((block) => block.content.includes('Outer A'));
+    expect(outer).toBeDefined();
+    // The inner row must not be flattened/duplicated into the outer table block.
+    expect((outer?.content.match(/Inner X/g) ?? []).length).toBeLessThanOrEqual(0);
+    expect(tableBlocks.some((block) => block.content.includes('Inner X'))).toBe(true);
+  });
+
   it('preserves loose text adjacent to block-level children (regression: silent content loss)', async () => {
     const dir = await createTempDir();
     const sourcePath = join(dir, 'mixed.html');

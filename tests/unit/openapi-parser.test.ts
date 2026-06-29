@@ -819,6 +819,36 @@ describe('OpenAPI / Swagger parser', () => {
     expect(untagged.children[4]?.metadata.get('path')).toBe('/foo_bar');
   });
 
+  it('assigns unique category ids when slugs collide with disambiguated slugs (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'slug-collision.json');
+
+    // "Foo Bar" and "Foo-Bar" both slugify to "foo-bar"; the second becomes
+    // "foo-bar-2", which then collides with "Foo Bar 2"'s slug. uniqueSlug must
+    // disambiguate against already-used ids (it previously did not).
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Slug Collision', version: '1.0.0' },
+      tags: [{ name: 'Foo Bar' }, { name: 'Foo-Bar' }, { name: 'Foo Bar 2' }],
+      paths: {
+        '/a': { get: { operationId: 'a', tags: ['Foo Bar'], responses: { '200': { description: 'ok' } } } },
+        '/b': { get: { operationId: 'b', tags: ['Foo-Bar'], responses: { '200': { description: 'ok' } } } },
+        '/c': { get: { operationId: 'c', tags: ['Foo Bar 2'], responses: { '200': { description: 'ok' } } } },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+
+    const ids: string[] = [];
+    const walk = (node: DocNode): void => {
+      ids.push(node.id);
+      node.children.forEach(walk);
+    };
+    walk(root);
+
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it('parses a YAML anchor-doubling schema DAG in bounded time (regression: exponential blowup)', async () => {
     const dir = await createTempDir();
     const sourcePath = join(dir, 'anchor-dag.yaml');
