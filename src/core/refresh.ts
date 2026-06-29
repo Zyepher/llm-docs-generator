@@ -1,9 +1,10 @@
-import { lstat, readFile, realpath, rm } from 'node:fs/promises';
+import { lstat, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { isObjectRecord, errorMessage, isFileNotFoundError } from '../utils/guards.js';
 import { isSameOrDescendant, realpathIfExists, resolveEffectiveOutputPath } from '../utils/fs-path.js';
+import { readJsonFile } from '../utils/json.js';
 import { isSha256Hash } from '../utils/hash.js';
 
 import categoriesConfig from '../../config/categories.json';
@@ -284,7 +285,7 @@ async function readRefreshManifest(manifestPath: string): Promise<Record<string,
   let manifest: unknown;
 
   try {
-    manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as unknown;
+    manifest = await readJsonFile(manifestPath);
   } catch (error) {
     if (isFileNotFoundError(error)) {
       throw new RefreshManifestError(`manifest not found: ${manifestPath}`);
@@ -944,7 +945,7 @@ async function readSourceDiscoveryRefreshReport(reportPath: string): Promise<{
   let report: unknown;
 
   try {
-    report = JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+    report = await readJsonFile(reportPath);
   } catch (error) {
     if (isFileNotFoundError(error)) {
       throw new RefreshManifestError(`discovery report not found: ${reportPath}`);
@@ -1029,7 +1030,7 @@ async function readSourceVerificationRefreshReport(reportPath: string): Promise<
   let report: unknown;
 
   try {
-    report = JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+    report = await readJsonFile(reportPath);
   } catch (error) {
     throw new RefreshManifestError(
       `malformed source-verification report JSON: ${errorMessage(error)}`
