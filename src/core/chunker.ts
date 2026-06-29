@@ -7,10 +7,10 @@
 
 import { isRecord } from '../utils/guards.js';
 import { sha256Hex } from '../utils/hash.js';
+import { DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN, estimateTokenCount } from '../utils/text-metrics.js';
 import { ContentBlockType, type ContentBlock, type DocNode } from './models.js';
 
 const DOUBLE_NEWLINE = '\n\n';
-const DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN = 4;
 const GENERATED_SPLIT_SEGMENT_PREFIX = '~chunk-';
 
 export const DEFAULT_CHUNK_MAX_CHARACTERS = 8000;
@@ -239,17 +239,6 @@ export function chunkDocNode(root: DocNode, options: ChunkDocNodeOptions = {}): 
   });
 
   return { chunks, warnings };
-}
-
-export function estimateTokenCount(
-  content: string,
-  estimatedCharactersPerToken = DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN
-): number {
-  const divisor = normalizePositiveInteger(
-    estimatedCharactersPerToken,
-    DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN
-  );
-  return Math.ceil(content.length / divisor);
 }
 
 function chunkSingleNode(
