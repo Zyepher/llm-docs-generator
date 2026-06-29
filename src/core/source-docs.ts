@@ -28,6 +28,7 @@ import {
 import { formatDocNode } from './universal-formatter.js';
 import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
+import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 
 const HASH_PREFIX = 'sha256:';
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
@@ -1448,22 +1449,6 @@ function isCandidateEvidenceReportShape(value: Record<string, unknown>): boolean
         Array.isArray(candidate.formatHints) ||
         Array.isArray(candidate.hints))
   );
-}
-
-function aggregateSourceFilesHash(files: SourceDocsFileManifestEntry[]): string {
-  const hash = createHash('sha256');
-  hash.update('llm-docs-generator:source-docs-directory:v1\n');
-
-  for (const file of files) {
-    hash.update(file.path);
-    hash.update('\0');
-    hash.update(String(file.byteSize));
-    hash.update('\0');
-    hash.update(file.hash);
-    hash.update('\n');
-  }
-
-  return `${HASH_PREFIX}${hash.digest('hex')}`;
 }
 
 function collectDocNodeWarnings(root: {

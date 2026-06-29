@@ -1739,9 +1739,13 @@ agentCommand
   .action(async (options: { json?: boolean }) => {
     try {
       const diagnostics = await buildAgentDoctorContract();
+      const doctorFailed = diagnostics.summary.overallStatus === 'fail';
 
       if (options.json === true) {
         console.log(JSON.stringify(diagnostics, null, 2));
+        if (doctorFailed) {
+          process.exit(1);
+        }
         return;
       }
 
@@ -1767,6 +1771,13 @@ agentCommand
       console.log('  Codex skill installation: skipped (not configured)');
       console.log('  Read-only: no installs, config writes, host mutations, or network access.');
       console.log('  Use --json for the stable diagnostics contract.');
+
+      // Exit non-zero only on a hard failure (a missing PATH binary is a
+      // warning and still exits 0). Currently no check reports 'fail', so this
+      // is a forward-looking guard, not a behavior change.
+      if (doctorFailed) {
+        process.exit(1);
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Agent doctor failed: ${errorMsg}`));
@@ -1958,6 +1969,11 @@ program
   .option('--scope <path>', 'Repo-relative path to inspect in repo mode')
   .option('--cache-dir <dir>', 'Directory for cached repo clones')
   .option('--output-dir <dir>', 'Directory for discovery-report.json and manifest.json')
+  .option(
+    '--allow-private-hosts',
+    'In --url mode, permit private/link-local/metadata IP targets (SSRF guard is on by default)',
+    false
+  )
   .action(
     async (options: {
       source?: string;
@@ -1966,6 +1982,7 @@ program
       scope?: string;
       cacheDir?: string;
       outputDir?: string;
+      allowPrivateHosts?: boolean;
     }) => {
       try {
         const inputCount =
@@ -2017,11 +2034,15 @@ program
             await removeKnownDiscoveryArtifacts(options.outputDir);
           }
 
-          const { report } = await discoverWebsite(
-            options.outputDir === undefined
-              ? { url: options.url }
-              : { url: options.url, outputDir: options.outputDir }
-          );
+          const websiteOptions: Parameters<typeof discoverWebsite>[0] = { url: options.url };
+          if (options.outputDir !== undefined) {
+            websiteOptions.outputDir = options.outputDir;
+          }
+          if (options.allowPrivateHosts === true) {
+            websiteOptions.allowPrivateHosts = true;
+          }
+
+          const { report } = await discoverWebsite(websiteOptions);
           const manifestPath = await writeCliDiscoveryReportManifest({
             discoveryKind: 'url',
             reportPath: report.output.reportPath,
@@ -2226,7 +2247,7 @@ program
       // Set log level
       Logger.setLevel(options.verbose ? LogLevel.DEBUG : LogLevel.INFO);
 
-      console.log(chalk.bold.blue('\nSupabase LLM Documentation Generator\n'));
+      console.log(chalk.bold.blue('\nLLM Documentation Generator\n'));
 
       try {
         // Load configuration
@@ -2629,5 +2650,14 @@ program
 // ============================================================================
 // PARSE AND RUN
 // ============================================================================
+
+// The program uses the synchronous program.parse(), so a rejected action
+// promise surfaces as an unhandled rejection. Convert it into an honest,
+// non-zero-exit failure instead of a raw stack trace / inconsistent exit code.
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  console.error(chalk.red(`Error: ${message}`));
+  process.exit(1);
+});
 
 program.parse();

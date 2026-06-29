@@ -39,7 +39,8 @@ export class Logger {
    */
   static debug(message: string, ...args: unknown[]): void {
     if (Logger.currentLevel <= LogLevel.DEBUG) {
-      console.debug(`[DEBUG] ${message}`, ...args);
+      // Diagnostics go to stderr; stdout is reserved for machine-readable data.
+      console.error(`[DEBUG] ${message}`, ...args);
     }
   }
 
@@ -49,7 +50,8 @@ export class Logger {
    */
   static info(message: string, ...args: unknown[]): void {
     if (Logger.currentLevel <= LogLevel.INFO) {
-      console.log(`[INFO] ${message}`, ...args);
+      // Diagnostics go to stderr; stdout is reserved for machine-readable data.
+      console.error(`[INFO] ${message}`, ...args);
     }
   }
 

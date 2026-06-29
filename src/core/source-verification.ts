@@ -737,9 +737,33 @@ async function inspectDocsFile(options: {
   }
 }
 
+function leadingIndentWidth(line: string): number {
+  let width = 0;
+
+  for (const character of line) {
+    if (character === ' ') {
+      width += 1;
+    } else if (character === '\t') {
+      width += 4;
+    } else {
+      break;
+    }
+  }
+
+  return width;
+}
+
 function extractDocsReferences(path: string, content: string): SourceVerificationDocsReference[] {
   const references: SourceVerificationDocsReference[] = [];
   let fenceState: FenceState | undefined;
+  // CommonMark indented code blocks (>=4 spaces / a tab) are not fenced, so they
+  // were not skipped: backtick text inside them was harvested as a doc
+  // reference, which could flip a no-doc-reference-evidence failure into a
+  // spurious pass. Track that state with a conservative approximation (an
+  // indented block does not interrupt a paragraph, so it must follow a blank
+  // line; it continues over indented/blank lines).
+  let inIndentedCode = false;
+  let previousLineBlank = true;
 
   for (const line of linesWithOffsets(content)) {
     const fence = parseFenceMarker(line.text);
@@ -753,13 +777,37 @@ function extractDocsReferences(path: string, content: string): SourceVerificatio
         fenceState = undefined;
       }
 
+      previousLineBlank = false;
       continue;
     }
 
     if (fence !== undefined) {
       fenceState = fence;
+      previousLineBlank = false;
       continue;
     }
+
+    const blank = line.text.trim() === '';
+    const indentWidth = leadingIndentWidth(line.text);
+
+    if (inIndentedCode) {
+      if (blank || indentWidth >= 4) {
+        previousLineBlank = blank;
+        continue;
+      }
+      inIndentedCode = false;
+    } else if (!blank && indentWidth >= 4 && previousLineBlank) {
+      inIndentedCode = true;
+      previousLineBlank = false;
+      continue;
+    }
+
+    if (blank) {
+      previousLineBlank = true;
+      continue;
+    }
+
+    previousLineBlank = false;
 
     for (const codeSpan of inlineCodeSpans(line.text)) {
       const reference = parseInlineCodeReference(codeSpan.rawText);

@@ -276,6 +276,36 @@ describe('source verification evidence', () => {
     expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
   });
 
+  it('ignores inline code inside indented code blocks so they cannot fabricate reference evidence (regression)', async () => {
+    const dir = await makeTempDir('llm-docs-source-verification-indented-');
+    const sourceDir = join(dir, 'source');
+    const docsDir = join(dir, 'docs');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(docsDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export const value = 1;\n', 'utf-8');
+    // The only backtick identifier lives inside a 4-space indented code block
+    // (preceded by a blank line), so it must NOT count as a doc reference.
+    await writeFile(
+      join(docsDir, 'guide.md'),
+      ['# Guide', '', 'Example:', '', '    const x = `value`;', ''].join('\n'),
+      'utf-8'
+    );
+
+    await expect(
+      verifyDocsAgainstSource({
+        source: sourceDir,
+        docs: docsDir,
+        outputDir,
+        generator: {
+          name: 'llm-docs-generator',
+          version: '1.0.0',
+          cliName: 'llm-docs',
+        },
+      })
+    ).rejects.toBeInstanceOf(SourceVerificationNoDocsEvidenceError);
+  });
+
   it('clears stale owned success artifacts when input validation fails on a rerun', async () => {
     const dir = await makeTempDir('llm-docs-source-verification-stale-input-');
     const sourceDir = join(dir, 'source');

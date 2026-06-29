@@ -45,15 +45,23 @@ export class OpenRefParser {
     const content = await readFile(this.specPath, 'utf-8');
 
     // Parse YAML (O(n) where n = file size)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const spec = yamlLoad(content) as any;
+    const spec = yamlLoad(content);
+
+    // Guard the root shape: an empty file (undefined) or a scalar/array would
+    // otherwise surface a leaky internal TypeError on `spec.info`. The validate
+    // path calls parse() directly (no detect() guard), so reject cleanly here.
+    if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
+      throw new Error(`OpenRef spec must be a top-level YAML mapping: ${this.specPath}`);
+    }
+
+    const specRecord = spec as { info?: unknown; functions?: unknown };
 
     // Extract info (O(1) object property access)
-    const info = this.parseInfo(spec.info);
+    const info = this.parseInfo(specRecord.info);
 
     // Parse operations (O(m * k) where m = operations, k = avg examples per op)
-    const functions = spec.functions as unknown[] | undefined;
-    const operations = this.parseOperations(functions ?? []);
+    const functions = Array.isArray(specRecord.functions) ? specRecord.functions : [];
+    const operations = this.parseOperations(functions);
 
     // Create optimized SpecData with cached lookups
     return createSpecData(info, operations);

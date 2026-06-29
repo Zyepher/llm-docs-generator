@@ -144,7 +144,20 @@ export class HtmlParser {
 
   async parse(): Promise<HtmlDocument> {
     const raw = await readFile(this.filePath, 'utf-8');
-    const parsed = this.parseContent(raw.replace(/^\uFEFF/, ''));
+    let parsed: ParsedHtml;
+    try {
+      parsed = this.parseContent(raw.replace(/^\uFEFF/, ''));
+    } catch (error) {
+      // Pathologically deep nesting overflows the recursive walkers; surface it
+      // as an honest ParserError instead of a raw RangeError.
+      if (error instanceof RangeError) {
+        throw new ParserError(
+          `HTML is too deeply nested to parse safely: ${this.filePath}`,
+          'Static HTML Parser'
+        );
+      }
+      throw error;
+    }
     const metadata = new Map<string, unknown>([
       ['format', 'html'],
       ['sourcePath', this.filePath],

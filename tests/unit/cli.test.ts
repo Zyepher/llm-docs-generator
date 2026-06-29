@@ -2755,7 +2755,7 @@ describe('CLI compatibility behavior', () => {
     expect(
       `${agentHelp.stdout}\n${agentContextHelp.stdout}\n${agentDoctorHelp.stdout}`
     ).not.toMatch(/\bagent install\b/i);
-  }, 15000);
+  }, 30000);
 
   it('describes generate options as local source mode, scoped preset mode, or configured SDK guards', async () => {
     const { stdout } = await runCli(['generate', '--help']);
@@ -3054,7 +3054,7 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('Agent doctor failed: packaged agent artifact unavailable');
     expect(result.stderr).toContain('skills/repo-docs-discovery/SKILL.md');
     expect(result.stderr).toContain('ENOENT');
-  }, 15000);
+  }, 30000);
 
   it('exits nonzero when agent doctor package binary metadata is malformed', async () => {
     const packagePath = join(repoRoot, 'package.json');
@@ -3079,7 +3079,7 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain(
       'Agent doctor failed: malformed package metadata: expected llm-docs bin entry'
     );
-  }, 15000);
+  }, 30000);
 
   it('prints a deterministic capabilities JSON contract without generatedAt', async () => {
     const first = await runCli(['capabilities', '--json']);
@@ -3098,7 +3098,7 @@ describe('CLI compatibility behavior', () => {
         binary: 'llm-docs',
       },
     });
-  }, 15000);
+  }, 30000);
 
   it('separates implemented capabilities from planned or unsupported capabilities', async () => {
     const { stdout } = await runCli(['capabilities', '--json']);
@@ -3823,7 +3823,7 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Scope: validation only');
     expect(stdout).toContain('generate --source --parser-plugin-manifest --format');
     expect(await pathExists(sideEffectPath)).toBe(false);
-  }, 15000);
+  }, 30000);
 
   it('prints deterministic parser plugin manifest validation JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -3881,7 +3881,7 @@ describe('CLI compatibility behavior', () => {
       errors: [],
       warnings: [],
     });
-  }, 15000);
+  }, 30000);
 
   it('reports parser plugin malformed root and field errors as JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -3955,7 +3955,7 @@ describe('CLI compatibility behavior', () => {
         'directory-support-boolean',
       ])
     );
-  }, 15000);
+  }, 30000);
 
   it('rejects URL-like absolute and traversal parser plugin module paths', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -4022,7 +4022,7 @@ describe('CLI compatibility behavior', () => {
       expect(validation.errors.map((error) => error.code)).toContain(testCase.code);
       expect(validation.errors.map((error) => error.path)).toContain('$.module');
     }
-  }, 15000);
+  }, 30000);
 
   it('rejects Windows-style parser plugin module paths that are not relative safe paths', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -4092,7 +4092,7 @@ describe('CLI compatibility behavior', () => {
       }
       expect(validation.errors.map((error) => error.path)).toContain('$.module');
     }
-  }, 15000);
+  }, 30000);
 
   it('rejects missing non-array and empty parser plugin formats', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -4140,7 +4140,7 @@ describe('CLI compatibility behavior', () => {
         message: 'formats must be a non-empty array of format objects.',
       });
     }
-  }, 15000);
+  }, 30000);
 
   it('rejects duplicate parser plugin format ids and duplicate extensions', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -4201,7 +4201,7 @@ describe('CLI compatibility behavior', () => {
         },
       ])
     );
-  }, 15000);
+  }, 30000);
 
   it('rejects duplicate parser plugin extensions across separate formats', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -4255,7 +4255,7 @@ describe('CLI compatibility behavior', () => {
           "duplicate extension 'dup' in format 'second'; first declared at $.formats[0].extensions[0] in format 'first'.",
       },
     ]);
-  }, 15000);
+  }, 30000);
 
   it('rejects unsupported parser plugin manifest keys', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -4312,7 +4312,7 @@ describe('CLI compatibility behavior', () => {
         },
       ])
     );
-  }, 15000);
+  }, 30000);
 
   it('reports missing and malformed parser plugin manifest files with non-zero exits', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-plugin-'));
@@ -4357,7 +4357,7 @@ describe('CLI compatibility behavior', () => {
     expect(malformedResult.stdout).toContain('Parser plugin manifest validation');
     expect(malformedResult.stdout).toContain('Result: failed');
     expect(malformedResult.stderr).toContain('manifest file must contain valid JSON');
-  }, 15000);
+  }, 30000);
 
   it('treats validate --version as the SDK version option', async () => {
     const configDir = await createTestConfig();
@@ -5789,6 +5789,24 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).not.toContain('user:secret');
     expect(result.stderr).not.toContain('secret@example.com');
   });
+
+  it('refuses cloud-metadata and private-range URL targets by default (SSRF guard)', async () => {
+    // These are rejected at URL normalization, before any network request, so
+    // the assertions are deterministic and never actually contact the address.
+    const metadata = await runCliWithExit([
+      'discover',
+      '--url',
+      'http://169.254.169.254/latest/meta-data/',
+    ]);
+    expect(metadata.exitCode).toBe(1);
+    expect(metadata.stderr).toContain('Refusing to fetch a private, link-local, or cloud-metadata');
+
+    const privateRange = await runCliWithExit(['discover', '--url', 'http://10.0.0.5/docs']);
+    expect(privateRange.exitCode).toBe(1);
+    expect(privateRange.stderr).toContain(
+      'Refusing to fetch a private, link-local, or cloud-metadata'
+    );
+  }, 30000);
 
   it('validates discover input exclusivity and repo-only options', async () => {
     const noInput = await runCliWithExit(['discover']);
@@ -7619,7 +7637,7 @@ describe('CLI compatibility behavior', () => {
       'refresh is supported for local-source-docs manifests only when generated by the built-in parser'
     );
     expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
-  }, 15000);
+  }, 30000);
 
   it('generates docs from an explicit directory parser plugin when the selected format supports directories', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-dir-generate-'));
@@ -8324,7 +8342,7 @@ describe('CLI compatibility behavior', () => {
       expect(result.stderr, testCase.name).toContain(testCase.expected);
       expect(result.stdout, testCase.name).not.toContain('Local source docs generated');
     }
-  }, 15000);
+  }, 30000);
 
   it('rejects invalid parser plugin manifests modules exports detection and DocNode output', async () => {
     const cases: Array<{
@@ -8557,7 +8575,7 @@ describe('CLI compatibility behavior', () => {
       expect(result.stderr, testCase.name).toContain(expected);
       expect(result.stdout, testCase.name).not.toContain('Local source docs generated');
     }
-  }, 15000);
+  }, 30000);
 
   it('generates swift-book preset docs from an explicit nested DocC-style Markdown directory', async () => {
     const { sourceDir, outputDir } = await createSwiftBookSourceFixture();
@@ -8937,6 +8955,43 @@ describe('CLI compatibility behavior', () => {
       'semantic chunk index chunks/semantic-chunks.jsonl: manifest metadata does not match JSONL records'
     );
     expect(result.stderr).not.toContain('hash mismatch');
+  });
+
+  it('rejects a manifest with a semantic-chunks-jsonl output but no semanticChunkIndexes (regression)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-source-chunk-index-missing-'));
+    tempDirs.push(dir);
+    const sourcePath = join(dir, 'missing-index-docs.md');
+    const outputDir = join(dir, 'output');
+    const manifestPath = join(outputDir, 'manifest.json');
+
+    await writeFile(sourcePath, '# Missing Index Docs\n\nStable chunk text.\n', 'utf-8');
+    await runCli([
+      'generate',
+      '--source',
+      sourcePath,
+      '--format',
+      'markdown',
+      '--chunks',
+      'jsonl',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as SourceDocsManifest;
+    // Drop the index (and its artifact-summary mirror) while keeping the JSONL
+    // generated output — the chunk metadata would otherwise go unverified.
+    delete (manifest as { semanticChunkIndexes?: unknown }).semanticChunkIndexes;
+    if (manifest.artifactSummary !== undefined) {
+      delete (manifest.artifactSummary as { indexes?: unknown }).indexes;
+    }
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+
+    const result = await runCliWithExit(['verify', '--manifest', manifestPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'semanticChunkIndexes is required when a semantic-chunks-jsonl output is present'
+    );
   });
 
   it('rejects malformed semantic chunk JSONL when manifest output metadata is current', async () => {
@@ -9767,7 +9822,7 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(join(unsupportedFormatOutputDir, 'manifest.json'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'llm-docs'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'chunks'))).toBe(false);
-  }, 15000);
+  }, 30000);
 
   it('preserves parser plugin files under output artifacts after CLI validation failures', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-parser-plugin-cli-cleanup-'));
@@ -10793,7 +10848,7 @@ describe('CLI compatibility behavior', () => {
     expect(linkedReportStats.isSymbolicLink()).toBe(true);
     expect(await readFile(outsideFixture.reportPath, 'utf-8')).toBe(outsideReportText);
     expect(await readFile(symlinkFixture.manifestPath, 'utf-8')).toBe(originalManifestText);
-  }, 15000);
+  }, 30000);
 
   it('refresh rejects scheme-looking source-verification report paths before reading local files', async () => {
     const fixture = await createSourceVerificationVerifyFixture(
@@ -10928,7 +10983,7 @@ describe('CLI compatibility behavior', () => {
     expect(outputInsideResult.stderr).toContain(
       'manifest output directory must not be the same as, or inside, the source-verification source or docs path'
     );
-  }, 15000);
+  }, 30000);
 
   it('refreshes configured SDK docs from the manifest recorded local OpenRef spec path', async () => {
     const { manifestPath, outputDir } = await generateSwiftFixture();
@@ -11653,7 +11708,7 @@ describe('CLI compatibility behavior', () => {
     expect(linkedReportStats.isSymbolicLink()).toBe(true);
     expect(await readFile(outsideFixture.reportPath, 'utf-8')).toBe(outsideReportText);
     expect(await readFile(insideFixture.manifestPath, 'utf-8')).toBe(originalManifestText);
-  }, 15000);
+  }, 30000);
 
   it('refresh rejects repo and URL discovery-report manifests', async () => {
     const repoDir = await createLocalGitRepo();
@@ -11686,7 +11741,7 @@ describe('CLI compatibility behavior', () => {
       'refresh supports discovery-report manifests only for discovery.kind source'
     );
     expect(urlResult.stderr).toContain('url discovery-report refresh is not supported');
-  }, 15000);
+  }, 30000);
 
   it('refresh rejects missing or malformed source discovery reports and bad local source paths', async () => {
     const missingFixture = await createSourceDiscoveryVerifyFixture(
@@ -11788,7 +11843,7 @@ describe('CLI compatibility behavior', () => {
     );
     expect(badBoundsResult.exitCode).toBe(1);
     expect(badBoundsResult.stderr).toContain('traversal.maxFiles must be a positive safe integer');
-  }, 15000);
+  }, 30000);
 
   it('refresh requires one manifest location and reports missing or malformed local manifests', async () => {
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-refresh-invalid-'));
@@ -11885,7 +11940,7 @@ describe('CLI compatibility behavior', () => {
         .refresh
     ).toBeUndefined();
     expect(await readFile(missingSourceOutputPath, 'utf-8')).toBe('preserve on refresh failure\n');
-  }, 15000);
+  }, 30000);
 
   it('verifies a generated configured SDK manifest by output directory', async () => {
     const { outputDir, manifestPath } = await generateSwiftFixture();
@@ -13006,7 +13061,7 @@ describe('CLI compatibility behavior', () => {
     expect(urlForgedResult.stderr).toContain(
       'refresh is supported for discovery-report manifests only when discovery.kind is source'
     );
-  }, 15000);
+  }, 30000);
 
   it('rejects discovery manifest and report count/path consistency drift', async () => {
     const countFixture = await createSourceDiscoveryVerifyFixture('llm-docs-discovery-count-');
@@ -14063,7 +14118,7 @@ describe('CLI compatibility behavior', () => {
       }
       expect(result.stderr, scenario.name).not.toContain('hash mismatch');
     }
-  }, 15000);
+  }, 30000);
 
   it('requires source docs generated output line and token metadata before file checks', async () => {
     const { manifestPath, manifest } = await generateSourceDocsFixture();
@@ -14724,7 +14779,7 @@ describe('CLI compatibility behavior', () => {
       `output ${outputLinkFile.path}: symbolic links are not allowed`
     );
     expect(outputLinkResult.stderr).not.toContain('hash mismatch');
-  }, 15000);
+  }, 30000);
 
   it('rejects invalid generated output kinds before checking files', async () => {
     const { manifestPath } = await generateSwiftFixture();

@@ -78,8 +78,8 @@ Current implemented capabilities include:
 - candidate evidence reports with deterministic evidence, warnings, skipped paths,
   discovery report integrity manifests, and compact content-free candidate
   evidence indexes
-- parsers for OpenRef, OpenAPI/Swagger, Markdown, MDX, RST, DocC, and HTML
-  fallback extraction from explicit local sources
+- parsers for OpenRef, OpenAPI/Swagger, Markdown/MDX (including DocC-style
+  Markdown), RST, and HTML fallback extraction from explicit local sources
 - agent-optimized Markdown output for explicit local source generation
 - a scoped `swift-book` preset that adds deterministic Markdown output
   defaults only when the agent or user supplies the exact local source path

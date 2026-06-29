@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, realpath } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -245,10 +245,23 @@ async function ensureGitCheckout(path: string): Promise<void> {
 }
 
 async function cloneRepo(repo: string, cachePath: string): Promise<void> {
+  // Clone into a temp sibling and atomically rename on success. An interrupted
+  // clone otherwise leaves a partial directory at cachePath that fails the
+  // is-git-repo check on every subsequent run, bricking the cache entry.
+  const tempPath = `${cachePath}.tmp-${process.pid}-${randomUUID()}`;
+
   try {
-    await git(['clone', '--', repo, cachePath]);
+    await git(['clone', '--', repo, tempPath]);
   } catch (error) {
+    await rm(tempPath, { recursive: true, force: true });
     throw new Error(`failed to clone repository into cache: ${formatGitError(error)}`);
+  }
+
+  try {
+    await rename(tempPath, cachePath);
+  } catch (error) {
+    await rm(tempPath, { recursive: true, force: true });
+    throw new Error(`failed to finalize cloned repository cache: ${formatGitError(error)}`);
   }
 }
 

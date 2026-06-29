@@ -1,4 +1,5 @@
 import { mkdir } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import { join, resolve } from 'node:path';
 
 import { request } from 'undici';
@@ -46,6 +47,13 @@ export interface DiscoverWebsiteOptions {
   timeoutMs?: number;
   maxBytesPerResponse?: number;
   maxCandidates?: number;
+  /**
+   * Allow fetching private/link-local/metadata IP literals. Default false:
+   * link-local (incl. cloud metadata 169.254.169.254) and RFC1918 ranges are
+   * refused as an SSRF guard. Loopback is always allowed (local dev). Hostnames
+   * are not DNS-resolved, so DNS-rebinding is out of scope.
+   */
+  allowPrivateHosts?: boolean;
 }
 
 export interface WebsiteInspectedResource {
@@ -202,7 +210,7 @@ export async function discoverWebsite(
 export async function inspectWebsite(
   options: Omit<DiscoverWebsiteOptions, 'outputDir'>
 ): Promise<WebsiteDiscoveryInspection> {
-  const normalizedUrl = normalizeWebsiteUrl(options.url);
+  const normalizedUrl = normalizeWebsiteUrl(options.url, options.allowPrivateHosts ?? false);
   const websiteUrl = new URL(normalizedUrl);
   const timeoutMs = resolvePositiveSafeInteger(
     options.timeoutMs,
@@ -307,7 +315,7 @@ export async function inspectWebsite(
   };
 }
 
-function normalizeWebsiteUrl(input: string): string {
+function normalizeWebsiteUrl(input: string, allowPrivateHosts: boolean): string {
   const trimmed = input.trim();
 
   if (trimmed === '') {
@@ -330,9 +338,55 @@ function normalizeWebsiteUrl(input: string): string {
     throw new Error('Embedded credentials are not supported in discover --url.');
   }
 
+  if (!allowPrivateHosts && isBlockedPrivateHost(url.hostname)) {
+    throw new Error(
+      `Refusing to fetch a private, link-local, or cloud-metadata address for discover --url: ${url.hostname} (use --allow-private-hosts to override).`
+    );
+  }
+
   url.hash = '';
 
   return url.href;
+}
+
+/**
+ * SSRF guard: block link-local (incl. cloud metadata 169.254.169.254) and
+ * RFC1918 private IP literals (and their IPv6 equivalents). Loopback is allowed
+ * (local development and the same host the agent already controls). Non-literal
+ * hostnames are not DNS-resolved here, so DNS-rebinding is explicitly out of
+ * scope for this syntactic check.
+ */
+function isBlockedPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  const ipVersion = isIP(host);
+
+  if (ipVersion === 4) {
+    const octets = host.split('.').map((part) => Number.parseInt(part, 10));
+    const [a, b] = octets;
+    if (a === undefined || b === undefined) {
+      return false;
+    }
+    if (a === 169 && b === 254) {
+      return true; // link-local, incl. cloud metadata
+    }
+    if (a === 10) {
+      return true; // RFC1918
+    }
+    if (a === 172 && b >= 16 && b <= 31) {
+      return true; // RFC1918
+    }
+    if (a === 192 && b === 168) {
+      return true; // RFC1918
+    }
+    return false; // loopback (127/8) and public addresses allowed
+  }
+
+  if (ipVersion === 6) {
+    // fe80::/10 (link-local) and fc00::/7 (unique local). ::1 loopback allowed.
+    return /^fe[89ab]/.test(host) || /^f[cd]/.test(host);
+  }
+
+  return false;
 }
 
 function buildResourcePlan(normalizedUrl: string): PlannedWebsiteResource[] {

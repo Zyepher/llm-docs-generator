@@ -189,14 +189,14 @@ export function convertExample(example: Example): DocNode {
  * @returns Language identifier
  */
 function inferLanguage(code: string): string {
-  // Check for language-specific patterns
-  if (code.includes('const ') || code.includes('let ') || code.includes('async ')) {
-    return 'javascript';
-  }
+  // Check more-specific markers first. Swift is checked before JavaScript so
+  // `let x: Int = ...` is not misread as JS (both use `let`), and Python is
+  // detected via `from X import Y` so a JS/TS ESM `import X from '...'` is not
+  // misread as Python.
   if (code.includes('func ') || (code.includes('let ') && code.includes(':'))) {
     return 'swift';
   }
-  if (code.includes('def ') || (code.includes('import ') && code.includes('from '))) {
+  if (code.includes('def ') || /\bfrom\s+\S+\s+import\b/.test(code)) {
     return 'python';
   }
   if (code.includes('public class') || code.includes('private val')) {
@@ -207,6 +207,15 @@ function inferLanguage(code: string): string {
   }
   if (code.includes('void ') || code.includes('Future<')) {
     return 'dart';
+  }
+  if (
+    code.includes('const ') ||
+    code.includes('let ') ||
+    code.includes('async ') ||
+    code.includes('=>') ||
+    /\bimport\b[\s\S]*\bfrom\b/.test(code)
+  ) {
+    return 'javascript';
   }
 
   // Default to generic code

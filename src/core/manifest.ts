@@ -3,7 +3,7 @@
  */
 
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, parse, relative, resolve, sep, win32 } from 'node:path';
 
@@ -27,6 +27,7 @@ import {
   type ParserPluginManifestMetadata,
 } from './parser-plugin-manifest.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
+import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 
 const HASH_PREFIX = 'sha256:';
 
@@ -1226,10 +1227,12 @@ export async function writeGenerationManifest(
   };
 
   await mkdir(manifestDir, { recursive: true });
-  await writeFile(
+  // Atomic, symlink-refusing write (parity with the sibling manifest writers),
+  // so a crash mid-write can't leave a truncated manifest and a pre-existing
+  // symlink at the path can't redirect the write.
+  await writeTextFileSafely(
     options.manifestPath,
-    `${JSON.stringify(manifestWithSummary, null, 2)}\n`,
-    'utf-8'
+    `${JSON.stringify(manifestWithSummary, null, 2)}\n`
   );
 }
 
@@ -5439,6 +5442,15 @@ function validateSourceDocsSemanticChunkIndexes(options: {
   const { semanticChunkIndexes, generatedOutputs, manifestDir, failures } = options;
 
   if (semanticChunkIndexes === undefined) {
+    // A semantic-chunks-jsonl output with no index would leave its chunk
+    // metadata (ordinals, per-chunk hashes, warning counts) unverified, so an
+    // omitted index must fail rather than silently pass when such an output
+    // exists.
+    if (sourceDocsSemanticChunkOutputPaths(generatedOutputs, manifestDir).size > 0) {
+      failures.push(
+        'malformed manifest: semanticChunkIndexes is required when a semantic-chunks-jsonl output is present'
+      );
+    }
     return [];
   }
 
@@ -7404,21 +7416,6 @@ async function verifyPathType(check: PathTypeCheck, failures: string[]): Promise
   }
 }
 
-function aggregateSourceFilesHash(files: SourceFileEntry[]): string {
-  const hash = createHash('sha256');
-  hash.update('llm-docs-generator:source-docs-directory:v1\n');
-
-  for (const file of files) {
-    hash.update(file.path);
-    hash.update('\0');
-    hash.update(String(file.byteSize));
-    hash.update('\0');
-    hash.update(file.hash);
-    hash.update('\n');
-  }
-
-  return `${HASH_PREFIX}${hash.digest('hex')}`;
-}
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

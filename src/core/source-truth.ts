@@ -538,7 +538,15 @@ async function traverseDirectory(options: {
     }
 
     if (entry.isFile()) {
-      const stats = await lstat(entryPath);
+      let stats: Stats;
+      try {
+        stats = await lstat(entryPath);
+      } catch {
+        // A file that became unreadable between readdir and lstat must not abort
+        // the whole inspection; record it and continue.
+        warnings.push(`Skipped unreadable file: ${normalizePathForReport(relativePath)}`);
+        continue;
+      }
       await inspectFile({
         absolutePath: entryPath,
         relativePath,
