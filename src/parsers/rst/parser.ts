@@ -161,14 +161,21 @@ export class RstParser {
       }
 
       const paragraph = this.parseParagraph(lines, index);
-      if (paragraph.literalBlock !== undefined) {
+      const literalBody = paragraph.literalBlock;
+      if (literalBody !== undefined) {
+        // The paragraph ended with `::`. Emit the prose with the standard
+        // `::` -> `:` cleanup, and a literal code block ONLY when an actual
+        // indented body followed. An empty body must not produce a spurious
+        // empty code block (and a lone `::` paragraph is dropped entirely).
         const prose = paragraph.content.replace(/::\s*$/, ':').trim();
-        if (prose !== '') {
+        if (prose !== '' && prose !== ':') {
           currentContent().push(createContentBlock(ContentBlockType.PROSE, prose));
         }
-        currentContent().push(
-          createContentBlock(ContentBlockType.CODE, paragraph.literalBlock, { language: 'text' })
-        );
+        if (literalBody !== '') {
+          currentContent().push(
+            createContentBlock(ContentBlockType.CODE, literalBody, { language: 'text' })
+          );
+        }
       } else if (paragraph.content !== '') {
         currentContent().push(createContentBlock(ContentBlockType.PROSE, paragraph.content));
       }
@@ -406,7 +413,12 @@ function stripDirectiveOptions(lines: string[]): string[] {
 }
 
 function countIndent(line: string): number {
-  const match = line.match(/^ */);
+  // Count the full leading-whitespace run (spaces AND tabs) in characters.
+  // Tabs were previously ignored, so tab-indented literal/directive bodies
+  // measured as indent 0 and were silently dropped. Counting characters keeps
+  // this consistent with the char-based `line.slice(trimIndent)` in
+  // readIndentedBody.
+  const match = line.match(/^[ \t]*/);
   return match?.[0].length ?? 0;
 }
 

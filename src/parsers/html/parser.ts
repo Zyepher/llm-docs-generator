@@ -398,32 +398,57 @@ class HtmlContentExtractor {
     }
 
     const content = rows.map((row) => row.join(' | ')).join('\n').trim();
-    if (content === '') {
-      return;
+    if (content !== '') {
+      this.currentContent().push(
+        createContentBlock(ContentBlockType.DATA, content, {
+          annotations: new Map([['type', 'table']]),
+        })
+      );
     }
 
-    this.currentContent().push(
-      createContentBlock(ContentBlockType.DATA, content, {
-        annotations: new Map([['type', 'table']]),
-      })
-    );
+    // Render nested tables (inside cells) as their own DATA blocks rather than
+    // flattening and duplicating their rows into this table.
+    for (const nested of findDirectNestedTables(node)) {
+      this.addTable(nested);
+    }
   }
 
   private addList(node: HtmlElementNode, ordered: boolean): void {
-    const items = node.children.filter(
-      (child): child is HtmlElementNode => child.type === 'element' && child.tag === 'li'
-    );
-    const lines = items
-      .map((item, index) => {
-        const marker = ordered ? `${index + 1}.` : '-';
-        const text = this.extractInlineTextExcludingNestedLists(item);
-        return text === '' ? '' : `${marker} ${text}`;
-      })
-      .filter((line) => line !== '');
+    const lines = this.renderListLines(node, ordered, 0);
 
     if (lines.length > 0) {
       this.currentContent().push(createContentBlock(ContentBlockType.PROSE, lines.join('\n')));
     }
+  }
+
+  /**
+   * Render a list (and its nested lists) into indented marker lines. Nested
+   * <ul>/<ol> inside an <li> were previously dropped; they are now recursed into
+   * with two-space indentation per level, and each line's whitespace is
+   * normalized to avoid trailing-space artifacts.
+   */
+  private renderListLines(node: HtmlElementNode, ordered: boolean, depth: number): string[] {
+    const indent = '  '.repeat(depth);
+    const items = node.children.filter(
+      (child): child is HtmlElementNode => child.type === 'element' && child.tag === 'li'
+    );
+
+    const lines: string[] = [];
+    items.forEach((item, index) => {
+      const marker = ordered ? `${index + 1}.` : '-';
+      const text = normalizeInlineWhitespace(this.extractInlineTextExcludingNestedLists(item));
+      if (text !== '') {
+        lines.push(`${indent}${marker} ${text}`);
+      }
+
+      for (const child of item.children) {
+        if (child.type === 'element' && (child.tag === 'ul' || child.tag === 'ol')) {
+          lines.push(...this.renderListLines(child, child.tag === 'ol', depth + 1));
+        }
+      }
+    });
+
+    return lines;
   }
 
   private extractInlineTextExcludingNestedLists(node: HtmlNode): string {
@@ -630,7 +655,12 @@ function extractFirstElementText(node: HtmlNode, tagName: string): string | unde
 
 function collectText(
   node: HtmlNode,
-  options: { preserveWhitespace: boolean; skipNestedLists?: boolean; includeNonContent?: boolean }
+  options: {
+    preserveWhitespace: boolean;
+    skipNestedLists?: boolean;
+    skipNestedTables?: boolean;
+    includeNonContent?: boolean;
+  }
 ): string {
   if (node.type === 'text') {
     return decodeHtmlEntities(node.text);
@@ -644,6 +674,11 @@ function collectText(
       return options.preserveWhitespace ? '\n' : ' ';
     }
     if (options.skipNestedLists && (node.tag === 'ul' || node.tag === 'ol')) {
+      return '';
+    }
+    // When extracting a table cell, a descendant <table> is a nested table that
+    // is rendered as its own block; do not flatten its text into the cell.
+    if (options.skipNestedTables && node.tag === 'table') {
       return '';
     }
   }
@@ -668,9 +703,63 @@ function inferCodeLanguage(node: HtmlElementNode): string {
 }
 
 function collectTableRows(node: HtmlElementNode): string[][] {
-  return findElements(node, 'tr')
+  return findRowsInTable(node)
     .map((row) => collectTableCells(row))
     .filter((row) => row.length > 0);
+}
+
+/**
+ * Collect the <tr> rows that belong to THIS table, without descending into a
+ * nested <table> (whose rows are rendered as their own block). Previously
+ * findElements(node, 'tr') pulled nested-table rows into the outer table,
+ * duplicating them (once flattened into the cell text, once as standalone rows).
+ */
+function findRowsInTable(node: HtmlNode): HtmlElementNode[] {
+  if (node.type === 'text') {
+    return [];
+  }
+
+  const rows: HtmlElementNode[] = [];
+  for (const child of node.children) {
+    if (child.type !== 'element') {
+      continue;
+    }
+    if (child.tag === 'table') {
+      continue; // nested table: not part of this table's rows
+    }
+    if (child.tag === 'tr') {
+      rows.push(child); // do not descend: a cell's nested-table rows are excluded
+    } else {
+      rows.push(...findRowsInTable(child));
+    }
+  }
+
+  return rows;
+}
+
+/** Tables nested inside this table (one level down), rendered as their own blocks. */
+function findDirectNestedTables(node: HtmlElementNode): HtmlElementNode[] {
+  const tables: HtmlElementNode[] = [];
+
+  const walk = (current: HtmlNode): void => {
+    if (current.type === 'text') {
+      return;
+    }
+
+    for (const child of current.children) {
+      if (child.type !== 'element') {
+        continue;
+      }
+      if (child.tag === 'table') {
+        tables.push(child); // do not recurse: deeper tables render when this one does
+      } else {
+        walk(child);
+      }
+    }
+  };
+
+  walk(node);
+  return tables;
 }
 
 function collectTableCells(row: HtmlElementNode): string[] {
@@ -680,7 +769,7 @@ function collectTableCells(row: HtmlElementNode): string[] {
   );
   const resolvedCells = cells.length > 0 ? cells : findElements(row, 'th').concat(findElements(row, 'td'));
   return resolvedCells.map((cell) =>
-    normalizeInlineWhitespace(collectText(cell, { preserveWhitespace: false }))
+    normalizeInlineWhitespace(collectText(cell, { preserveWhitespace: false, skipNestedTables: true }))
   );
 }
 

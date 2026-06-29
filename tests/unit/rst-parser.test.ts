@@ -289,4 +289,46 @@ describe('reStructuredText parser foundation', () => {
     expect(doc.metadata.get('format')).toBe('rst');
     expect(doc.content[0]?.content).toBe('Reference prose.');
   });
+
+  it('does not emit a spurious empty code block for `::` with no indented body (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'colon.rst');
+    await writeFile(
+      sourcePath,
+      ['Title', '=====', '', 'A trailing marker with no block follows::', '', 'Next paragraph.', ''].join(
+        '\n'
+      ),
+      'utf-8'
+    );
+
+    const root = await new RstFormatParser().parse(sourcePath);
+    const blocks = collectContentBlocks(root);
+    const codeBlocks = blocks.filter((block) => block.type === ContentBlockType.CODE);
+    const proseText = blocks
+      .filter((block) => block.type === ContentBlockType.PROSE)
+      .map((block) => block.content)
+      .join('\n');
+
+    expect(codeBlocks).toHaveLength(0);
+    expect(proseText).toContain('A trailing marker with no block follows:');
+    expect(proseText).toContain('Next paragraph.');
+  });
+
+  it('captures tab-indented literal block bodies (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'tabbed.rst');
+    await writeFile(
+      sourcePath,
+      ['Title', '=====', '', 'Example::', '', '\tconst tabbed = true;', '', 'After.', ''].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new RstFormatParser().parse(sourcePath);
+    const codeBlocks = collectContentBlocks(root).filter(
+      (block) => block.type === ContentBlockType.CODE
+    );
+
+    expect(codeBlocks).toHaveLength(1);
+    expect(codeBlocks[0]?.content).toContain('const tabbed = true;');
+  });
 });
