@@ -1,5 +1,7 @@
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+
+import { writeTextFileSafely } from '../utils/safe-write.js';
 
 import categoriesConfig from '../../config/categories.json';
 import type { CategoryConfig, SDKVersionConfig } from '../config/schemas.js';
@@ -425,37 +427,53 @@ async function refreshConfiguredSdkManifest(options: {
     llmOutputPaths: expectedLlmOutputPaths,
   });
 
-  await openRefParser.saveJSON(parsedData, parsedSpecPath);
+  // The configured-SDK path is hand-rolled (no generator-level failure
+  // cleanup), so wrap the mutating regeneration: if any step throws after the
+  // first on-disk write, quarantine the manifest instead of leaving a stale
+  // success manifest pointing at half-overwritten outputs.
+  let llmOutputPaths: string[];
+  try {
+    await openRefParser.saveJSON(parsedData, parsedSpecPath);
 
-  const refreshConfig = new ConfiguredSdkRefreshFormatterConfig({
-    sdkName: sdk.name,
-    displayName: sdk.displayName,
-    filenamePrefix,
-    source,
-  });
-  const llmFormatter = new LLMFormatter(
-    parsedData,
-    refreshConfig,
-    sdk.name,
-    sdk.resolvedVersion,
-    source.resolvedSpecPath
-  );
-  const llmOutputPaths = await llmFormatter.generateAll(outputDir);
+    const refreshConfig = new ConfiguredSdkRefreshFormatterConfig({
+      sdkName: sdk.name,
+      displayName: sdk.displayName,
+      filenamePrefix,
+      source,
+    });
+    const llmFormatter = new LLMFormatter(
+      parsedData,
+      refreshConfig,
+      sdk.name,
+      sdk.resolvedVersion,
+      source.resolvedSpecPath
+    );
+    llmOutputPaths = await llmFormatter.generateAll(outputDir);
 
-  await writeGenerationManifest({
-    manifestPath: options.manifestPath,
-    generatedAt: new Date(),
-    generator: options.generator,
-    sdk,
-    source,
-    parser,
-    formatter,
-    generatedOutputs: [
-      { path: parsedSpecPath, kind: 'parsed-spec-json' },
-      ...llmOutputPaths.map((path) => ({ path, kind: 'llm-docs' as const })),
-    ],
-    warnings: [],
-  });
+    await writeGenerationManifest({
+      manifestPath: options.manifestPath,
+      generatedAt: new Date(),
+      generator: options.generator,
+      sdk,
+      source,
+      parser,
+      formatter,
+      generatedOutputs: [
+        { path: parsedSpecPath, kind: 'parsed-spec-json' },
+        ...llmOutputPaths.map((path) => ({ path, kind: 'llm-docs' as const })),
+      ],
+      warnings: [],
+    });
+  } catch (error) {
+    await quarantineFailedRefresh({
+      manifestPath: options.manifestPath,
+      outputDir,
+      reason: 'configured-sdk-refresh-regeneration-failed',
+      error,
+    });
+
+    throw error;
+  }
 
   return withPostRefreshVerification({
     mode: CONFIGURED_SDK_MODE,
@@ -467,27 +485,84 @@ async function refreshConfiguredSdkManifest(options: {
   });
 }
 
+const REFRESH_FAILURE_FILE = 'failure.json';
+const REFRESH_FAILURE_MODE = 'refresh-failure';
+
+/**
+ * Make a failed refresh non-deceptive: remove the manifest so a stale "success"
+ * manifest can never be left behind for `verify` to accept, and record a
+ * failure.json describing why. Idempotent and best-effort (a cleanup failure
+ * must not mask the original error).
+ */
+async function quarantineFailedRefresh(params: {
+  manifestPath: string;
+  outputDir: string;
+  reason: string;
+  error: unknown;
+}): Promise<void> {
+  try {
+    await rm(params.manifestPath, { force: true });
+
+    const message = params.error instanceof Error ? params.error.message : String(params.error);
+    const failure: Record<string, unknown> = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      mode: REFRESH_FAILURE_MODE,
+      reason: params.reason,
+      message,
+      manifestPath: relative(params.outputDir, params.manifestPath) || basename(params.manifestPath),
+    };
+
+    if (params.error instanceof RefreshManifestVerificationError) {
+      failure.verificationFailures = params.error.failures;
+    }
+
+    await writeTextFileSafely(
+      join(params.outputDir, REFRESH_FAILURE_FILE),
+      `${JSON.stringify(failure, null, 2)}\n`
+    );
+  } catch {
+    // Best-effort cleanup: never let a quarantine failure hide the real error.
+  }
+}
+
 async function withPostRefreshVerification(
   result: Omit<RefreshManifestResult, 'postRefreshVerification'>
 ): Promise<RefreshManifestResult> {
-  await recordRefreshProvenanceInManifest({
-    manifestPath: result.manifestPath,
-    mode: result.mode as RefreshSourceManifestMode,
-  });
+  try {
+    await recordRefreshProvenanceInManifest({
+      manifestPath: result.manifestPath,
+      mode: result.mode as RefreshSourceManifestMode,
+    });
 
-  const verification = await verifyGenerationManifest({ manifestPath: result.manifestPath });
+    const verification = await verifyGenerationManifest({ manifestPath: result.manifestPath });
 
-  if (verification.failures.length > 0) {
-    throw new RefreshManifestVerificationError(verification);
+    if (verification.failures.length > 0) {
+      throw new RefreshManifestVerificationError(verification);
+    }
+
+    return {
+      ...result,
+      postRefreshVerification: {
+        status: 'passed',
+        checkedFiles: verification.checkedFiles,
+      },
+    };
+  } catch (error) {
+    // The refresh produced an output set that fails integrity verification (or
+    // the provenance stamp itself failed). Do not leave a manifest that claims
+    // a verified success; quarantine it and surface the failure.
+    await quarantineFailedRefresh({
+      manifestPath: result.manifestPath,
+      outputDir: result.outputDir,
+      reason:
+        error instanceof RefreshManifestVerificationError
+          ? 'post-refresh-verification-failed'
+          : 'post-refresh-provenance-failed',
+      error,
+    });
+
+    throw error;
   }
-
-  return {
-    ...result,
-    postRefreshVerification: {
-      status: 'passed',
-      checkedFiles: verification.checkedFiles,
-    },
-  };
 }
 
 function sourceDocsPresetFromManifest(preset: unknown): SourceDocsPresetMetadata | undefined {
