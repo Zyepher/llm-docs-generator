@@ -140,9 +140,16 @@ export type DiscoverLocalSourceOptions = DiscoverLocalSourcesOptions;
 interface MutableTraversalState {
   visitedFiles: number;
   visitedEntries: number;
+  // Global stop: a genuine budget (maxFiles/maxEntries) has been hit, so all
+  // remaining traversal is aborted.
   truncated: boolean;
+  // Per-subtree prune: at least one branch exceeded maxDepth. This does NOT
+  // abort sibling/ancestor traversal; it is surfaced as traversal.truncated so
+  // the report still honestly signals incomplete coverage.
+  depthLimited: boolean;
   emittedMaxFileWarning: boolean;
   emittedMaxEntryWarning: boolean;
+  emittedMaxDepthWarning: boolean;
 }
 
 interface CandidateHint {
@@ -221,8 +228,10 @@ export async function inspectLocalSource(
     visitedFiles: 0,
     visitedEntries: 0,
     truncated: false,
+    depthLimited: false,
     emittedMaxFileWarning: false,
     emittedMaxEntryWarning: false,
+    emittedMaxDepthWarning: false,
   };
 
   if (sourceType === 'file') {
@@ -266,7 +275,7 @@ export async function inspectLocalSource(
       visitedEntries: state.visitedEntries,
       visitedFiles: state.visitedFiles,
       candidateCount: candidates.length,
-      truncated: state.truncated,
+      truncated: state.truncated || state.depthLimited,
     },
     candidates,
     warnings,
@@ -386,9 +395,14 @@ async function traverseDirectory(options: {
       }
 
       if (depth >= maxDepth) {
-        state.truncated = true;
-        warnings.push(`Traversal stopped at max depth ${maxDepth}: ${relativePath}`);
-        return;
+        // Prune only this over-deep subtree; keep traversing siblings so a
+        // single deep branch cannot drop all later in-bounds candidates.
+        state.depthLimited = true;
+        if (!state.emittedMaxDepthWarning) {
+          warnings.push(`Traversal pruned subtrees at max depth ${maxDepth} (first: ${relativePath})`);
+          state.emittedMaxDepthWarning = true;
+        }
+        continue;
       }
 
       await traverseDirectory({

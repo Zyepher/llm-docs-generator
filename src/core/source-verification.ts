@@ -312,9 +312,14 @@ interface MutableDocsTraversalState {
   visitedFiles: number;
   inspectedFiles: number;
   skippedFiles: number;
+  // Global stop: a genuine budget (maxFiles/maxEntries) has been hit.
   truncated: boolean;
+  // Per-subtree prune: a branch exceeded maxDepth. Does not abort sibling/
+  // ancestor traversal; surfaced as traversal.truncated for honest coverage.
+  depthLimited: boolean;
   emittedMaxEntryWarning: boolean;
   emittedMaxFileWarning: boolean;
+  emittedMaxDepthWarning: boolean;
 }
 
 interface DirectoryEntriesResult {
@@ -482,8 +487,10 @@ async function inspectDocsReferences(options: {
     inspectedFiles: 0,
     skippedFiles: 0,
     truncated: false,
+    depthLimited: false,
     emittedMaxEntryWarning: false,
     emittedMaxFileWarning: false,
+    emittedMaxDepthWarning: false,
   };
 
   if (options.type === 'file') {
@@ -534,7 +541,7 @@ async function inspectDocsReferences(options: {
       visitedFiles: state.visitedFiles,
       inspectedFiles: state.inspectedFiles,
       skippedFiles: state.skippedFiles,
-      truncated: state.truncated,
+      truncated: state.truncated || state.depthLimited,
     },
     files,
     references,
@@ -599,11 +606,15 @@ async function traverseDocsDirectory(options: {
       }
 
       if (options.depth >= options.maxDepth) {
-        options.state.truncated = true;
-        options.warnings.push(
-          `Docs traversal stopped at max depth ${options.maxDepth}: ${relativePath}`
-        );
-        return;
+        // Prune only this over-deep subtree; keep traversing siblings.
+        options.state.depthLimited = true;
+        if (!options.state.emittedMaxDepthWarning) {
+          options.warnings.push(
+            `Docs traversal pruned subtrees at max depth ${options.maxDepth} (first: ${relativePath})`
+          );
+          options.state.emittedMaxDepthWarning = true;
+        }
+        continue;
       }
 
       await traverseDocsDirectory({
@@ -1230,18 +1241,14 @@ async function readDirectoryEntries(options: {
     return { entries, reachedLimit: true };
   }
 
+  const allEntries: Dirent[] = [];
+
   try {
     const directory = await opendir(options.directoryPath);
 
     try {
       for await (const entry of directory) {
-        if (entries.length >= remainingEntries) {
-          emitMaxEntryWarning(options.warnings, options.state, options.maxEntries);
-          reachedLimit = true;
-          break;
-        }
-
-        entries.push(entry);
+        allEntries.push(entry);
       }
     } catch {
       options.warnings.push(
@@ -1256,7 +1263,22 @@ async function readDirectoryEntries(options: {
     return undefined;
   }
 
-  entries.sort((a, b) => compareStringsByCodeUnit(a.name, b.name));
+  // Sort BEFORE applying the entry budget so a truncated directory retains the
+  // lexicographically-first N entries deterministically, rather than whichever
+  // N the filesystem happened to return first (which made the resulting
+  // fileEvidenceIndex.aggregateHash filesystem-order-dependent).
+  allEntries.sort((a, b) => compareStringsByCodeUnit(a.name, b.name));
+
+  if (allEntries.length > remainingEntries) {
+    for (const entry of allEntries.slice(0, remainingEntries)) {
+      entries.push(entry);
+    }
+    emitMaxEntryWarning(options.warnings, options.state, options.maxEntries);
+    reachedLimit = true;
+  } else {
+    entries.push(...allEntries);
+  }
+
   options.state.visitedEntries += entries.length;
 
   return { entries, reachedLimit };
