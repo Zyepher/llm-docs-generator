@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { lstat, open, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
+import { isFileNotFoundError } from './guards.js';
+
 export async function writeTextFileSafely(path: string, content: string): Promise<void> {
   await assertSafeReplaceTarget(path);
 
@@ -37,19 +39,10 @@ async function assertSafeReplaceTarget(path: string): Promise<void> {
       throw new Error(`Refusing to write ${path}: destination exists and is not a regular file.`);
     }
   } catch (error) {
-    if (isPathNotFoundError(error)) {
+    if (isFileNotFoundError(error)) {
       return;
     }
 
     throw error;
   }
-}
-
-function isPathNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-  );
 }

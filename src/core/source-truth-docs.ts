@@ -23,6 +23,7 @@ import {
 } from './source-truth.js';
 import { HASH_PREFIX } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
+import { isFileNotFoundError } from '../utils/guards.js';
 
 export const SOURCE_TRUTH_DOCS_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_TRUTH_DOCS_MODE = 'source-truth-local-docs';
@@ -632,7 +633,7 @@ async function resolveEffectiveOutputPath(outputDir: string): Promise<string> {
         ? canonicalExistingPath
         : join(canonicalExistingPath, ...missingSegments.reverse());
     } catch (error) {
-      if (!isNotFoundError(error)) {
+      if (!isFileNotFoundError(error)) {
         throw error;
       }
     }
@@ -646,12 +647,6 @@ async function resolveEffectiveOutputPath(outputDir: string): Promise<string> {
     missingSegments.push(basename(currentPath));
     currentPath = parentPath;
   }
-}
-
-function isNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT'
-  );
 }
 
 function isSameOrDescendant(parentPath: string, candidatePath: string): boolean {

@@ -28,7 +28,7 @@ import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
-import { isRecord } from '../utils/guards.js';
+import { isRecord, isFileNotFoundError } from '../utils/guards.js';
 import { sha256File } from '../utils/hash.js';
 
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
@@ -352,7 +352,7 @@ export async function cleanupStaleSourceDocsArtifacts(
   try {
     manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as unknown;
   } catch (error) {
-    if (isNotFoundError(error) || error instanceof SyntaxError) {
+    if (isFileNotFoundError(error) || error instanceof SyntaxError) {
       return;
     }
 
@@ -603,7 +603,7 @@ async function resolveParserPluginModuleFile(
   try {
     moduleStats = await lstat(modulePath);
   } catch (error) {
-    if (isNotFoundError(error)) {
+    if (isFileNotFoundError(error)) {
       throw new Error(`parser plugin module file not found: ${modulePath}`);
     }
 
@@ -772,7 +772,7 @@ async function resolveSourceInput(sourceInput: string): Promise<ResolvedSourceDo
 
     throw new Error(`generate --source input must be a local file or directory: ${resolvedPath}`);
   } catch (error) {
-    if (isNotFoundError(error)) {
+    if (isFileNotFoundError(error)) {
       throw new Error(`generate --source path not found: ${resolvedPath}`);
     }
 
@@ -1656,7 +1656,7 @@ async function resolveEffectiveOutputPath(outputDir: string): Promise<string> {
         ? canonicalExistingPath
         : join(canonicalExistingPath, ...missingSegments.reverse());
     } catch (error) {
-      if (!isNotFoundError(error)) {
+      if (!isFileNotFoundError(error)) {
         throw error;
       }
     }
@@ -1698,15 +1698,6 @@ function isSameOrDescendant(parentPath: string, candidatePath: string): boolean 
 
 function isParentRelativePath(path: string): boolean {
   return path === '..' || path.startsWith(`..${sep}`);
-}
-
-function isNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
-      (error as NodeJS.ErrnoException).code === 'ENOTDIR')
-  );
 }
 
 function isDocNodeLike(value: unknown): value is {

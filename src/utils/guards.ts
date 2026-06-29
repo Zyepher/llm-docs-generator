@@ -26,3 +26,19 @@ export function isNonNegativeInteger(value: unknown): value is number {
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * True when a filesystem error means the target path does not exist: ENOENT (no
+ * such entry) or ENOTDIR (a path component is not a directory, e.g. `a/b/c`
+ * where `b` is a file). Several call-sites previously checked only ENOENT, so a
+ * non-directory path component was misclassified as an unexpected error instead
+ * of "not found"; this canonical guard handles both.
+ */
+export function isFileNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error) || !('code' in error)) {
+    return false;
+  }
+
+  const { code } = error as NodeJS.ErrnoException;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}

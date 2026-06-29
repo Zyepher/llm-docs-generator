@@ -25,7 +25,13 @@ import {
   type ParserPluginFormatMetadata,
   type ParserPluginManifestMetadata,
 } from './parser-plugin-manifest.js';
-import { isObjectRecord, isNonEmptyString, isNonNegativeInteger, errorMessage } from '../utils/guards.js';
+import {
+  isObjectRecord,
+  isNonEmptyString,
+  isNonNegativeInteger,
+  errorMessage,
+  isFileNotFoundError,
+} from '../utils/guards.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
@@ -7449,9 +7455,5 @@ function isInsideDirectory(parentDir: string, childPath: string): boolean {
 
 function isParentRelativePath(path: string): boolean {
   return path === '..' || path.startsWith(`..${sep}`);
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-  return isObjectRecord(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR');
 }
 

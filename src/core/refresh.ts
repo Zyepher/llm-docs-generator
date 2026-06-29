@@ -2,7 +2,7 @@ import { lstat, readFile, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 import { writeTextFileSafely } from '../utils/safe-write.js';
-import { isObjectRecord, errorMessage } from '../utils/guards.js';
+import { isObjectRecord, errorMessage, isFileNotFoundError } from '../utils/guards.js';
 import { isSha256Hash } from '../utils/hash.js';
 
 import categoriesConfig from '../../config/categories.json';
@@ -1538,12 +1538,6 @@ function isSameOrDescendant(parentPath: string, candidatePath: string): boolean 
   return (
     relativePath === '' ||
     (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
-  );
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT'
   );
 }
 
