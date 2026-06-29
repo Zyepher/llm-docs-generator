@@ -818,4 +818,44 @@ describe('OpenAPI / Swagger parser', () => {
     expect(untagged.children[3]?.metadata.get('path')).toBe('/foo-bar');
     expect(untagged.children[4]?.metadata.get('path')).toBe('/foo_bar');
   });
+
+  it('parses a YAML anchor-doubling schema DAG in bounded time (regression: exponential blowup)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'anchor-dag.yaml');
+
+    // Each level references the previous anchor TWICE, so js-yaml resolves them
+    // to the same shared object 2^depth times along distinct paths. Without
+    // memoized schema walking this hangs; with it, each node is visited once.
+    const depth = 64;
+    const lines: string[] = [
+      'openapi: 3.0.0',
+      'info:',
+      '  title: Anchor DAG',
+      '  version: 1.0.0',
+      'x-anchors:',
+      '  - &d0 { type: string }',
+    ];
+    for (let level = 1; level <= depth; level += 1) {
+      lines.push(`  - &d${level} { allOf: [*d${level - 1}, *d${level - 1}] }`);
+    }
+    lines.push('paths:');
+    lines.push('  /x:');
+    lines.push('    get:');
+    lines.push('      operationId: getX');
+    lines.push('      responses:');
+    lines.push("        '200':");
+    lines.push('          description: ok');
+    lines.push('          content:');
+    lines.push('            application/json:');
+    lines.push(`              schema: *d${depth}`);
+
+    await writeFile(sourcePath, lines.join('\n'), 'utf-8');
+
+    const start = Date.now();
+    const root = await parseOpenApiFile(sourcePath);
+    const elapsedMs = Date.now() - start;
+
+    expect(root.children.length).toBeGreaterThan(0);
+    expect(elapsedMs).toBeLessThan(2000);
+  });
 });
