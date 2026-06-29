@@ -359,4 +359,30 @@ describe('semantic DocNode chunker', () => {
       },
     ]);
   });
+
+  it('emits a single oversized chunk instead of splitting under an over-large heading context (regression)', () => {
+    // A heading context larger than the chunk budget previously collapsed the
+    // available space to 1 char, splitting prose into thousands of chunks that
+    // each re-prepended the full heading (O(prose x heading) output).
+    const hugeTitle = 'H'.repeat(9000);
+    const root = createDocNode(DocNodeType.ROOT, 'docs', 'Docs', {
+      children: [
+        createDocNode(DocNodeType.SECTION, 'big', hugeTitle, {
+          content: [createContentBlock(ContentBlockType.PROSE, 'word '.repeat(1000))],
+        }),
+      ],
+    });
+
+    const result = chunkDocNode(root);
+
+    // Output stays bounded (a handful of chunks), not O(prose length).
+    expect(result.chunks.length).toBeLessThan(5);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.code === 'oversized_indivisible_block' ||
+          warning.code === 'context_exceeds_max_characters'
+      )
+    ).toBe(true);
+  });
 });

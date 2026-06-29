@@ -359,7 +359,26 @@ function chunkSingleNode(
       continue;
     }
 
-    const available = Math.max(1, maxCharacters - headingContext.length - DOUBLE_NEWLINE.length);
+    const available = maxCharacters - headingContext.length - DOUBLE_NEWLINE.length;
+    const minSplittable = Math.max(1, Math.floor(maxCharacters / 4));
+    if (available < minSplittable) {
+      // The heading context leaves too little room to split this unit
+      // productively. Splitting anyway would emit O(unit length) near-1-char
+      // pieces, each re-prepending the full heading context, blowing output up
+      // to O(unit length x heading length). Emit the unit as a single oversized
+      // chunk instead, mirroring the indivisible-block path.
+      const warning = createWarning(
+        'oversized_indivisible_block',
+        nodePath,
+        `${unit.blockType} block (${unit.text.length} chars) cannot be split: the heading context (${headingContext.length} chars) leaves too little room within the ${maxCharacters} character target.`
+      );
+      currentWarnings.push(warning);
+      globalWarnings.push(warning);
+      currentOversized = true;
+      addPart(unit.text, unit.blockType);
+      continue;
+    }
+
     const pieces = splitTextAtSafeBoundaries(unit.text, available, nodePath, globalWarnings);
     for (const piece of pieces) {
       if (
