@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -30,6 +30,7 @@ import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { isRecord, isFileNotFoundError } from '../utils/guards.js';
 import { isSameOrDescendant, resolveEffectiveOutputPath } from '../utils/fs-path.js';
+import { readJsonFile } from '../utils/json.js';
 import { sha256File } from '../utils/hash.js';
 
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
@@ -351,7 +352,7 @@ export async function cleanupStaleSourceDocsArtifacts(
   let manifest: unknown;
 
   try {
-    manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as unknown;
+    manifest = await readJsonFile(manifestPath);
   } catch (error) {
     if (isFileNotFoundError(error) || error instanceof SyntaxError) {
       return;
@@ -797,7 +798,7 @@ async function assertNotDiscoveryReport(source: ResolvedSourceDocsInput): Promis
   }
 
   try {
-    const parsed = JSON.parse(await readFile(source.resolvedPath, 'utf-8')) as unknown;
+    const parsed = await readJsonFile(source.resolvedPath);
 
     if (!isRecord(parsed)) {
       return;

@@ -2,7 +2,7 @@
  * Generation manifest writer for the configured SDK compatibility flow.
  */
 
-import { lstat, mkdir, readFile, stat } from 'node:fs/promises';
+import { lstat, mkdir, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, parse, relative, resolve, sep, win32 } from 'node:path';
 
@@ -36,6 +36,7 @@ import { writeTextFileSafely } from '../utils/safe-write.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { isParentRelativePath } from '../utils/fs-path.js';
+import { readJsonFile } from '../utils/json.js';
 import {
   HASH_PREFIX,
   sha256File,
@@ -1310,7 +1311,7 @@ export async function recordRefreshProvenanceInManifest(options: {
   mode: RefreshSourceManifestMode;
   refreshedAt?: Date;
 }): Promise<RefreshProvenance> {
-  const manifest = JSON.parse(await readFile(options.manifestPath, 'utf-8')) as unknown;
+  const manifest = await readJsonFile(options.manifestPath);
 
   if (!isObjectRecord(manifest)) {
     throw new Error('refreshed manifest must be an object before recording refresh provenance');
@@ -1344,7 +1345,7 @@ export async function verifyManifestFile(
   let manifest: unknown;
 
   try {
-    manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as unknown;
+    manifest = await readJsonFile(manifestPath);
   } catch (error) {
     if (isFileNotFoundError(error)) {
       return {
@@ -2360,7 +2361,7 @@ interface DiscoveryReportSummary {
 
 async function readDiscoveryReportJson(reportPath: string): Promise<unknown> {
   try {
-    return JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+    return await readJsonFile(reportPath);
   } catch (error) {
     throw new Error(
       `discovery report must be readable JSON before writing manifest: ${errorMessage(error)}`
@@ -4454,7 +4455,7 @@ async function verifyDiscoveryReportFile(options: {
   let report: unknown;
 
   try {
-    report = JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+    report = await readJsonFile(reportPath);
   } catch (error) {
     failures.push(`discovery report: malformed JSON: ${errorMessage(error)}`);
     return;
@@ -6482,7 +6483,7 @@ async function verifySourceVerificationReportFile(options: {
   let report: unknown;
 
   try {
-    report = JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+    report = await readJsonFile(reportPath);
   } catch (error) {
     failures.push(`source-verification report: malformed JSON: ${errorMessage(error)}`);
     return;
@@ -6728,7 +6729,7 @@ async function verifySourceTruthReportFile(options: {
   let report: unknown;
 
   try {
-    report = JSON.parse(await readFile(reportPath, 'utf-8')) as unknown;
+    report = await readJsonFile(reportPath);
   } catch (error) {
     failures.push(`source-truth report: malformed JSON: ${errorMessage(error)}`);
     return;

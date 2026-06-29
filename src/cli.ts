@@ -43,6 +43,7 @@ import { SOURCE_VERIFICATION_MODE } from './core/source-verification.js';
 import { fetchSpec } from './utils/fetcher.js';
 import { isObjectRecord, isNonNegativeInteger, isFileNotFoundError } from './utils/guards.js';
 import { sha256Hex } from './utils/hash.js';
+import { readJsonFile } from './utils/json.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
 // ============================================================================
@@ -243,7 +244,7 @@ async function removeOwnedJsonFile(
   let content: unknown;
 
   try {
-    content = JSON.parse(await readFile(path, 'utf-8')) as unknown;
+    content = await readJsonFile(path);
   } catch {
     return;
   }
