@@ -1,6 +1,6 @@
 ---
 name: llm-docs-generator
-description: Maintain or use llm-docs-generator as a deterministic documentation-pack CLI. Use when working in this repository, checking implemented CLI capabilities, planning next-gen slices, or generating evidence-bound local docs with the current command surface.
+description: Maintain or use llm-docs-generator as a deterministic documentation-pack CLI. Use when working in this repository, checking implemented CLI capabilities, planning future slices, or generating evidence-bound local docs with the current command surface.
 ---
 
 # llm-docs-generator
@@ -51,6 +51,12 @@ llm-docs agent doctor --json
 
 4. Use only implemented deterministic commands for the task.
 5. Report warnings, planned/unsupported capabilities, and incomplete evidence honestly.
+
+## Pack Navigation (Agent-Authored Index)
+
+After generating a source-docs pack, write a short `llm-docs/index.md` that maps the pack's contents: the generated `*-llms.txt` file(s) and the main topics or sections inside, with a one-line note for each. The goal is that in a later session you read the index first and load only what you need, instead of pulling the whole pack into context.
+
+This index is your navigation aid, not a CLI output: it is not recorded in `manifest.json` and `verify` ignores it. Keep it accurate to the files actually present; the verified pack content remains the source of truth.
 
 ## External Target Workflow
 
