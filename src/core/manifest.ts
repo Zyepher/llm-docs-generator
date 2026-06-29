@@ -115,6 +115,18 @@ import type {
   ManifestContractMode,
   RefreshSourceManifestMode,
 } from './manifest/constants.js';
+import {
+  formatAllowedOutputKinds,
+  isAllowedOutputKind,
+  isDiscoveryReportKind,
+  isInsideDirectory,
+  isIsoTimestampString,
+  isManifestContractMode,
+  isPositiveInteger,
+  isSourceDocsSourceType,
+  isSourceTruthSourceType,
+  isStringArray,
+} from './manifest/predicates.js';
 
 export {
   CONFIGURED_SDK_MODE,
@@ -3063,10 +3075,6 @@ function validateManifestContractStringArray(
       `malformed manifest: manifestContract.${key} must match the expected ${key} for ${expectedMode}`
     );
   }
-}
-
-function isManifestContractMode(value: string): value is ManifestContractMode {
-  return Object.prototype.hasOwnProperty.call(MANIFEST_CONTRACT_BY_MODE, value);
 }
 
 function validateRequiredInputProvenance(
@@ -7135,57 +7143,4 @@ async function verifyPathType(check: PathTypeCheck, failures: string[]): Promise
   }
 }
 
-
-function isIsoTimestampString(value: unknown): value is string {
-  if (typeof value !== 'string') {
-    return false;
-  }
-
-  const date = new Date(value);
-
-  return !Number.isNaN(date.valueOf()) && date.toISOString() === value;
-}
-
-function isPositiveInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
-}
-
-function isAllowedOutputKind(value: unknown, allowedKinds: ReadonlySet<string>): value is string {
-  return typeof value === 'string' && allowedKinds.has(value);
-}
-
-function isDiscoveryReportKind(value: unknown): value is DiscoveryReportKind {
-  return (
-    typeof value === 'string' &&
-    Object.prototype.hasOwnProperty.call(DISCOVERY_REPORT_MODE_BY_KIND, value)
-  );
-}
-
-function formatAllowedOutputKinds(allowedKinds: ReadonlySet<string>): string {
-  const kinds = [...allowedKinds];
-
-  if (kinds.length <= 1) {
-    return kinds[0] ?? 'a supported output kind';
-  }
-
-  return `${kinds.slice(0, -1).join(', ')} or ${kinds[kinds.length - 1]}`;
-}
-
-function isSourceDocsSourceType(value: unknown): value is 'file' | 'directory' {
-  return typeof value === 'string' && SOURCE_DOCS_SOURCE_TYPES.has(value);
-}
-
-function isSourceTruthSourceType(value: unknown): value is 'file' | 'directory' {
-  return typeof value === 'string' && SOURCE_DOCS_SOURCE_TYPES.has(value);
-}
-
-function isInsideDirectory(parentDir: string, childPath: string): boolean {
-  const relativePath = relative(parentDir, childPath);
-
-  return relativePath === '' || (!isParentRelativePath(relativePath) && !isAbsolute(relativePath));
-}
 
