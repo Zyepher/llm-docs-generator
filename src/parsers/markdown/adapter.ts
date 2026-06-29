@@ -44,6 +44,9 @@ export function markdownToDocNode(
   metadata.set('path', doc.path);
 
   const root = createDocNode(docType, extractIdFromPath(doc.path), doc.title, {
+    // Preserve document-level (headingless / leading) content on the root node
+    // so it is not lost for sources that have no headings.
+    content: doc.content.map((c) => convertContent(c)),
     metadata,
   });
 

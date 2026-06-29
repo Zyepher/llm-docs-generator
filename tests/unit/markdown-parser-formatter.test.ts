@@ -89,7 +89,7 @@ describe('Markdown/DocC parser and universal formatter acceptance', () => {
 
     const docNode = await parser.parse(sourcePath);
 
-    expect(docNode.type).toBe('SECTION');
+    expect(docNode.type).toBe(DocNodeType.SECTION);
     expect(docNode.title).toBe('DocC Acceptance Guide');
     expect(docNode.metadata.get('format')).toBe('markdown');
     expect(docNode.metadata.get('path')).toBe(sourcePath);

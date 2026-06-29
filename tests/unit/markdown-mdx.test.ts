@@ -325,3 +325,75 @@ describe('Markdown parser MDX cleanup', () => {
     expect(parsedText).not.toContain('<AccordionItem');
   });
 });
+
+describe('Markdown parser structure preservation', () => {
+  it('preserves content of a headingless markdown document (regression: total content loss)', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'README.md');
+
+    await writeFile(
+      sourcePath,
+      [
+        'This project does a thing. It has no headings at all.',
+        '',
+        'A second paragraph with more detail.',
+        '',
+        '```bash',
+        'npm install thing',
+        '```',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const parser = new MarkdownFormatParser();
+    const docNode = await parser.parse(sourcePath);
+
+    const text = collectText(docNode);
+    expect(text).toContain('This project does a thing');
+    expect(text).toContain('A second paragraph with more detail');
+
+    const codeBlocks = collectCodeBlocks(docNode);
+    expect(codeBlocks.join('\n')).toContain('npm install thing');
+  });
+
+  it('preserves leading prose that appears before the first heading', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'intro.md');
+
+    await writeFile(
+      sourcePath,
+      [
+        'Intro paragraph before any heading.',
+        '',
+        '# Title',
+        '',
+        'Body under the title.',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const parser = new MarkdownFormatParser();
+    const docNode = await parser.parse(sourcePath);
+
+    const text = collectText(docNode);
+    expect(text).toContain('Intro paragraph before any heading');
+    expect(text).toContain('Body under the title');
+  });
+
+  it('does not hang on an unterminated MDX string literal (regression: ReDoS in delimiterBalance)', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'redos.mdx');
+
+    // A long run of backslashes inside an unterminated quoted string used to
+    // trigger catastrophic regex backtracking; assert it completes quickly.
+    const malicious = `<Cmp value="${'\\'.repeat(80)}`;
+    await writeFile(sourcePath, ['# Heading', '', malicious, ''].join('\n'), 'utf-8');
+
+    const parser = new MarkdownFormatParser();
+    const start = Date.now();
+    await parser.parse(sourcePath);
+    const elapsedMs = Date.now() - start;
+
+    expect(elapsedMs).toBeLessThan(2000);
+  });
+});
