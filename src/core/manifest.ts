@@ -127,6 +127,25 @@ import {
   isSourceTruthSourceType,
   isStringArray,
 } from './manifest/predicates.js';
+import {
+  optionalBooleanOrNullField,
+  optionalNonNegativeIntegerField,
+  optionalStringArrayField,
+  optionalStringArraysEqual,
+  optionalStringOrNullField,
+  requireStringArray,
+  requiredArrayField,
+  requiredBooleanField,
+  requiredFalseField,
+  requiredNonNegativeIntegerField,
+  requiredObjectField,
+  requiredPositiveIntegerField,
+  requiredStringField,
+  requiredUnprefixedSha256Field,
+  stringArraysEqual,
+  validateAllowedKeys,
+  validateOptionalStringArray,
+} from './manifest/field-validators.js';
 
 export {
   CONFIGURED_SDK_MODE,
@@ -2476,62 +2495,6 @@ function discoveryCandidateEvidenceIndexesEqual(
   return JSON.stringify(expected) === JSON.stringify(actual);
 }
 
-function requiredObjectField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): Record<string, unknown> {
-  const fieldValue = value[field];
-
-  if (!isObjectRecord(fieldValue)) {
-    throw new Error(`${label}.${field} must be an object`);
-  }
-
-  return fieldValue;
-}
-
-function requiredStringField(value: Record<string, unknown>, field: string, label: string): string {
-  const fieldValue = value[field];
-
-  if (!isNonEmptyString(fieldValue)) {
-    throw new Error(`${label}.${field} must be a non-empty string`);
-  }
-
-  return fieldValue;
-}
-
-function requiredArrayField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): unknown[] {
-  const fieldValue = value[field];
-
-  if (!Array.isArray(fieldValue)) {
-    throw new Error(`${label}.${field} must be an array`);
-  }
-
-  return fieldValue;
-}
-
-function optionalNonNegativeIntegerField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): number | undefined {
-  const fieldValue = value[field];
-
-  if (fieldValue === undefined) {
-    return undefined;
-  }
-
-  if (!isNonNegativeInteger(fieldValue)) {
-    throw new Error(`${label}.${field} must be a non-negative integer when present`);
-  }
-
-  return fieldValue;
-}
-
 function summarizeGeneratedArtifactFiles(files: unknown[]): ArtifactFileSummary {
   const entries = files.map((file, index) =>
     artifactSummaryFileMetadata(file, `artifact summary generatedOutputs[${index}]`, 'kind')
@@ -2821,134 +2784,6 @@ function artifactSummaryIndexes(
   }
 
   return undefined;
-}
-
-function optionalStringOrNullField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): string | null {
-  const fieldValue = value[field];
-
-  if (fieldValue === undefined || fieldValue === null) {
-    return null;
-  }
-
-  if (!isNonEmptyString(fieldValue)) {
-    throw new Error(`${label}.${field} must be a non-empty string or null`);
-  }
-
-  return fieldValue;
-}
-
-function requiredBooleanField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): boolean {
-  const fieldValue = value[field];
-
-  if (typeof fieldValue !== 'boolean') {
-    throw new Error(`${label}.${field} must be a boolean`);
-  }
-
-  return fieldValue;
-}
-
-function optionalBooleanOrNullField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): boolean | null {
-  const fieldValue = value[field];
-
-  if (fieldValue === undefined || fieldValue === null) {
-    return null;
-  }
-
-  if (typeof fieldValue !== 'boolean') {
-    throw new Error(`${label}.${field} must be a boolean or null`);
-  }
-
-  return fieldValue;
-}
-
-function requiredFalseField(value: Record<string, unknown>, field: string, label: string): false {
-  const fieldValue = value[field];
-
-  if (fieldValue !== false) {
-    throw new Error(`${label}.${field} must be false`);
-  }
-
-  return false;
-}
-
-function requiredPositiveIntegerField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): number {
-  const fieldValue = value[field];
-
-  if (!isPositiveInteger(fieldValue)) {
-    throw new Error(`${label}.${field} must be a positive integer`);
-  }
-
-  return fieldValue;
-}
-
-function requiredNonNegativeIntegerField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): number {
-  const fieldValue = value[field];
-
-  if (!isNonNegativeInteger(fieldValue)) {
-    throw new Error(`${label}.${field} must be a non-negative integer`);
-  }
-
-  return fieldValue;
-}
-
-function requiredUnprefixedSha256Field(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): string {
-  const fieldValue = value[field];
-
-  if (!isUnprefixedSha256Hash(fieldValue)) {
-    throw new Error(`${label}.${field} must be a sha256 hex digest`);
-  }
-
-  return fieldValue;
-}
-
-function optionalStringArrayField(
-  value: Record<string, unknown>,
-  field: string,
-  label: string
-): string[] {
-  const fieldValue = value[field];
-
-  if (fieldValue === undefined) {
-    return [];
-  }
-
-  if (!Array.isArray(fieldValue)) {
-    throw new Error(`${label}.${field} must be a string array`);
-  }
-
-  return requireStringArray(fieldValue, `${label}.${field}`);
-}
-
-function requireStringArray(values: unknown[], label: string): string[] {
-  if (!values.every((value) => typeof value === 'string')) {
-    throw new Error(`${label} must contain only strings`);
-  }
-
-  return values;
 }
 
 function buildRefreshProvenance(
@@ -3566,22 +3401,6 @@ function validateArtifactSummaryOptionalStringArray(
   }
 }
 
-function optionalStringArraysEqual(left: unknown, right: string[] | undefined): boolean {
-  if (left === undefined && right === undefined) {
-    return true;
-  }
-
-  if (!Array.isArray(left) || !left.every((entry) => typeof entry === 'string')) {
-    return false;
-  }
-
-  if (right === undefined) {
-    return false;
-  }
-
-  return stringArraysEqual(left, right);
-}
-
 function artifactIndexSummariesEqual(
   actual: Record<string, unknown>,
   expected: ArtifactIndexSummary
@@ -3676,12 +3495,6 @@ function isRefreshIsoDatetimeString(value: unknown): value is string {
   const time = Date.parse(value);
 
   return Number.isFinite(time) && new Date(time).toISOString() === value;
-}
-
-function stringArraysEqual(actual: string[], expected: readonly string[]): boolean {
-  return (
-    actual.length === expected.length && actual.every((value, index) => value === expected[index])
-  );
 }
 
 function validateGeneratorMetadata(generator: Record<string, unknown>, failures: string[]): void {
@@ -5016,28 +4829,6 @@ function validateOptionalCandidateSourceResources(
   return resources;
 }
 
-function validateOptionalStringArray(
-  value: unknown,
-  label: string,
-  failures: string[]
-): string[] | undefined {
-  if (value === undefined) {
-    return [];
-  }
-
-  if (!Array.isArray(value)) {
-    failures.push(`malformed manifest: ${label} must be a string array when present`);
-    return undefined;
-  }
-
-  if (!value.every((entry) => typeof entry === 'string')) {
-    failures.push(`malformed manifest: ${label} must contain only strings`);
-    return undefined;
-  }
-
-  return value;
-}
-
 function verifyDiscoveryCandidateEvidenceIndexAgainstReport(options: {
   discoveryKind: DiscoveryReportKind;
   report: Record<string, unknown>;
@@ -5521,19 +5312,6 @@ function sourceDocsSemanticChunkOutputPaths(
   }
 
   return paths;
-}
-
-function validateAllowedKeys(
-  value: Record<string, unknown>,
-  allowedKeys: ReadonlySet<string>,
-  label: string,
-  failures: string[]
-): void {
-  for (const key of Object.keys(value)) {
-    if (!allowedKeys.has(key)) {
-      failures.push(`malformed manifest: ${label}.${key} is not supported`);
-    }
-  }
 }
 
 function validateSourceDocsPresetMetadata(preset: unknown, failures: string[]): void {
