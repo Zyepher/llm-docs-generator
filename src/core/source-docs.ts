@@ -1214,8 +1214,13 @@ async function writeSemanticChunksJsonl(
   const chunksDir = join(outputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
   const chunksPath = join(chunksDir, SOURCE_DOCS_CHUNKS_JSONL);
   const chunkResult = chunkDocNode(root);
+  // Index node-wide warnings by node path ONCE (O(W)) so each chunk merges its
+  // warnings in O(1) instead of rescanning the whole global list per chunk
+  // (which was O(chunks x warnings), i.e. O(C^2) when oversized-block warnings
+  // scale with chunk count).
+  const nodeWideWarnings = buildNodeWideWarningIndex(chunkResult.warnings);
   const lines = chunkResult.chunks.map((chunk) =>
-    JSON.stringify(toSemanticChunkJsonlRecord(chunk, chunkResult.warnings))
+    JSON.stringify(toSemanticChunkJsonlRecord(chunk, nodeWideWarnings))
   );
   const jsonl = lines.length === 0 ? '' : `${lines.join('\n')}\n`;
 
@@ -1244,9 +1249,9 @@ async function writeSemanticChunksJsonl(
 
 function toSemanticChunkJsonlRecord(
   chunk: SemanticChunk,
-  globalWarnings: SemanticChunkWarning[]
+  nodeWideWarnings: Map<string, SemanticChunkWarning[]>
 ): SemanticChunk {
-  const warnings = semanticChunkWarningsForRecord(chunk, globalWarnings);
+  const warnings = semanticChunkWarningsForRecord(chunk, nodeWideWarnings);
   const record: SemanticChunk = {
     id: chunk.id,
     ordinal: chunk.ordinal,
@@ -1271,17 +1276,50 @@ function toSemanticChunkJsonlRecord(
   return record;
 }
 
-function semanticChunkWarningsForRecord(
-  chunk: SemanticChunk,
+// Block-specific warning codes are already attached to the exact chunk that
+// produced them (via chunk.warnings). Merging them back from the global list by
+// node path would wrongly copy one chunk's per-piece warning onto sibling
+// chunks of the same node, inflating warningCount. Only node-wide warnings are
+// merged.
+const BLOCK_SPECIFIC_WARNING_CODES: ReadonlySet<string> = new Set([
+  'hard_text_split',
+  'oversized_indivisible_block',
+]);
+
+function nodePathKey(nodePath: string[]): string {
+  return JSON.stringify(nodePath);
+}
+
+function buildNodeWideWarningIndex(
   globalWarnings: SemanticChunkWarning[]
-): SemanticChunkWarning[] {
-  const warnings = [...chunk.warnings];
+): Map<string, SemanticChunkWarning[]> {
+  const index = new Map<string, SemanticChunkWarning[]>();
 
   for (const warning of globalWarnings) {
-    if (!sameStringArray(warning.nodePath, chunk.nodePath)) {
+    if (BLOCK_SPECIFIC_WARNING_CODES.has(warning.code)) {
       continue;
     }
 
+    const key = nodePathKey(warning.nodePath);
+    const bucket = index.get(key);
+    if (bucket === undefined) {
+      index.set(key, [warning]);
+    } else {
+      bucket.push(warning);
+    }
+  }
+
+  return index;
+}
+
+function semanticChunkWarningsForRecord(
+  chunk: SemanticChunk,
+  nodeWideWarnings: Map<string, SemanticChunkWarning[]>
+): SemanticChunkWarning[] {
+  const warnings = [...chunk.warnings];
+  const candidates = nodeWideWarnings.get(nodePathKey(chunk.nodePath)) ?? [];
+
+  for (const warning of candidates) {
     if (warnings.some((existingWarning) => sameSemanticChunkWarning(existingWarning, warning))) {
       continue;
     }

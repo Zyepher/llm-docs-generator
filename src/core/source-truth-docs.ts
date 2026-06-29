@@ -484,11 +484,23 @@ async function buildManifest(
   };
 }
 
+// Cap concurrent open file descriptors. An unbounded Promise.all over every
+// fact-bearing file (up to the traversal maxFiles, e.g. thousands) could exhaust
+// the descriptor limit (EMFILE) on large source trees.
+const SOURCE_TRUTH_MANIFEST_READ_CONCURRENCY = 32;
+
 async function describeSourceTruthManifestSourceFiles(
   files: SourceTruthFileEvidence[]
 ): Promise<SourceTruthManifestSourceFile[]> {
-  return Promise.all(
-    filesWithAnyFacts(files).map(async (file) => {
+  const targets = filesWithAnyFacts(files);
+  const results = new Array<SourceTruthManifestSourceFile>(targets.length);
+  let cursor = 0;
+
+  const worker = async (): Promise<void> => {
+    while (cursor < targets.length) {
+      const index = cursor;
+      cursor += 1;
+      const file = targets[index]!;
       const metadata = await describeGeneratedTextOutput(file.resolvedPath);
       const hash = formatHash(file.sha256 ?? '');
 
@@ -498,7 +510,7 @@ async function describeSourceTruthManifestSourceFiles(
         );
       }
 
-      return {
+      results[index] = {
         path: file.path,
         resolvedPath: file.resolvedPath,
         byteSize: file.byteSize,
@@ -512,8 +524,13 @@ async function describeSourceTruthManifestSourceFiles(
         contextFactCount: file.contextFacts.length,
         parseDiagnosticCount: file.parseDiagnostics?.length ?? 0,
       };
-    })
-  );
+    }
+  };
+
+  const workerCount = Math.min(SOURCE_TRUTH_MANIFEST_READ_CONCURRENCY, targets.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return results;
 }
 
 function buildFailure(
