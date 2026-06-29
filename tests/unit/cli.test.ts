@@ -6972,9 +6972,9 @@ describe('CLI compatibility behavior', () => {
       truncated: true,
     });
     expect(report.candidates.map((candidate) => candidate.path)).toEqual(['a.md']);
-    expect(report.warnings).toContain('Traversal stopped at max depth 0: z-nested');
+    expect(report.warnings).toContain('Traversal pruned subtrees at max depth 0 (first: z-nested)');
     expect(reportFromDisk.traversal.truncated).toBe(true);
-    expect(reportFromDisk.warnings).toContain('Traversal stopped at max depth 0: z-nested');
+    expect(reportFromDisk.warnings).toContain('Traversal pruned subtrees at max depth 0 (first: z-nested)');
   });
 
   it('reports truncated local discovery when maxEntries bounds directory fanout', async () => {
@@ -11566,7 +11566,7 @@ describe('CLI compatibility behavior', () => {
     expect(report.traversal.maxEntries).toBe(9);
     expect(report.traversal.maxFiles).toBe(4);
     expect(report.traversal.truncated).toBe(true);
-    expect(report.warnings).toContain('Traversal stopped at max depth 0: nested');
+    expect(report.warnings).toContain('Traversal pruned subtrees at max depth 0 (first: nested)');
     expect(report.candidates.map((candidate) => candidate.path)).toEqual(['guide.md']);
     expect(manifest.discovery.candidateCount).toBe(report.candidates.length);
     expect(manifest.candidateEvidenceIndex?.candidateCount).toBe(report.candidates.length);

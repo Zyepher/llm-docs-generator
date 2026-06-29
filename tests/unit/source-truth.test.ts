@@ -1755,7 +1755,9 @@ describe('source-truth inspection', () => {
     expect(depthReport.facts.map((fact) => fact.name)).toEqual(['root']);
     expect(depthReport.traversal.truncated).toBe(true);
     expect(depthReport.warnings).toContain('Skipped symbolic link: linked.ts');
-    expect(depthReport.warnings).toContain('Traversal stopped at max depth 0: z-nested');
+    expect(depthReport.warnings).toContain(
+      'Traversal pruned subtrees at max depth 0 (first: z-nested)'
+    );
 
     const fullReport = await inspectSourceTruth({ source: sourceDir });
 
@@ -1764,6 +1766,30 @@ describe('source-truth inspection', () => {
     expect(fullReport.warnings).toContain('Skipped symbolic link: linked.ts');
     expect(fullReport.warnings).toContain('Skipped directory by default: node_modules');
     expect(fullReport.files.some((file) => file.path.includes('ignored'))).toBe(false);
+  });
+
+  it('prunes only the over-deep subtree and still traverses later siblings (regression)', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-depth-prune-');
+    const sourceDir = join(dir, 'source');
+    // 'a-deep' sorts before 'b-shallow', so the old global-abort behavior would
+    // drop 'b-shallow/found.ts' the moment 'a-deep/nested' exceeded maxDepth.
+    await mkdir(join(sourceDir, 'a-deep/nested'), { recursive: true });
+    await mkdir(join(sourceDir, 'b-shallow'), { recursive: true });
+    await writeFile(join(sourceDir, 'a-deep/shallow.ts'), 'export const shallow = true;\n', 'utf-8');
+    await writeFile(join(sourceDir, 'a-deep/nested/deep.ts'), 'export const deep = true;\n', 'utf-8');
+    await writeFile(join(sourceDir, 'b-shallow/found.ts'), 'export const found = true;\n', 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir, maxDepth: 1 });
+
+    expect(report.files.map((file) => file.path)).toEqual([
+      'a-deep/shallow.ts',
+      'b-shallow/found.ts',
+    ]);
+    expect(report.facts.map((fact) => fact.name)).toEqual(['shallow', 'found']);
+    expect(report.traversal.truncated).toBe(true);
+    expect(report.warnings).toContain(
+      'Traversal pruned subtrees at max depth 1 (first: a-deep/nested)'
+    );
   });
 
   it('rejects explicit source paths that traverse an intermediate symlink component', async () => {

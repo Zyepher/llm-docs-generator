@@ -268,9 +268,14 @@ interface MutableTraversalState {
   visitedFiles: number;
   inspectedFiles: number;
   skippedFiles: number;
+  // Global stop: a genuine budget (maxFiles/maxEntries) has been hit.
   truncated: boolean;
+  // Per-subtree prune: a branch exceeded maxDepth. Does not abort sibling/
+  // ancestor traversal; surfaced as traversal.truncated for honest coverage.
+  depthLimited: boolean;
   emittedMaxEntryWarning: boolean;
   emittedMaxFileWarning: boolean;
+  emittedMaxDepthWarning: boolean;
 }
 
 interface DirectoryEntriesResult {
@@ -318,8 +323,10 @@ export async function inspectSourceTruth(
     inspectedFiles: 0,
     skippedFiles: 0,
     truncated: false,
+    depthLimited: false,
     emittedMaxEntryWarning: false,
     emittedMaxFileWarning: false,
+    emittedMaxDepthWarning: false,
   };
 
   if (sourceType === 'file') {
@@ -381,7 +388,7 @@ export async function inspectSourceTruth(
       visitedFiles: state.visitedFiles,
       inspectedFiles: state.inspectedFiles,
       skippedFiles: state.skippedFiles,
-      truncated: state.truncated,
+      truncated: state.truncated || state.depthLimited,
     },
     files,
     facts,
@@ -506,9 +513,13 @@ async function traverseDirectory(options: {
       }
 
       if (depth >= maxDepth) {
-        state.truncated = true;
-        warnings.push(`Traversal stopped at max depth ${maxDepth}: ${relativePath}`);
-        return;
+        // Prune only this over-deep subtree; keep traversing siblings.
+        state.depthLimited = true;
+        if (!state.emittedMaxDepthWarning) {
+          warnings.push(`Traversal pruned subtrees at max depth ${maxDepth} (first: ${relativePath})`);
+          state.emittedMaxDepthWarning = true;
+        }
+        continue;
       }
 
       await traverseDirectory({
