@@ -21,6 +21,7 @@ import {
   type SourceTruthSourceType,
   type SourceTruthTraversalSettings,
 } from './source-truth.js';
+import { compareStringsByCodeUnit } from '../utils/sort.js';
 
 export const SOURCE_TRUTH_DOCS_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_TRUTH_DOCS_MODE = 'source-truth-local-docs';
@@ -737,18 +738,4 @@ function longestRun(value: string, character: string): number {
 
 function escapeMarkdownText(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
-}
-
-function compareStringsByCodeUnit(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-
-  for (let index = 0; index < length; index++) {
-    const difference = a.charCodeAt(index) - b.charCodeAt(index);
-
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return a.length - b.length;
 }

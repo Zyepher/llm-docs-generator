@@ -14,6 +14,7 @@ import {
 } from 'node:path';
 
 import { isObjectRecord } from '../utils/guards.js';
+import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
   buildArtifactSummaryForManifest,
@@ -1643,18 +1644,4 @@ function isNotFoundError(error: unknown): boolean {
     ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
       (error as NodeJS.ErrnoException).code === 'ENOTDIR')
   );
-}
-
-function compareStringsByCodeUnit(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-
-  for (let index = 0; index < length; index++) {
-    const difference = a.charCodeAt(index) - b.charCodeAt(index);
-
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return a.length - b.length;
 }

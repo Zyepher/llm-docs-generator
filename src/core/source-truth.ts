@@ -6,6 +6,7 @@ import { basename, extname, join, parse, relative, resolve, sep } from 'node:pat
 import ts from 'typescript';
 
 import { isRecord } from '../utils/guards.js';
+import { compareStringsByCodeUnit } from '../utils/sort.js';
 
 export const SOURCE_TRUTH_REPORT_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_TRUTH_INSPECTION_MODE = 'source-truth-local-evidence';
@@ -2575,20 +2576,6 @@ function toRelativePath(rootPath: string, targetPath: string): string {
 
 function normalizePathForReport(path: string): string {
   return path.split(sep).join('/');
-}
-
-function compareStringsByCodeUnit(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-
-  for (let index = 0; index < length; index++) {
-    const difference = a.charCodeAt(index) - b.charCodeAt(index);
-
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return a.length - b.length;
 }
 
 function resolveTraversalBound(

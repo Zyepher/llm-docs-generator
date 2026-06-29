@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isObjectRecord, isNonEmptyString, isNonNegativeInteger } from '../utils/guards.js';
+import { compareStringsByCodeUnit } from '../utils/sort.js';
 
 const HASH_SEED = 'llm-docs-generator:source-verification-file-evidence-index:v1\n';
 const HASH_PREFIX = 'sha256:';
@@ -746,10 +747,6 @@ function compareDocsFileEntries(
     compareStringsByCodeUnit(left.path, right.path) ||
     compareStringsByCodeUnit(left.status, right.status)
   );
-}
-
-function compareStringsByCodeUnit(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function isFileStatus(value: unknown): value is string {
