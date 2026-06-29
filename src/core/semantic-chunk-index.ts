@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { isObjectRecord, errorMessage } from '../utils/guards.js';
 import { HASH_PREFIX, sha256Hex, isUnprefixedSha256Hash } from '../utils/hash.js';
+import { estimateTokenCount } from '../utils/text-metrics.js';
 
 const SEMANTIC_CHUNK_INDEX_HASH_CONTEXT =
   'llm-docs-generator:source-docs-semantic-chunks-jsonl-index:v1';
@@ -201,7 +202,7 @@ function parseSemanticChunkJsonlLine(
     throw new Error(`${outputPath}: line ${lineNumber} characterCount does not match content`);
   }
 
-  const actualEstimatedTokenCount = estimateSemanticChunkTokenCount(content);
+  const actualEstimatedTokenCount = estimateTokenCount(content);
   if (estimatedTokenCount !== actualEstimatedTokenCount) {
     throw new Error(
       `${outputPath}: line ${lineNumber} estimatedTokenCount does not match content`
@@ -221,10 +222,6 @@ function parseSemanticChunkJsonlLine(
     ...optionalStringField(record, 'sourcePath', outputPath, lineNumber),
     warningCount: warnings.length,
   };
-}
-
-function estimateSemanticChunkTokenCount(content: string): number {
-  return Math.ceil(content.length / 4);
 }
 
 function requiredString(

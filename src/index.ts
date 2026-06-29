@@ -10,7 +10,8 @@ export type { HtmlDocument, HtmlLink, HtmlParserWarning } from './parsers/html/i
 export { RstFormatParser, parseRstFile, rstParser } from './parsers/rst/index.js';
 export type { RstDocument } from './parsers/rst/index.js';
 export { LLMFormatter, formatSpecData } from './core/formatter.js';
-export { DEFAULT_CHUNK_MAX_CHARACTERS, chunkDocNode, estimateTokenCount } from './core/chunker.js';
+export { DEFAULT_CHUNK_MAX_CHARACTERS, chunkDocNode } from './core/chunker.js';
+export { estimateTokenCount } from './utils/text-metrics.js';
 export type {
   ChunkDocNodeOptions,
   ChunkDocNodeResult,
