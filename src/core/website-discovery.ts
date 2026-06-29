@@ -6,6 +6,7 @@ import { request } from 'undici';
 
 import { DISCOVERY_REPORT_SCHEMA_VERSION } from './discovery.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
+import { compareStringsByCodeUnit } from '../utils/sort.js';
 
 export const WEBSITE_BOUNDED_INSPECTION_MODE = 'website-bounded-inspection';
 export const DEFAULT_WEBSITE_FETCH_TIMEOUT_MS = 10_000;
@@ -1115,20 +1116,6 @@ function resolvePositiveSafeInteger(
   }
 
   return value;
-}
-
-function compareStringsByCodeUnit(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-
-  for (let index = 0; index < length; index++) {
-    const difference = a.charCodeAt(index) - b.charCodeAt(index);
-
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return a.length - b.length;
 }
 
 function formatFetchError(error: unknown): string {

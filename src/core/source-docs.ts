@@ -29,6 +29,7 @@ import { formatDocNode } from './universal-formatter.js';
 import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
+import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { isRecord } from '../utils/guards.js';
 
 const HASH_PREFIX = 'sha256:';
@@ -1712,20 +1713,6 @@ function isSameOrDescendant(parentPath: string, candidatePath: string): boolean 
 
 function isParentRelativePath(path: string): boolean {
   return path === '..' || path.startsWith(`..${sep}`);
-}
-
-function compareStringsByCodeUnit(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-
-  for (let index = 0; index < length; index++) {
-    const difference = a.charCodeAt(index) - b.charCodeAt(index);
-
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return a.length - b.length;
 }
 
 function isNotFoundError(error: unknown): boolean {

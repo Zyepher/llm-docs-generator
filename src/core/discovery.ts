@@ -4,6 +4,7 @@ import type { Dirent, Stats } from 'node:fs';
 import { lstat, mkdir, opendir } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 
+import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 
 export const DISCOVERY_REPORT_SCHEMA_VERSION = '0.2.0';
@@ -758,20 +759,6 @@ function toRelativePath(rootPath: string, targetPath: string): string {
 
 function normalizePathForReport(path: string): string {
   return path.split(sep).join('/');
-}
-
-function compareStringsByCodeUnit(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-
-  for (let index = 0; index < length; index++) {
-    const difference = a.charCodeAt(index) - b.charCodeAt(index);
-
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return a.length - b.length;
 }
 
 function resolveTraversalBound(

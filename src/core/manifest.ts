@@ -29,6 +29,7 @@ import {
 import { isObjectRecord, isNonEmptyString, isNonNegativeInteger, errorMessage } from '../utils/guards.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
+import { compareStringsByCodeUnit } from '../utils/sort.js';
 
 const HASH_PREFIX = 'sha256:';
 
@@ -7100,20 +7101,6 @@ function resolveManifestSourcePath(sourcePath: string, manifestDir: string): str
   }
 
   return resolve(manifestDir, sourcePath);
-}
-
-function compareStringsByCodeUnit(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-
-  for (let index = 0; index < length; index++) {
-    const difference = a.charCodeAt(index) - b.charCodeAt(index);
-
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return a.length - b.length;
 }
 
 function sameStringArray(left: string[], right: string[]): boolean {
