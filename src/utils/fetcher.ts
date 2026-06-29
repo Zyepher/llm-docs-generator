@@ -21,11 +21,35 @@ import { info, warn, error as logError } from './logger.js';
 
 const FETCH_TIMEOUT = 30000; // 30 seconds
 const USER_AGENT = 'llm-docs/1.0.0';
+const MAX_SPEC_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB safety cap for spec downloads
 
 class SourceAvailabilityError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SourceAvailabilityError';
+  }
+}
+
+const REDACTED_QUERY_PARAMS = ['token', 'access_token', 'apikey', 'api_key', 'key', 'sig', 'signature'];
+
+/**
+ * Strip credentials from a URL before logging: remove userinfo (user:token@)
+ * and mask common secret query parameters, so a spec URL carrying a token does
+ * not leak into logs/error messages.
+ */
+function redactUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    for (const param of REDACTED_QUERY_PARAMS) {
+      if (url.searchParams.has(param)) {
+        url.searchParams.set(param, 'REDACTED');
+      }
+    }
+    return url.toString();
+  } catch {
+    return value;
   }
 }
 
@@ -80,7 +104,7 @@ export async function fetchSpec(
 
   // Download from URL
   const specUrl = versionConfig.spec.url;
-  info(`Fetching spec from: ${specUrl}`);
+  info(`Fetching spec from: ${redactUrl(specUrl)}`);
 
   try {
     await checkRemoteSpecAvailability(specUrl, FETCH_TIMEOUT);
@@ -100,8 +124,8 @@ export async function fetchSpec(
       throw err;
     }
 
-    logError(`Failed to download spec from ${specUrl}: ${String(err)}`);
-    throw new Error(`Failed to download spec from ${specUrl}: ${String(err)}`);
+    logError(`Failed to download spec from ${redactUrl(specUrl)}: ${String(err)}`);
+    throw new Error(`Failed to download spec from ${redactUrl(specUrl)}: ${String(err)}`);
   }
 }
 
@@ -119,7 +143,7 @@ async function checkRemoteSpecAvailability(url: string, timeout: number): Promis
     });
   } catch (err) {
     throw new SourceAvailabilityError(
-      `Spec source availability check failed for ${url}: ${String(err)}`
+      `Spec source availability check failed for ${redactUrl(url)}: ${String(err)}`
     );
   }
 
@@ -127,7 +151,7 @@ async function checkRemoteSpecAvailability(url: string, timeout: number): Promis
     await response.body.text();
   } catch (err) {
     throw new SourceAvailabilityError(
-      `Spec source availability check failed for ${url}: ${String(err)}`
+      `Spec source availability check failed for ${redactUrl(url)}: ${String(err)}`
     );
   }
 
@@ -138,11 +162,11 @@ async function checkRemoteSpecAvailability(url: string, timeout: number): Promis
   }
 
   if (statusCode === 405 || statusCode === 501) {
-    warn(`Spec source HEAD check unsupported for ${url} (HTTP ${statusCode}); trying GET`);
+    warn(`Spec source HEAD check unsupported for ${redactUrl(url)} (HTTP ${statusCode}); trying GET`);
     return;
   }
 
-  throw new SourceAvailabilityError(`Spec source unavailable at ${url}: HTTP ${statusCode}`);
+  throw new SourceAvailabilityError(`Spec source unavailable at ${redactUrl(url)}: HTTP ${statusCode}`);
 }
 
 /**
@@ -171,13 +195,40 @@ async function downloadFile(url: string, timeout: number): Promise<string> {
       // Preserve the existing HTTP status failure while still attempting cleanup.
     }
 
-    throw new Error(`HTTP ${response.statusCode}: ${response.statusCode}`);
+    throw new Error(`HTTP ${response.statusCode}`);
   }
 
-  // Read body efficiently
-  const body = await response.body.text();
+  return readBodyWithLimit(response.body, MAX_SPEC_DOWNLOAD_BYTES);
+}
 
-  return body;
+/**
+ * Read a response body into a string, aborting if it exceeds maxBytes. Prevents
+ * an unbounded (or maliciously large) spec response from exhausting memory.
+ */
+async function readBodyWithLimit(
+  body: AsyncIterable<Buffer | Uint8Array | string>,
+  maxBytes: number
+): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+
+  for await (const chunk of body) {
+    const buffer =
+      typeof chunk === 'string'
+        ? Buffer.from(chunk)
+        : Buffer.isBuffer(chunk)
+          ? chunk
+          : Buffer.from(chunk);
+    total += buffer.length;
+
+    if (total > maxBytes) {
+      throw new Error(`Spec response body exceeds the ${maxBytes}-byte limit`);
+    }
+
+    chunks.push(buffer);
+  }
+
+  return Buffer.concat(chunks).toString('utf-8');
 }
 
 /**
@@ -207,7 +258,7 @@ export function getCachedSpecPath(sdkName: string, version: string): string | nu
  * Performance: O(n) where n = file size
  */
 export async function downloadSpecTo(url: string, outputPath: string): Promise<void> {
-  info(`Downloading from ${url} to ${outputPath}`);
+  info(`Downloading from ${redactUrl(url)} to ${outputPath}`);
 
   try {
     const content = await downloadFile(url, FETCH_TIMEOUT);

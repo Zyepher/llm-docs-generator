@@ -131,15 +131,6 @@ export abstract class BaseParser implements Parser {
   }
 
   /**
-   * Helper: Read first N bytes of file for content sniffing
-   */
-  protected async readFileHead(path: string, bytes = 100): Promise<string> {
-    const { readFile } = await import('fs/promises');
-    const content = await readFile(path, 'utf-8');
-    return content.substring(0, bytes);
-  }
-
-  /**
    * Helper: Get file extension
    */
   protected getFileExtension(path: string): string {

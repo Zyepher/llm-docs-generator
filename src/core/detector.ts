@@ -147,8 +147,12 @@ export class FormatDetector {
    * Get file extension
    */
   private getFileExtension(path: string): string {
-    const parts = path.split('.');
-    return parts.length > 1 ? (parts.at(-1) ?? '') : '';
+    // Take the extension from the basename so a dotted parent directory
+    // (e.g. /a.b/file) does not yield a slash-containing "extension", and treat
+    // a leading-dot dotfile (.env) as having no extension.
+    const base = path.split(/[\\/]/).pop() ?? '';
+    const dot = base.lastIndexOf('.');
+    return dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
   }
 }
 

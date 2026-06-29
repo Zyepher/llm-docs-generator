@@ -58,4 +58,29 @@ describe('UniversalFormatter', () => {
       'Must not overwrite full docs.'
     );
   });
+
+  it('fences code containing triple backticks with a longer fence (regression)', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'llm-docs-formatter-fence-'));
+    tempDirs.push(outputDir);
+
+    const codeWithFence = ['```js', 'const x = 1;', '```'].join('\n');
+    const root = createDocNode(DocNodeType.ROOT, 'root', 'Fence Docs', {
+      children: [
+        createDocNode(DocNodeType.CATEGORY, 'guide', 'Guide', {
+          content: [
+            createContentBlock(ContentBlockType.CODE, codeWithFence, { language: 'markdown' }),
+          ],
+        }),
+      ],
+    });
+
+    await formatDocNode(root, { outputDir, filenamePrefix: 'docs', includeMetadata: false });
+    const output = await readFile(join(outputDir, 'docs-full-llms.txt'), 'utf-8');
+
+    // The outer fence must be longer than the inner ``` run so the block is not
+    // closed prematurely, and the embedded fence content is preserved verbatim.
+    expect(output).toContain('````markdown');
+    expect(output).toContain('```js');
+    expect(output).toContain('const x = 1;');
+  });
 });

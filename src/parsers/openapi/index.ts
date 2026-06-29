@@ -519,6 +519,7 @@ function summarizeResponses(
   sourceKind: ApiSourceKind
 ): string[] {
   return Object.keys(responses)
+    .filter((status) => !status.toLowerCase().startsWith('x-'))
     .sort(compareResponseStatus)
     .map((status) => summarizeResponse(status, responses[status], sourceKind))
     .filter((line): line is string => line !== undefined);
@@ -785,7 +786,10 @@ function readResponsesObject(
     throw new ParserError(`${context} must be an object`, 'OpenAPI / Swagger Parser');
   }
 
-  const statuses = Object.keys(value);
+  // `x-` keys are specification extensions, not responses; ignore them so a
+  // valid Responses Object carrying extensions (incl. non-object values) is not
+  // rejected.
+  const statuses = Object.keys(value).filter((status) => !status.toLowerCase().startsWith('x-'));
   if (statuses.length === 0) {
     throw new ParserError(
       `${context} must contain at least one response`,
@@ -1225,10 +1229,17 @@ function compareParameterLines(left: string, right: string): number {
 }
 
 function extractParameterLocation(line: string): (typeof PARAMETER_LOCATION_ORDER)[number] {
-  for (const location of PARAMETER_LOCATION_ORDER) {
-    if (line.includes(`(${location},`) || line.includes(`(${location})`)) {
-      return location;
-    }
+  // The formatted line is `name (location, required)`, so read the FIRST
+  // parenthetical token rather than scanning the whole line — otherwise a
+  // description containing e.g. "(path, ...)" could misclassify the parameter.
+  const match = /\(([a-z]+)[,)]/.exec(line);
+  const candidate = match?.[1];
+
+  if (
+    candidate !== undefined &&
+    (PARAMETER_LOCATION_ORDER as readonly string[]).includes(candidate)
+  ) {
+    return candidate as (typeof PARAMETER_LOCATION_ORDER)[number];
   }
 
   return 'body';

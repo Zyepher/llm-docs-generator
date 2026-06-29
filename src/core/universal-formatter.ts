@@ -11,8 +11,10 @@
  */
 
 import { createWriteStream } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir } from 'fs/promises';
 import { join } from 'node:path';
+
+import { writeTextFileSafely } from '../utils/safe-write.js';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 
@@ -84,11 +86,11 @@ export class UniversalFormatter {
 
     const content = parts.join('');
 
-    // Stream for large files
+    // Stream for very large files; otherwise write atomically.
     if (content.length > 10 * 1024 * 1024) {
       await this.writeFileStream(filepath, content);
     } else {
-      await writeFile(filepath, content, 'utf-8');
+      await writeTextFileSafely(filepath, content);
     }
 
     return filepath;
@@ -124,7 +126,7 @@ export class UniversalFormatter {
       // Format category content
       parts.push(this.formatNode(category, []));
 
-      await writeFile(filepath, parts.join(''), 'utf-8');
+      await writeTextFileSafely(filepath, parts.join(''));
       outputPaths.push(filepath);
     }
 
@@ -248,13 +250,20 @@ export class UniversalFormatter {
         parts.push(content.content, DOUBLE_NEWLINE);
         break;
 
-      case ContentBlockType.CODE:
-        // Code block with language
+      case ContentBlockType.CODE: {
+        // Code block with language. Use a fence longer than any backtick run in
+        // the content so embedded ``` fences cannot terminate it prematurely.
         const lang = content.language || 'text';
-        parts.push('```', lang, NEWLINE);
+        const longestBacktickRun = (content.content.match(/`+/g) ?? []).reduce(
+          (max, run) => Math.max(max, run.length),
+          0
+        );
+        const fence = '`'.repeat(Math.max(3, longestBacktickRun + 1));
+        parts.push(fence, lang, NEWLINE);
         parts.push(content.content, NEWLINE);
-        parts.push('```', DOUBLE_NEWLINE);
+        parts.push(fence, DOUBLE_NEWLINE);
         break;
+      }
 
       case ContentBlockType.DATA:
         // Data block (SQL, JSON, etc.) as inline comment

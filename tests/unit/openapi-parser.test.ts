@@ -819,6 +819,30 @@ describe('OpenAPI / Swagger parser', () => {
     expect(untagged.children[4]?.metadata.get('path')).toBe('/foo_bar');
   });
 
+  it('accepts x- specification extensions in a Responses Object (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'ext-responses.json');
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Ext', version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: 'a',
+            responses: {
+              '200': { description: 'ok' },
+              'x-rate-limit': 'documented elsewhere',
+            },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+    expect(root.children.length).toBeGreaterThan(0);
+  });
+
   it('assigns unique category ids when slugs collide with disambiguated slugs (regression)', async () => {
     const dir = await createTempDir();
     const sourcePath = join(dir, 'slug-collision.json');
