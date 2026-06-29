@@ -9,8 +9,8 @@ import { BaseParser, FormatType } from '../base.js';
 import { DocNodeType, type DocNode } from '../../core/models.js';
 import { MarkdownParser } from './parser.js';
 import { markdownToDocNode } from './adapter.js';
-import { readdir } from 'fs/promises';
-import { join } from 'path';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 
 /**
  * Markdown format parser
@@ -35,7 +35,7 @@ export class MarkdownFormatParser extends BaseParser {
 
     // Check if it's a directory (like TSPL.docc)
     try {
-      const { stat } = await import('fs/promises');
+      const { stat } = await import('node:fs/promises');
       const stats = await stat(sourcePath);
       if (stats.isDirectory()) {
         // Check if directory contains Markdown/MDX files
@@ -57,13 +57,13 @@ export class MarkdownFormatParser extends BaseParser {
    */
   async parse(sourcePath: string): Promise<DocNode> {
     // Check if it's a file or directory
-    const { stat } = await import('fs/promises');
+    const { stat } = await import('node:fs/promises');
     const stats = await stat(sourcePath);
 
     if (stats.isFile()) {
       // Parse single file
       return await this.parseSingleFile(sourcePath);
-    } else if (stats.isDirectory()) {
+    }if (stats.isDirectory()) {
       // Parse directory
       return await this.parseDirectory(sourcePath);
     }

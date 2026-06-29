@@ -114,7 +114,7 @@ export abstract class BaseParser implements Parser {
    */
   protected async fileExists(path: string): Promise<boolean> {
     try {
-      const { access } = await import('fs/promises');
+      const { access } = await import('node:fs/promises');
       await access(path);
       return true;
     } catch {
@@ -126,7 +126,7 @@ export abstract class BaseParser implements Parser {
    * Helper: Read file content
    */
   protected async readFile(path: string): Promise<string> {
-    const { readFile } = await import('fs/promises');
+    const { readFile } = await import('node:fs/promises');
     return await readFile(path, 'utf-8');
   }
 

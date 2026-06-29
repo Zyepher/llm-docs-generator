@@ -5,6 +5,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Many CLI tests spawn a real `node`/`tsx` subprocess per case; under
+    // parallel load each spawn is slow, so the default 5s is too tight. Set a
+    // generous global default (heavier cases also set their own timeout).
+    testTimeout: 30000,
+    hookTimeout: 30000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

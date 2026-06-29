@@ -322,7 +322,7 @@ async function refreshSourceDocsManifest(options: {
 
   if (!SOURCE_DOCS_FORMAT_HINTS.has(formatHint)) {
     throw new RefreshManifestError(
-      `malformed manifest: source.formatHint must be a supported source format hint`
+      "malformed manifest: source.formatHint must be a supported source format hint"
     );
   }
 
@@ -1314,7 +1314,7 @@ async function assertSafeRefreshWritePath(options: {
   for (let index = 0; index < parts.length; index++) {
     currentPath = join(currentPath, parts[index]!);
 
-    let stats;
+    let stats: Awaited<ReturnType<typeof lstat>>;
     try {
       stats = await lstat(currentPath);
     } catch (error) {
@@ -1362,7 +1362,7 @@ async function assertSafeExistingRegularFilePath(options: {
   for (let index = 0; index < parts.length; index++) {
     currentPath = join(currentPath, parts[index]!);
 
-    let stats;
+    let stats: Awaited<ReturnType<typeof lstat>>;
     try {
       stats = await lstat(currentPath);
     } catch (error) {

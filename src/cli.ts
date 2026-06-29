@@ -2374,14 +2374,11 @@ program
             if (options.verbose && error instanceof Error && error.stack !== undefined) {
               console.error(chalk.gray(error.stack));
             }
-
-            // Continue with other SDKs even if one fails
-            continue;
           }
         }
 
         // Summary
-        console.log(chalk.bold.green(`\nGeneration complete!`));
+        console.log(chalk.bold.green("\nGeneration complete!"));
         console.log(`  Successful: ${successCount}`);
         if (failureCount > 0) {
           console.log(chalk.red(`  Failed: ${failureCount}`));
@@ -2444,7 +2441,7 @@ program
         console.log(`  Preset: ${result.presetName}`);
       }
       if (result.mode === DISCOVERY_REPORT_MODE) {
-        console.log(`  Candidate evidence report: refreshed`);
+        console.log("  Candidate evidence report: refreshed");
         console.log(`  Candidate files: ${result.candidateCount ?? 0}`);
         if (result.reportPath !== undefined) {
           console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
@@ -2454,7 +2451,7 @@ program
         if (result.docsPath !== undefined) {
           console.log(`  Docs: ${result.docsPath}`);
         }
-        console.log(`  Local source/docs evidence: refreshed`);
+        console.log("  Local source/docs evidence: refreshed");
         console.log(`  Source files: ${result.sourceFiles}`);
         console.log(`  Evidence files: ${result.generatedOutputs}`);
         console.log(`  Docs references: ${result.docsReferences ?? 0}`);

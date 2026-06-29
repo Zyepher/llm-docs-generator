@@ -1,8 +1,8 @@
 name: CI
 
-# Enforces the pre-merge gate: type-check, build, and the full test suite.
-# FORCE_COLOR is pinned to 0 so the suite is hermetic (ANSI never leaks into
-# CLI stdout, which the assertions compare against).
+# Enforces the pre-merge gate: lint (Biome), type-check, build, and the full
+# test suite. FORCE_COLOR is pinned to 0 so the suite is hermetic (ANSI never
+# leaks into CLI stdout, which the assertions compare against).
 
 on:
   push:
@@ -32,6 +32,9 @@ jobs:
       # instead of `npm ci`.
       - name: Install dependencies
         run: npm install
+
+      - name: Lint
+        run: npm run lint
 
       - name: Type-check
         run: npm run type-check

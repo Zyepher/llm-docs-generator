@@ -4232,8 +4232,7 @@ function validateSourceDocsParserPluginFormatMetadata(
     }
 
     if (
-      parsedMediaTypes !== undefined &&
-      parsedMediaTypes.some((mediaType) => mediaType.length === 0)
+      parsedMediaTypes?.some((mediaType) => mediaType.length === 0)
     ) {
       failures.push(
         'malformed manifest: parser.plugin.format.mediaTypes must contain only non-empty strings'
@@ -7341,7 +7340,7 @@ async function verifyNoSymlinkPathComponent(options: {
   failures: string[];
 }): Promise<boolean> {
   const { label, path, targetPath, isLeaf, leafType = 'file', failures } = options;
-  let stats;
+  let stats: Awaited<ReturnType<typeof lstat>>;
 
   try {
     stats = await lstat(path);
@@ -7394,7 +7393,7 @@ async function verifyPathType(check: PathTypeCheck, failures: string[]): Promise
     return;
   }
 
-  let stats;
+  let stats: Awaited<ReturnType<typeof lstat>>;
 
   try {
     stats = await lstat(check.path);

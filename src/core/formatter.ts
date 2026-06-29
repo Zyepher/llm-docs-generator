@@ -9,21 +9,21 @@
  * - Minimal string allocations
  */
 
-import { createWriteStream } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
-import { pipeline } from 'stream/promises';
-import { Readable } from 'stream';
+import { createWriteStream } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 
 import type { ConfigLoader } from '../config/loader.js';
 import type { CategoryConfig, SDKVersionConfig } from '../config/schemas.js';
 import {
   addOperationToCategory,
-  CategorizedOperations,
+  type CategorizedOperations,
   createCategorizedOperations,
-  Example,
+  type Example,
   getOperationsForCategory,
-  Operation,
-  SpecData,
+  type Operation,
+  type SpecData,
 } from './models.js';
 
 // ============================================================================

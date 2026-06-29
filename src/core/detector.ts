@@ -83,9 +83,7 @@ export class FormatDetector {
 
     // Could not detect
     throw new Error(
-      `Unable to detect format for: ${sourcePath}\n` +
-        `Supported formats: ${this.parsers.map((p) => p.format).join(', ')}\n` +
-        `Try specifying --format explicitly`
+      `Unable to detect format for: ${sourcePath}\nSupported formats: ${this.parsers.map((p) => p.format).join(', ')}\nTry specifying --format explicitly`
     );
   }
 
