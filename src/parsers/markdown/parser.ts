@@ -43,6 +43,12 @@ const MDX_ADMONITION_COMPONENTS = new Set(['Callout', 'Alert', 'Note', 'Warning'
 export interface MarkdownDocument {
   path: string;
   title: string;
+  /**
+   * Document-level content with no owning section: leading prose before the
+   * first heading, or the entire body of a headingless document. Kept separate
+   * from `sections` so it is preserved rather than silently dropped.
+   */
+  content: MarkdownContent[];
   sections: MarkdownSection[];
   metadata: Map<string, unknown>;
 }
@@ -97,12 +103,13 @@ export class MarkdownParser {
     // Extract title (first H1 or filename)
     const title = this.extractTitle(tokens, this.filePath);
 
-    // Build hierarchical sections
-    const sections = this.buildSections(tokens);
+    // Build hierarchical sections plus any document-level (headingless) content
+    const { content: documentContent, sections } = this.buildSections(tokens);
 
     return {
       path: this.filePath,
       title,
+      content: documentContent,
       sections,
       metadata,
     };
@@ -689,7 +696,15 @@ export class MarkdownParser {
   }
 
   private delimiterBalance(text: string): number {
-    const withoutStrings = text.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, '');
+    // Strip quoted strings before counting brace/paren/bracket balance. Each
+    // alternative uses a negated class that excludes BOTH the delimiter and the
+    // backslash, so a backslash can only ever match `\\.`. This removes the
+    // ambiguity of the previous `(?:\\.|(?!\1).)*` pattern, which backtracked
+    // exponentially (ReDoS) on a run of backslashes with no closing delimiter.
+    const withoutStrings = text.replace(
+      /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g,
+      ''
+    );
     let balance = 0;
 
     for (const char of withoutStrings) {
@@ -757,18 +772,37 @@ export class MarkdownParser {
    * Performance: O(n) where n = number of tokens
    * Creates tree structure based on heading levels
    */
-  private buildSections(tokens: Token[]): MarkdownSection[] {
+  private buildSections(tokens: Token[]): {
+    content: MarkdownContent[];
+    sections: MarkdownSection[];
+  } {
     const rootSections: MarkdownSection[] = [];
+    // Content that has no open section to live in: leading prose before the
+    // first heading, or a document with no headings at all (e.g. a README,
+    // CHANGELOG, or plain-prose fragment). Without this it was silently dropped.
+    const documentContent: MarkdownContent[] = [];
     const stack: MarkdownSection[] = [];
     let currentContent: MarkdownContent[] = [];
 
+    const flushCurrentContent = (): void => {
+      if (currentContent.length === 0) {
+        return;
+      }
+
+      if (stack.length > 0) {
+        stack[stack.length - 1]!.content.push(...currentContent);
+      } else {
+        documentContent.push(...currentContent);
+      }
+
+      currentContent = [];
+    };
+
     for (const token of tokens) {
       if (token.type === 'heading') {
-        // Save accumulated content to previous section
-        if (stack.length > 0 && currentContent.length > 0) {
-          stack[stack.length - 1]!.content.push(...currentContent);
-          currentContent = [];
-        }
+        // Save accumulated content to the current section, or to the document
+        // level when no section is open yet.
+        flushCurrentContent();
 
         // Create new section
         const section: MarkdownSection = {
@@ -802,12 +836,11 @@ export class MarkdownParser {
       }
     }
 
-    // Add remaining content to last section
-    if (stack.length > 0 && currentContent.length > 0) {
-      stack[stack.length - 1]!.content.push(...currentContent);
-    }
+    // Flush any remaining content (to the last open section, or to the document
+    // level when there were no headings).
+    flushCurrentContent();
 
-    return rootSections;
+    return { content: documentContent, sections: rootSections };
   }
 
   /**

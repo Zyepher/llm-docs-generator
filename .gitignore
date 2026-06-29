@@ -30,3 +30,6 @@ package-lock.json
 # Generated output
 test-output/
 output/
+
+# Local review notes (not part of the published package)
+OPUS_REVIEW.md

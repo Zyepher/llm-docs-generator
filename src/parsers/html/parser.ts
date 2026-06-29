@@ -298,11 +298,56 @@ class HtmlContentExtractor {
     }
 
     if (hasDirectBlockChild(node)) {
-      this.visitChildren(node);
+      this.visitMixedChildren(node);
       return;
     }
 
     this.addProse(this.extractInlineText(node));
+  }
+
+  /**
+   * Visit a container that mixes block-level children with loose text / inline
+   * elements. Loose text and inline content are flushed as PROSE blocks around
+   * each block child (in document order) instead of being silently dropped,
+   * which previously happened because visitChildren only re-dispatched element
+   * children and ignored text-node siblings entirely.
+   */
+  private visitMixedChildren(node: HtmlElementNode): void {
+    let inlineParts: string[] = [];
+
+    const flushInline = (): void => {
+      if (inlineParts.length === 0) {
+        return;
+      }
+      // addProse normalizes whitespace and skips empty output.
+      this.addProse(inlineParts.join(' '));
+      inlineParts = [];
+    };
+
+    for (const child of node.children) {
+      if (child.type === 'text') {
+        inlineParts.push(decodeHtmlEntities(child.text));
+        continue;
+      }
+
+      if (child.type !== 'element') {
+        continue;
+      }
+
+      if (NON_CONTENT_ELEMENTS.has(child.tag) || child.tag === 'br') {
+        continue;
+      }
+
+      if (BLOCK_ELEMENTS.has(child.tag) || hasDirectBlockChild(child)) {
+        flushInline();
+        this.visitNode(child);
+      } else {
+        // Inline element (span, a, em, strong, ...): keep it in the inline run.
+        inlineParts.push(this.extractInlineText(child));
+      }
+    }
+
+    flushInline();
   }
 
   private startSection(level: number, title: string): void {

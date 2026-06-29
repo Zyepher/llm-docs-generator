@@ -6,7 +6,7 @@
  */
 
 import { BaseParser, FormatType } from '../base.js';
-import type { DocNode } from '../../core/models.js';
+import { DocNodeType, type DocNode } from '../../core/models.js';
 import { MarkdownParser } from './parser.js';
 import { markdownToDocNode } from './adapter.js';
 import { readdir } from 'fs/promises';
@@ -78,7 +78,7 @@ export class MarkdownFormatParser extends BaseParser {
     const parser = new MarkdownParser(filePath);
     const doc = await parser.parse();
     const docNode = markdownToDocNode(doc, {
-      documentType: 'SECTION' as any,
+      documentType: DocNodeType.SECTION,
       mapH2ToCategory: true,
     });
     return docNode;

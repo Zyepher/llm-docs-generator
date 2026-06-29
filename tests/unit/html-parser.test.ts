@@ -378,4 +378,30 @@ describe('static HTML parser foundation', () => {
     await expect(parser.parse(symlinkPath)).rejects.toThrow(/Invalid HTML source path/);
     await expect(parseHtmlFile(symlinkPath)).rejects.toThrow(/Invalid HTML file path/);
   });
+
+  it('preserves loose text adjacent to block-level children (regression: silent content loss)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'mixed.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<title>Mixed</title>',
+        '<div>',
+        'Lead-in prose before the list.',
+        '<ul><li>First item.</li><li>Second item.</li></ul>',
+        'Trailing prose after the list.',
+        '</div>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('Lead-in prose before the list.');
+    expect(text).toContain('First item.');
+    expect(text).toContain('Trailing prose after the list.');
+  });
 });
