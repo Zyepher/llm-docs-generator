@@ -141,9 +141,9 @@ describe('source-truth docs generation', () => {
     );
 
     expect(report).toEqual(firstResult.report);
-    expect(JSON.stringify(report, null, 2) + '\n').toEqual(secondReportText);
+    expect(`${JSON.stringify(report, null, 2)}\n`).toEqual(secondReportText);
     expect(markdown).toEqual(secondMarkdown);
-    expect(JSON.stringify(manifest, null, 2) + '\n').toEqual(secondManifestText);
+    expect(`${JSON.stringify(manifest, null, 2)}\n`).toEqual(secondManifestText);
     expect(firstResult.outputDir).toBe(firstOutputDir);
     expect(secondResult.outputDir).toBe(secondOutputDir);
 

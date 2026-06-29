@@ -14,9 +14,9 @@
 import type { SpecData, Operation, Example } from '../../core/models.js';
 
 import {
-  DocNode,
+  type DocNode,
   DocNodeType,
-  ContentBlock,
+  type ContentBlock,
   ContentBlockType,
   createDocNode,
   createContentBlock,

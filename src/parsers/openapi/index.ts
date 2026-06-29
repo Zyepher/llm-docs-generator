@@ -1092,7 +1092,7 @@ function stableJsonStringify(
     if (Array.isArray(value)) {
       const items: string[] = [];
       let accumulated = 2; // surrounding []
-      result = `[]`;
+      result = "[]";
       let bailed = false;
       for (const item of value) {
         const serialized = stableJsonStringify(item, seen, memo, maxLength);

@@ -9,17 +9,17 @@
  * - Avoid unnecessary object creation
  */
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { load as yamlLoad } from 'js-yaml';
 
 import {
   createSpecData,
-  Example,
+  type Example,
   ExampleSchema,
-  Operation,
+  type Operation,
   OperationSchema,
-  SpecData,
-  SpecInfo,
+  type SpecData,
+  type SpecInfo,
   SpecInfoSchema,
 } from '../../core/models.js';
 
@@ -71,7 +71,7 @@ export class OpenRefParser {
    * Parse specification info
    * Performance: O(1) - fixed number of properties
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: raw YAML value, structurally validated by Zod below
   private parseInfo(infoRaw: any): SpecInfo {
     // Use nullish coalescing for efficient defaults
     const info = {
@@ -93,7 +93,7 @@ export class OpenRefParser {
    *
    * Optimization: Pre-allocate array if size known
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: raw YAML value, structurally validated by Zod below
   private parseOperations(functionsRaw: any[]): Operation[] {
     // Pre-allocate array with known size (avoids dynamic resizing)
     const operations: Operation[] = new Array(functionsRaw.length);
@@ -110,7 +110,7 @@ export class OpenRefParser {
    * Parse single operation with all examples
    * Performance: O(k) where k = number of examples
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: raw YAML value, structurally validated by Zod below
   private parseOperation(funcRaw: any): Operation {
     // Extract examples (O(k))
     const examplesRaw = funcRaw?.examples as unknown[] | undefined;
@@ -133,7 +133,7 @@ export class OpenRefParser {
    * Parse all examples for an operation
    * Performance: O(k) where k = number of examples
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: raw YAML value, structurally validated by Zod below
   private parseExamples(examplesRaw: any[]): Example[] {
     // Pre-allocate array
     const examples: Example[] = new Array(examplesRaw.length);
@@ -149,7 +149,7 @@ export class OpenRefParser {
    * Parse single example
    * Performance: O(1) - fixed number of properties
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: raw YAML value, structurally validated by Zod below
   private parseExample(exRaw: any): Example {
     // Extract data SQL efficiently
     const dataSql = this.extractDataSql(exRaw?.data);
@@ -172,7 +172,7 @@ export class OpenRefParser {
    * Extract SQL from data block efficiently
    * Performance: O(1)
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: raw YAML value, structurally validated by Zod below
   private extractDataSql(dataBlock: any): string {
     if (dataBlock === null || dataBlock === undefined) {
       return '';

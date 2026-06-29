@@ -72,7 +72,12 @@ const URL_LIKE_INPUT_PATTERNS = [
 ];
 
 const SUPPORTED_DOCS_EXTENSIONS = new Set(['.md', '.mdx', '.markdown']);
+// U+200C (ZWNJ) and U+200D (ZWJ) are valid JavaScript IdentifierPart characters,
+// so they belong in this identifier-continue class; noMisleadingCharacterClass
+// is a false positive here.
+// biome-ignore lint/suspicious/noMisleadingCharacterClass: ZWNJ/ZWJ are valid IdentifierPart chars
 const IDENTIFIER_PATTERN = /^[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*$/u;
+// biome-ignore lint/suspicious/noMisleadingCharacterClass: ZWNJ/ZWJ are valid IdentifierPart chars
 const CALL_IDENTIFIER_PATTERN = /^([$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*)\s*\(\s*\)$/u;
 
 export type SourceVerificationInputType = SourceTruthSourceType;

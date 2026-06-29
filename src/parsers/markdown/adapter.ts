@@ -14,9 +14,9 @@
 import type { MarkdownDocument, MarkdownSection, MarkdownContent } from './parser.js';
 
 import {
-  DocNode,
+  type DocNode,
   DocNodeType,
-  ContentBlock,
+  type ContentBlock,
   ContentBlockType,
   createDocNode,
   createContentBlock,

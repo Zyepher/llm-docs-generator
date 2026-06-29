@@ -11,7 +11,7 @@
  * Performance: O(n) where n = file size
  */
 
-import { readFile } from 'fs/promises';
+import { readFile } from 'node:fs/promises';
 import { marked } from 'marked';
 import type { Token } from 'marked';
 
@@ -864,19 +864,20 @@ export class MarkdownParser {
           content: token.text,
         };
 
-      case 'blockquote':
+      case 'blockquote': {
         // Extract text from blockquote
         const text = token.text || '';
         return {
           type: 'blockquote',
           content: text,
         };
+      }
 
       case 'space':
         // Skip whitespace tokens
         return null;
 
-      default:
+      default: {
         // Convert other tokens to prose
         const tokenText =
           ('text' in token && typeof token.text === 'string' ? token.text : '') ||
@@ -888,6 +889,7 @@ export class MarkdownParser {
           };
         }
         return null;
+      }
     }
   }
 

@@ -10,13 +10,13 @@
  * - Hierarchical numbering for precise navigation
  */
 
-import { createWriteStream } from 'fs';
-import { mkdir } from 'fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { writeTextFileSafely } from '../utils/safe-write.js';
-import { pipeline } from 'stream/promises';
-import { Readable } from 'stream';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 
 import type { DocNode, ContentBlock } from './models.js';
 import { DocNodeType, ContentBlockType } from './models.js';
@@ -265,7 +265,7 @@ export class UniversalFormatter {
         break;
       }
 
-      case ContentBlockType.DATA:
+      case ContentBlockType.DATA: {
         // Data block (SQL, JSON, etc.) as inline comment
         const dataType = content.annotations?.get('type') || 'data';
         parts.push(NEWLINE, `// ${dataType}`, NEWLINE);
@@ -273,6 +273,7 @@ export class UniversalFormatter {
         parts.push(content.content, NEWLINE);
         parts.push('*/', NEWLINE, NEWLINE);
         break;
+      }
     }
 
     return parts.join('');

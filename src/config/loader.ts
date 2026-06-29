@@ -8,17 +8,17 @@
  * - Pre-computed sorted categories
  */
 
-import { readFile } from 'fs/promises';
-import { isAbsolute, relative, resolve } from 'path';
+import { readFile } from 'node:fs/promises';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 import {
   CategoriesConfigSchema,
-  CategoryConfig,
-  PresetConfig,
+  type CategoryConfig,
+  type PresetConfig,
   PresetConfigSchema,
-  SDKConfig,
+  type SDKConfig,
   SDKsConfigSchema,
-  SDKVersionConfig,
+  type SDKVersionConfig,
 } from './schemas.js';
 
 // ============================================================================

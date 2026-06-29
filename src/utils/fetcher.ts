@@ -8,8 +8,8 @@
  * - Connection pooling via undici
  */
 
-import { mkdir, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { request } from 'undici';
 
 import type { ConfigLoader } from '../config/loader.js';
@@ -130,7 +130,7 @@ export async function fetchSpec(
 }
 
 async function checkRemoteSpecAvailability(url: string, timeout: number): Promise<void> {
-  let response;
+  let response: Awaited<ReturnType<typeof request>>;
 
   try {
     response = await request(url, {
@@ -293,7 +293,7 @@ export async function clearSpecCache(sdkName?: string, version?: string): Promis
     const cachePath = `${cacheDir}/${cacheFileName}`;
 
     if (existsSync(cachePath)) {
-      const { unlink } = await import('fs/promises');
+      const { unlink } = await import('node:fs/promises');
       await unlink(cachePath);
       return 1;
     }
@@ -302,7 +302,7 @@ export async function clearSpecCache(sdkName?: string, version?: string): Promis
   }
 
   // Clear all cache files
-  const { readdir, unlink } = await import('fs/promises');
+  const { readdir, unlink } = await import('node:fs/promises');
 
   if (!existsSync(cacheDir)) {
     return 0;
