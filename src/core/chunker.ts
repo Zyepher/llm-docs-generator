@@ -5,9 +5,8 @@
  * manifests, or change CLI generation behavior.
  */
 
-import { createHash } from 'node:crypto';
-
 import { isRecord } from '../utils/guards.js';
+import { sha256Hex } from '../utils/hash.js';
 import { ContentBlockType, type ContentBlock, type DocNode } from './models.js';
 
 const DOUBLE_NEWLINE = '\n\n';
@@ -925,7 +924,7 @@ function pathTitles(path: PathLink): string[] {
 }
 
 function sha256(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
+  return sha256Hex(content);
 }
 
 function normalizePositiveInteger(value: number | undefined, fallback: number): number {

@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { isObjectRecord, errorMessage } from '../utils/guards.js';
+import { isSha256Hash } from '../utils/hash.js';
 
 import categoriesConfig from '../../config/categories.json';
 import type { CategoryConfig, SDKVersionConfig } from '../config/schemas.js';
@@ -851,7 +852,7 @@ function requiredNonNegativeInteger(value: unknown, label: string): number {
 }
 
 function requiredSha256Hash(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value)) {
+  if (typeof value !== 'string' || !isSha256Hash(value)) {
     throw new RefreshManifestError(`malformed manifest: ${label} must be a sha256 hash`);
   }
 

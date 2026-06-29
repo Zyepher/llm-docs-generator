@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -31,8 +29,8 @@ import { FormatType, type Parser } from '../parsers/base.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { isRecord } from '../utils/guards.js';
+import { sha256File } from '../utils/hash.js';
 
-const HASH_PREFIX = 'sha256:';
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
 const SOURCE_DOCS_OUTPUT_DIR = 'llm-docs';
 const SOURCE_DOCS_CHUNKS_OUTPUT_DIR = 'chunks';
@@ -1618,19 +1616,6 @@ function isSourceDocsArtifactPath(
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
-}
-
-async function sha256File(path: string): Promise<string> {
-  const hash = createHash('sha256');
-  const stream = createReadStream(path);
-
-  await new Promise<void>((resolvePromise, reject) => {
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('error', reject);
-    stream.on('end', resolvePromise);
-  });
-
-  return `${HASH_PREFIX}${hash.digest('hex')}`;
 }
 
 async function assertOutputDirOutsideSource(

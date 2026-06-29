@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
-const HASH_PREFIX = 'sha256:';
+import { sha256Prefixed } from '../utils/hash.js';
 
 export interface GeneratedTextOutputMetadata {
   byteSize: number;
@@ -18,7 +17,7 @@ export async function describeGeneratedTextOutput(
 
   return {
     byteSize: bytes.byteLength,
-    hash: `${HASH_PREFIX}${createHash('sha256').update(bytes).digest('hex')}`,
+    hash: sha256Prefixed(bytes),
     lineCount: countTextLines(text),
     estimatedTokenCount: estimateTextTokens(text),
   };

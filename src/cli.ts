@@ -13,7 +13,6 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import packageJson from '../package.json';
-import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { access, lstat, readFile, rm, stat } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path';
@@ -43,6 +42,7 @@ import { validateParserPluginManifestFile } from './core/parser-plugin-manifest.
 import { SOURCE_VERIFICATION_MODE } from './core/source-verification.js';
 import { fetchSpec } from './utils/fetcher.js';
 import { isObjectRecord, isNonNegativeInteger } from './utils/guards.js';
+import { sha256Hex } from './utils/hash.js';
 import { Logger, LogLevel } from './utils/logger.js';
 
 // ============================================================================
@@ -1059,7 +1059,7 @@ async function readPackagedAgentArtifact(
     name: artifact.name,
     path: artifact.path,
     byteSize: content.byteLength,
-    sha256: createHash('sha256').update(content).digest('hex'),
+    sha256: sha256Hex(content),
     intendedUse: artifact.intendedUse,
   };
 }
