@@ -928,7 +928,11 @@ async function runCli(args: string[], cwd = repoRoot): Promise<{ stdout: string;
     cwd,
     env: {
       ...process.env,
+      // Force color OFF deterministically. NO_COLOR alone is insufficient: an
+      // ambient FORCE_COLOR (set by some CI/terminals) takes precedence and
+      // injects ANSI codes into stdout, breaking .toContain assertions.
       NO_COLOR: '1',
+      FORCE_COLOR: '0',
     },
   });
 
@@ -944,7 +948,10 @@ async function runCliWithEnv(
     cwd,
     env: {
       ...process.env,
+      // Force color off by default (see runCli); explicit envOverrides still win
+      // so a test can opt into color behavior intentionally.
       NO_COLOR: '1',
+      FORCE_COLOR: '0',
       ...envOverrides,
     },
   });
