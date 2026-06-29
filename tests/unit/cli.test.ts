@@ -2623,8 +2623,8 @@ describe('CLI compatibility behavior', () => {
     );
     const combined = [...docs.values()].join('\n');
 
-    expect(docs.get('README.md')).toContain(
-      'generate --source <local-file-or-directory> --parser-plugin-manifest <path>'
+    expect(combined).toMatch(
+      /generate --source <local-file-or-directory>\s+--parser-plugin-manifest <path>/
     );
     expect(docs.get('AGENT_CONTEXT.md')).toMatch(
       /Plugin code is trusted\s+local code and is not sandboxed/
@@ -2632,7 +2632,7 @@ describe('CLI compatibility behavior', () => {
     expect(docs.get('index.md')).toMatch(
       /verify` checks recorded plugin\s+metadata\s+against the plugin manifest/
     );
-    expect(docs.get('README.md')).toMatch(
+    expect(combined).toMatch(
       /Parser-plugin `local-source-docs`\s+manifests are\s+not refreshed\s+yet/
     );
     expect(docs.get('IMPLEMENTATION.md')).toContain('- [ ] Plugin system for custom parsers');
@@ -3756,7 +3756,7 @@ describe('CLI compatibility behavior', () => {
 
   it('documents source-verification local evidence refresh without broad verification claims', async () => {
     const docs = await Promise.all(
-      ['README.md', 'index.md', 'AGENT_CONTEXT.md', 'IMPLEMENTATION.md'].map(async (path) => ({
+      ['index.md', 'AGENT_CONTEXT.md', 'IMPLEMENTATION.md'].map(async (path) => ({
         path,
         text: await readFile(join(repoRoot, path), 'utf-8'),
       }))

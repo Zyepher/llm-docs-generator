@@ -7,7 +7,7 @@ This project is a Node.js / TypeScript command-line tool. The CLI entry point is
 
 ## Product Intent
 
-The next-generation product is an LLM documentation system that helps an AI
+llm-docs-generator is an LLM documentation system that helps an AI
 agent turn reliable source material into LLM-friendly documentation.
 
 It should support three major user intents:
@@ -207,7 +207,11 @@ Current implementation:
   values, unknown presets, presets without `--source`, presets with `--sdk`,
   and preset-incompatible explicit formats, and does not fetch, crawl, select
   candidates, infer task fit, or decide source selection. Successful source
-  generation writes `manifest.json` plus generated docs under `llm-docs/`.
+  generation writes `manifest.json` plus generated docs under `llm-docs/`. An
+  agent may additionally author an `llm-docs/index.md` navigation file after
+  generation; it is agent-authored, not a CLI output, is not recorded in
+  `manifest.json`, and `verify` ignores it, so it must not be treated as a
+  verified artifact.
   With `--chunks jsonl`, it also writes `chunks/semantic-chunks.jsonl` and a
   compact source-docs `semanticChunkIndexes` manifest entry. The manifest
   records source file hashes, byte sizes, line counts, deterministic estimated
@@ -314,7 +318,7 @@ Current implementation:
   `agent doctor`.
 - Does not yet implement broad website crawling, repo/URL discovery-report
   refresh, remote freshness refresh, broad official-docs behavior/API claim
-  verification, full next-generation manifests, broad source-code behavior
+  verification, full planned manifests, broad source-code behavior
   validation, or behavior-level source documentation from code. Parser plugin
   discovery, install, package resolution, auto-selection, sandboxing, and broad
   custom parser workflows remain planned/unsupported.
@@ -340,7 +344,7 @@ Current implementation:
   scope; it is not source-selection, task-fit, correctness, source-truth, or
   authority judgment.
 
-Target next-generation implementation:
+Target implementation:
 
 - Produce bounded inspection reports from explicit repo links, docs URLs,
   package metadata, source paths, or agent-approved scopes.
@@ -363,7 +367,7 @@ and either implement it or provide the next engineering step.
 
 Use this router before running commands.
 
-The workflows below describe the approved next-generation product direction.
+The workflows below describe the approved product direction.
 When using the current CLI, verify that the needed command exists first. If the
 workflow needs discovery, repo caching, refresh beyond current local
 explicit-manifest source-docs/source-truth/configured-SDK/source-discovery
@@ -903,8 +907,8 @@ freshness, perform broad official-docs claim verification, validate source-code
 behavior, make candidate selection, validate HTTP freshness, refresh remote
 resources, make task-fit judgments, resolve source truth, make source selection
 decisions, or prove docs correctness.
-V2 is a fresh manifest/docs-pack contract. Regenerate V1 or early next-gen
-packs with the V2 CLI before verifying them. Verification requires
+V2 is a fresh manifest/docs-pack contract. Regenerate V1 or early
+packs with the current CLI before verifying them. Verification requires
 `manifestContract`, `inputProvenance`, and `artifactSummary` on supported
 successful manifests; requires `candidateEvidenceIndex` on discovery-report
 manifests; and requires `sourceVerification.fileEvidenceIndex` on
@@ -1103,7 +1107,7 @@ the user's wording is unclear.
 
 ## Compatibility Baseline
 
-Do not break the current Supabase/OpenRef workflow while adding next-generation
+Do not break the current Supabase/OpenRef workflow while adding new
 discovery.
 
 The following commands are the current regression baseline:

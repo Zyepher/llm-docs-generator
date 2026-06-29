@@ -14,7 +14,7 @@ Discovery reports are candidate evidence for agent review only. Generation from
 discovery candidates requires an explicit agent/user-selected source or a
 documented automation flag, not CLI source selection.
 
-The next-generation direction is to make the project an agent-aware system that
+The direction is to make the project an agent-aware system that
 will be able to:
 
 1. Help agents inspect explicit official documentation candidates.
@@ -63,7 +63,7 @@ Read:
 2. [AGENT_CONTEXT.md](AGENT_CONTEXT.md)
 3. [README.md](README.md)
 
-The HTML plan explains the next-generation architecture, edge cases, skill
+The HTML plan explains the planned architecture, edge cases, skill
 integration, CLI shape, and roadmap.
 
 ### Engineer Changing The Tool
@@ -84,8 +84,8 @@ npm run test
 
 ## Intent Map
 
-Use this map to choose the intended workflow. Some workflows are target
-next-generation behavior and are not fully implemented in the current CLI yet;
+Use this map to choose the intended workflow. Some workflows are planned
+and not fully implemented in the current CLI yet;
 check [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and source before promising support.
 
 | User Intent                              | First File To Read                     | Workflow                                                             |
@@ -179,8 +179,8 @@ aggregate hashes over existing manifest file metadata, warning counts,
 source-file totals where already represented, and compact index counters. It
 does not include raw content, excerpts, new paths, scores, ranking, authority,
 task-fit, freshness proof, source-truth proof, or source-selection judgment.
-V2 is a fresh manifest/docs-pack contract: regenerate V1 or early next-gen
-packs with the V2 CLI before verifying them. `verify` requires and validates
+V2 is a fresh manifest/docs-pack contract: regenerate V1 or early
+packs with the current CLI before verifying them. `verify` requires and validates
 `manifestContract`, `inputProvenance`, and `artifactSummary` for supported
 successful manifests, requires `candidateEvidenceIndex` on discovery-report
 manifests, and requires `sourceVerification.fileEvidenceIndex` on
@@ -474,7 +474,7 @@ Tests:
 
 ## Planning And Design Files
 
-- [NEXT_GEN_PLAN.html](NEXT_GEN_PLAN.html): visual next-generation product and
+- [NEXT_GEN_PLAN.html](NEXT_GEN_PLAN.html): visual product and
   architecture plan.
 - [AGENT_CONTEXT.md](AGENT_CONTEXT.md): operational instructions for AI agents.
 - [IMPLEMENTATION.md](IMPLEMENTATION.md): current implementation notes.
@@ -483,7 +483,7 @@ Tests:
 - [SWIFT-6.2-GUIDE.md](SWIFT-6.2-GUIDE.md): Swift 6.2 generation notes, if
   present in the worktree.
 
-## Next-Generation Concepts
+## Planned Concepts
 
 The project should evolve toward these modules:
 
@@ -585,5 +585,5 @@ When an AI agent enters this repo, use this order:
    task is about architecture or future work.
 5. Inspect source files only after intent is clear.
 
-Do not assume that every planned next-generation capability is already
+Do not assume that every planned capability is already
 implemented. Verify in source before promising behavior.
