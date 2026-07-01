@@ -306,6 +306,68 @@ describe('source verification evidence', () => {
     ).rejects.toBeInstanceOf(SourceVerificationNoDocsEvidenceError);
   });
 
+  it('does not let an info-string fence line (```js) close an open code block (regression)', async () => {
+    const dir = await makeTempDir('llm-docs-source-verification-fence-info-');
+    const sourceDir = join(dir, 'source');
+    const docsDir = join(dir, 'docs');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(docsDir, { recursive: true });
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      'export function realExport() {\n  return 1;\n}\nexport function fakeRef() {\n  return 2;\n}\n',
+      'utf-8'
+    );
+    // The ```js line must NOT close the open ``` block, so `fakeRef` stays code
+    // (not harvested) and the real `realExport` prose reference is still found.
+    await writeFile(
+      join(docsDir, 'guide.md'),
+      ['# Guide', '', '```', '```js', 'const a = `fakeRef`;', '```', '', 'Use `realExport` here.', ''].join(
+        '\n'
+      ),
+      'utf-8'
+    );
+
+    const result = await verifyDocsAgainstSource({
+      source: sourceDir,
+      docs: docsDir,
+      outputDir,
+      generator: { name: 'llm-docs-generator', version: '1.0.0', cliName: 'llm-docs' },
+    });
+
+    const identifiers = result.report.docs.references.map((reference) => reference.identifier);
+    expect(identifiers).toContain('realExport');
+    expect(identifiers).not.toContain('fakeRef');
+  });
+
+  it('keeps later inline-code spans on a line after an unmatched backtick run (regression)', async () => {
+    const dir = await makeTempDir('llm-docs-source-verification-inline-break-');
+    const sourceDir = join(dir, 'source');
+    const docsDir = join(dir, 'docs');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(docsDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export function realExport() {\n  return 1;\n}\n', 'utf-8');
+    // A stray single backtick earlier on the line must not drop the later
+    // ``realExport`` span (the code used to `break` out of the whole line).
+    await writeFile(
+      join(docsDir, 'guide.md'),
+      ['# Guide', '', 'A stray ` backtick then ``realExport`` still counts.', ''].join('\n'),
+      'utf-8'
+    );
+
+    const result = await verifyDocsAgainstSource({
+      source: sourceDir,
+      docs: docsDir,
+      outputDir,
+      generator: { name: 'llm-docs-generator', version: '1.0.0', cliName: 'llm-docs' },
+    });
+
+    expect(result.report.docs.references.map((reference) => reference.identifier)).toContain(
+      'realExport'
+    );
+  });
+
   it('clears stale owned success artifacts when input validation fails on a rerun', async () => {
     const dir = await makeTempDir('llm-docs-source-verification-stale-input-');
     const sourceDir = join(dir, 'source');

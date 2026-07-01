@@ -313,9 +313,9 @@ Current implementation:
   directory with an explicit custom plugin format id, where directory sources
   require `directorySupport: true` on the selected manifest format,
   `generate --source --preset swift-book`,
-  `generate --sdk`, `refresh`, `verify`, `list-sdks`, `validate --sdk`,
-  `capabilities --json`, read-only `agent context`, and read-only
-  `agent doctor`.
+  `generate --sdk`, `plugins validate`, `refresh`, `verify`, `list-sdks`,
+  `validate --sdk`, `capabilities --json`, read-only `agent context`, and
+  read-only `agent doctor`.
 - Does not yet implement broad website crawling, repo/URL discovery-report
   refresh, remote freshness refresh, broad official-docs behavior/API claim
   verification, full planned manifests, broad source-code behavior

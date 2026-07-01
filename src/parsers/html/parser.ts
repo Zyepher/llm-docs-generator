@@ -530,11 +530,8 @@ class HtmlContentExtractor {
 function parseHtmlTree(content: string): HtmlRootNode {
   const root: HtmlRootNode = { type: 'root', children: [] };
   const stack: Array<HtmlRootNode | HtmlElementNode> = [root];
-  const tokenPattern = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<![^>]*>|<\/?[A-Za-z][^>]*>|[^<]+|</g;
-  let match: RegExpExecArray | null;
 
-  while ((match = tokenPattern.exec(content)) !== null) {
-    const token = match[0];
+  for (const token of tokenizeHtml(content)) {
     if (token.startsWith('<!--') || token.startsWith('<!')) {
       continue;
     }
@@ -572,6 +569,65 @@ function parseHtmlTree(content: string): HtmlRootNode {
   }
 
   return root;
+}
+
+/**
+ * Tokenize HTML into markup and text tokens with a single linear scan. Each
+ * markup construct is consumed to its terminator or, when unterminated, to
+ * end-of-input exactly once. The previous global-regex tokenizer rescanned to
+ * end-of-input from every `<` on unterminated `<!`/`<!--`/`<tag` runs — O(n^2),
+ * ~54s on one ~400KB malformed document.
+ */
+function* tokenizeHtml(content: string): Generator<string> {
+  const length = content.length;
+  let index = 0;
+
+  while (index < length) {
+    const lt = content.indexOf('<', index);
+
+    if (lt === -1) {
+      yield content.slice(index);
+      return;
+    }
+
+    if (lt > index) {
+      yield content.slice(index, lt);
+    }
+
+    const end = markupTokenEnd(content, lt);
+    yield content.slice(lt, end);
+    index = end;
+  }
+}
+
+/** Index just past the markup token that begins at `start` (content[start] === '<'). */
+function markupTokenEnd(content: string, start: number): number {
+  if (content.startsWith('<!--', start)) {
+    const close = content.indexOf('-->', start + 4);
+    return close === -1 ? content.length : close + 3;
+  }
+
+  if (content.startsWith('<![CDATA[', start)) {
+    const close = content.indexOf(']]>', start + 9);
+    return close === -1 ? content.length : close + 3;
+  }
+
+  if (content.startsWith('<!', start)) {
+    const close = content.indexOf('>', start + 2);
+    return close === -1 ? content.length : close + 1;
+  }
+
+  const afterLt = content[start + 1];
+  const nameStart = afterLt === '/' ? content[start + 2] : afterLt;
+
+  if (nameStart !== undefined && /[A-Za-z]/.test(nameStart)) {
+    const close = content.indexOf('>', start + 1);
+    return close === -1 ? content.length : close + 1;
+  }
+
+  // A bare '<' that does not begin a tag or markup declaration: emit it alone so
+  // the caller treats it as literal text (matching the prior tokenizer).
+  return start + 1;
 }
 
 function popToMatchingTag(stack: Array<HtmlRootNode | HtmlElementNode>, tagName: string): void {
@@ -614,15 +670,64 @@ function readTagName(token: string): string | undefined {
 }
 
 function stripUnsafeElements(content: string): string {
-  return STRIPPED_ELEMENTS.reduce((result, tag) => {
-    const pairedPattern = new RegExp(`<${tag}\\b[\\s\\S]*?<\\/${tag}\\s*>`, 'gi');
-    const selfClosingPattern = new RegExp(`<${tag}\\b[^>]*\\/\\s*>`, 'gi');
-    const unclosedPattern = new RegExp(`<${tag}\\b[\\s\\S]*$`, 'gi');
-    return result
-      .replace(pairedPattern, '')
-      .replace(selfClosingPattern, '')
-      .replace(unclosedPattern, '');
-  }, content);
+  return STRIPPED_ELEMENTS.reduce((result, tag) => stripElement(result, tag), content);
+}
+
+/**
+ * Remove every `<tag>…</tag>` (and self-closing / unclosed variants) with a
+ * single linear indexOf scan. The previous global lazy regex rescanned to
+ * end-of-input from every opening on unterminated runs — O(n^2), several
+ * seconds on ~100KB of `<script`-flooded input. An unterminated opening drops
+ * the remainder conservatively (parity with the old unclosed pattern).
+ */
+function stripElement(content: string, tag: string): string {
+  const lower = content.toLowerCase();
+  const openTag = `<${tag}`;
+  const closeTag = `</${tag}`;
+  let result = '';
+  let index = 0;
+
+  while (index < content.length) {
+    const start = lower.indexOf(openTag, index);
+
+    if (start === -1) {
+      result += content.slice(index);
+      break;
+    }
+
+    // Require a tag-name boundary so `<scripting>` is not treated as `<script>`.
+    const boundary = lower[start + openTag.length];
+    if (boundary !== undefined && !/[\s/>]/.test(boundary)) {
+      result += content.slice(index, start + openTag.length);
+      index = start + openTag.length;
+      continue;
+    }
+
+    result += content.slice(index, start);
+
+    const openEnd = content.indexOf('>', start);
+    if (openEnd === -1) {
+      // Unterminated opening tag: drop the remainder conservatively.
+      break;
+    }
+
+    if (content[openEnd - 1] === '/') {
+      // Self-closing <tag ... />: remove only the opening tag.
+      index = openEnd + 1;
+      continue;
+    }
+
+    const close = lower.indexOf(closeTag, openEnd + 1);
+    if (close === -1) {
+      // Opened but never closed: drop the remainder conservatively.
+      break;
+    }
+
+    const closeEnd = content.indexOf('>', close);
+    index = closeEnd === -1 ? content.length : closeEnd + 1;
+  }
+
+  return result;
 }
 
 function countStrippedElements(content: string): Record<(typeof STRIPPED_ELEMENTS)[number], number> {

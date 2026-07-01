@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
@@ -22,8 +22,15 @@ import {
   type SourceTruthTraversalSettings,
 } from './source-truth.js';
 import { HASH_PREFIX } from '../utils/hash.js';
+import { writeJsonFileSafely } from '../utils/json.js';
+import { writeTextFileSafely } from '../utils/safe-write.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
-import { isSameOrDescendant, realpathIfExists, resolveEffectiveOutputPath } from '../utils/fs-path.js';
+import {
+  isParentRelativePath,
+  isSameOrDescendant,
+  realpathIfExists,
+  resolveEffectiveOutputPath,
+} from '../utils/fs-path.js';
 
 export const SOURCE_TRUTH_DOCS_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_TRUTH_DOCS_MODE = 'source-truth-local-docs';
@@ -141,12 +148,16 @@ export async function generateSourceTruthDocs(
     source: options.source,
     outputDir,
   });
+
+  // Inspect the source (read-only) BEFORE clearing the output directory. A
+  // missing or unreadable --source must never destroy a previously-good pack
+  // and leave the output dir with neither a manifest nor a failure.json.
+  const report = await inspectSourceTruth(options);
+
   await mkdir(outputDir, { recursive: true });
   await clearGeneratedArtifacts(outputDir);
 
-  const report = await inspectSourceTruth(options);
-
-  await writeJsonFile(reportPath, report);
+  await writeJsonFileSafely(reportPath, report);
 
   if (
     report.facts.length === 0 &&
@@ -156,7 +167,7 @@ export async function generateSourceTruthDocs(
     await rm(markdownPath, { force: true });
     await rm(manifestPath, { force: true });
     const failure = buildFailure(report, relativeOutputPath(outputDir, reportPath));
-    await writeJsonFile(failurePath, failure);
+    await writeJsonFileSafely(failurePath, failure);
 
     throw new SourceTruthDocsNoFactsError({
       failurePath,
@@ -167,14 +178,14 @@ export async function generateSourceTruthDocs(
 
   await rm(failurePath, { force: true });
   const markdown = formatSourceTruthMarkdown(report);
-  await writeFile(markdownPath, markdown, 'utf-8');
+  await writeTextFileSafely(markdownPath, markdown);
 
   const generatedOutputs = await describeGeneratedOutputs(outputDir, [
     { path: reportPath, kind: 'source-truth-report-json' },
     { path: markdownPath, kind: 'source-truth-markdown' },
   ]);
   const manifest = await buildManifest(report, generatedOutputs);
-  await writeJsonFile(manifestPath, manifest);
+  await writeJsonFileSafely(manifestPath, manifest);
 
   return {
     outputDir,
@@ -615,12 +626,7 @@ async function assertOutputDirOutsideSource(options: {
 function relativeOutputPath(outputDir: string, outputPath: string): string {
   const relativePath = relative(outputDir, outputPath);
 
-  if (
-    relativePath === '' ||
-    relativePath.startsWith(`..${sep}`) ||
-    relativePath === '..' ||
-    isAbsolute(relativePath)
-  ) {
+  if (relativePath === '' || isParentRelativePath(relativePath) || isAbsolute(relativePath)) {
     throw new Error(`Generated output is outside output directory: ${outputPath}`);
   }
 
@@ -649,9 +655,6 @@ async function describeGeneratedOutputs(
   return describedOutputs.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
 }
 
-async function writeJsonFile(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
-}
 
 function formatHash(hash: string): string {
   return `${HASH_PREFIX}${hash}`;

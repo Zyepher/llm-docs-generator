@@ -1,5 +1,5 @@
 import type { Dirent, Stats } from 'node:fs';
-import { lstat, mkdir, opendir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, opendir, readFile, realpath, rm } from 'node:fs/promises';
 import {
   basename,
   extname,
@@ -12,9 +12,13 @@ import {
 } from 'node:path';
 
 import { isObjectRecord, isFileNotFoundError } from '../utils/guards.js';
-import { isSameOrDescendant, resolveEffectiveOutputPath } from '../utils/fs-path.js';
+import {
+  isParentRelativePath,
+  isSameOrDescendant,
+  resolveEffectiveOutputPath,
+} from '../utils/fs-path.js';
 import { sha256Hex } from '../utils/hash.js';
-import { readJsonFile } from '../utils/json.js';
+import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
@@ -338,6 +342,9 @@ interface DirectoryEntriesResult {
 interface FenceState {
   character: '`' | '~';
   length: number;
+  // True when the fence line carries an info string (e.g. ```js). Such a line
+  // may open a fenced block but, per CommonMark, may never close one.
+  hasInfoString: boolean;
 }
 
 interface LineEntry {
@@ -394,11 +401,14 @@ export async function verifyDocsAgainstSource(
     sourcePath: sourceInput.resolvedPath,
     docsPath: docsInput.resolvedPath,
   });
-  await mkdir(outputDir, { recursive: true });
-  await clearGeneratedArtifacts(outputDir);
 
+  // Inspect both inputs (read-only) BEFORE touching the output directory, so a
+  // source/docs failure can never destroy a previously-good pack or leave the
+  // output dir with neither a manifest nor a failure.json. inspectSourceTruth
+  // re-resolves its source, so pass the already-validated resolved path (not
+  // the raw, possibly-untrimmed option) to keep resolution consistent.
   const [sourceInspection, docsInspection] = await Promise.all([
-    inspectSourceTruth(options),
+    inspectSourceTruth({ ...options, source: sourceInput.resolvedPath }),
     inspectDocsReferences({
       input: options.docs,
       resolvedPath: docsInput.resolvedPath,
@@ -430,13 +440,17 @@ export async function verifyDocsAgainstSource(
       ),
     }),
   ]);
+
+  await mkdir(outputDir, { recursive: true });
+  await clearGeneratedArtifacts(outputDir);
+
   const report = buildSourceVerificationReport({
     reportPath: relativeOutputPath(outputDir, reportPath),
     sourceInspection,
     docsInspection,
   });
 
-  await writeJsonFile(reportPath, report);
+  await writeJsonFileSafely(reportPath, report);
 
   const failureReason = noDocsEvidenceReason(report);
   if (failureReason !== undefined) {
@@ -446,7 +460,7 @@ export async function verifyDocsAgainstSource(
       reason: failureReason,
       evidenceReportPath: relativeOutputPath(outputDir, reportPath),
     });
-    await writeJsonFile(failurePath, failure);
+    await writeJsonFileSafely(failurePath, failure);
 
     throw new SourceVerificationNoDocsEvidenceError({
       failurePath,
@@ -466,7 +480,7 @@ export async function verifyDocsAgainstSource(
     report,
     generatedOutputs,
   });
-  await writeJsonFile(manifestPath, manifest);
+  await writeJsonFileSafely(manifestPath, manifest);
 
   return {
     outputDir,
@@ -634,7 +648,17 @@ async function traverseDocsDirectory(options: {
     }
 
     if (entry.isFile()) {
-      const stats = await lstat(entryPath);
+      let stats: Stats;
+      try {
+        stats = await lstat(entryPath);
+      } catch {
+        // A docs file that became unreadable between readdir and lstat (e.g. a
+        // concurrent docs rebuild) must not abort the whole verification and
+        // leave the output dir with neither a manifest nor a failure.json;
+        // record it and continue. (Parity with the source-truth traversal.)
+        options.warnings.push(`Skipped unreadable docs file: ${relativePath}`);
+        continue;
+      }
       await inspectDocsFile({
         absolutePath: entryPath,
         relativePath,
@@ -777,8 +801,14 @@ function extractDocsReferences(path: string, content: string): SourceVerificatio
     const fence = parseFenceMarker(line.text);
 
     if (fenceState !== undefined) {
+      // A closing fence must match the opening character, be at least as long,
+      // and carry no info string. Without the info-string check, a content line
+      // like ```js inside an open ``` block would wrongly close it, inverting
+      // fenced/prose classification for everything after and corrupting the
+      // harvested reference set.
       if (
         fence !== undefined &&
+        !fence.hasInfoString &&
         fence.character === fenceState.character &&
         fence.length >= fenceState.length
       ) {
@@ -864,7 +894,12 @@ function inlineCodeSpans(line: string): Array<{ rawText: string }> {
     const closingIndex = findBacktickRun(line, contentStart, runLength);
 
     if (closingIndex === -1) {
-      break;
+      // No matching closer: per CommonMark the opening run is literal text, but
+      // later spans on the same line can still form. Skip past this run and keep
+      // scanning instead of abandoning the rest of the line (which would silently
+      // drop every reference after a single stray backtick).
+      index = contentStart;
+      continue;
     }
 
     spans.push({
@@ -1378,17 +1413,19 @@ function linesWithOffsets(content: string): LineEntry[] {
 }
 
 function parseFenceMarker(line: string): FenceState | undefined {
-  const match = /^(?: {0,3})(`{3,}|~{3,})/.exec(line);
+  const match = /^(?: {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
 
   if (match === null || match[1] === undefined) {
     return undefined;
   }
 
   const marker = match[1];
+  const info = match[2] ?? '';
 
   return {
     character: marker[0] as '`' | '~',
     length: marker.length,
+    hasInfoString: info.trim() !== '',
   };
 }
 
@@ -1569,9 +1606,6 @@ function shouldPreserveOutputDirForInputSafety(outputDir: string, input: string)
   return isSameOrDescendant(resolve(trimmedInput), outputDir);
 }
 
-async function writeJsonFile(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
-}
 
 function isSupportedDocsFile(path: string): boolean {
   return SUPPORTED_DOCS_EXTENSIONS.has(extname(path).toLowerCase());
@@ -1588,12 +1622,7 @@ function normalizePathForReport(path: string): string {
 function relativeOutputPath(outputDir: string, outputPath: string): string {
   const relativePath = relative(outputDir, outputPath);
 
-  if (
-    relativePath === '' ||
-    relativePath.startsWith(`..${sep}`) ||
-    relativePath === '..' ||
-    isAbsolute(relativePath)
-  ) {
+  if (relativePath === '' || isParentRelativePath(relativePath) || isAbsolute(relativePath)) {
     throw new Error(`Generated output is outside output directory: ${outputPath}`);
   }
 

@@ -113,7 +113,7 @@ That is the general path, and it works for almost any library with real docs: yo
 
 ## What else you can do with it
 
-- **A Supabase client SDK? Even simpler.** If you use one (JavaScript/TypeScript, Swift, Kotlin, Dart/Flutter, Python, C#), skip the source hunting: it's a single built-in command. *(`llm-docs generate --sdk javascript --sdk-version v2`)*
+- **A Supabase client SDK? Even simpler.** If you use one (JavaScript/TypeScript, Swift, Kotlin, Dart/Flutter, Python, C#), skip the source hunting: it's a single built-in command. *(`llm-docs generate --sdk javascript --sdk-version v2 --output-dir ./agent-docs`)* Pass `--output-dir`; without it, `--sdk` writes to its legacy monorepo default (`../../public/llms-openref`, outside your project).
 - **Turn your own docs into a pack.** Point it at a local OpenAPI/Swagger spec, a Markdown/MDX/DocC folder, reStructuredText, or HTML, and get the same clean, manifest-backed output. *(`llm-docs generate --source ./docs --output-dir ./agent-docs`)*
 - **Teach it a format it doesn't know.** Docs in a custom or proprietary shape? Write a small parser plugin and it reads your own. (See [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md) for the manifest format.)
 - **Document a codebase that has no docs.** The source-truth mode extracts conservative, code-derived facts (exported names, signatures, package/config) with file-level provenance: observations for your agent to build on, never invented behavior.
@@ -132,7 +132,7 @@ In every case the shape is the same: **you describe the goal, your agent picks t
 - `llm-docs/*.txt`: the clean docs your agent reads, a single combined file, plus one file per topic when the source carries its own categories (built-in `--sdk` packs, tagged OpenAPI specs)
 - `manifest.json`: the paper trail of source paths and URLs, content hashes, versions, and the exact parser and formatter used
 - `chunks/semantic-chunks.jsonl`: optional, for retrieval
-- `discovery-report.json` / `failure.json`: bounded evidence, and honest failures when a source can't be used
+- `discovery-report.json`: bounded evidence from `discover`; and `failure.json`, the honest failure record `source-truth generate` / `verify-docs` write when a source yields no usable evidence (rather than a misleading empty pack)
 
 ---
 

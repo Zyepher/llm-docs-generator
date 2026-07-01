@@ -11,7 +11,7 @@ The most valuable contribution is improving `config/known-sources.json`. Despite
 #### Requirements
 
 - Documentation must be publicly accessible
-- Format must be implemented today (`openref`, `markdown`) or marked as planned until parser and CLI support exists (for example, `restructuredtext`/RST)
+- Format must be one the parsers implement today: `openref`, `markdown`, `mdx`, `openapi`, `rst`, or `html` (anything else must be marked as planned until parser and CLI support exists)
 - Verify the repository, path, version, and format before submitting
 - Include a note that explains how the hint was verified
 
@@ -52,7 +52,7 @@ The most valuable contribution is improving `config/known-sources.json`. Despite
 - `id`: Unique identifier (lowercase, hyphens)
 - `name`: Display name
 - `repository`: GitHub repository URL
-- `format`: Documentation format; implemented parser formats are currently `openref` and `markdown`, while planned formats such as `restructuredtext` should stay untested until parser/CLI support exists
+- `format`: Documentation format; implemented parser formats are `openref`, `markdown`, `mdx`, `openapi`, `rst`, and `html`. Any other value must stay marked as planned until parser/CLI support exists
 - `path`: Path to documentation within repo
 - `description`: Brief description
 - `hint`: Verification-oriented note for agents and maintainers
@@ -122,7 +122,7 @@ npm run build
 ## Code Style
 
 - TypeScript with strict mode enabled
-- ESLint configuration provided
+- Biome for linting (`npm run lint`)
 - Prettier for formatting
 - Zod for validation schemas
 
@@ -205,7 +205,7 @@ cd docs-repo
 find ./docs -maxdepth 2 -type f | head
 ```
 
-The current CLI does not support source-driven generation. Do not document `llm-docs generate --source` as working behavior. Future roadmap examples must be labeled as planned target commands.
+Source-driven generation is supported: once you have the source locally, `llm-docs generate --source <path> --output-dir <dir>` produces a pack you can inspect and `llm-docs verify` against. Use it to sanity-check a hint's format before adding it to the catalog.
 
 ### Step 3: Add to Hint Catalog
 

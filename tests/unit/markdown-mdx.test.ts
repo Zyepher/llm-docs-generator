@@ -396,4 +396,52 @@ describe('Markdown parser structure preservation', () => {
 
     expect(elapsedMs).toBeLessThan(2000);
   });
+
+  it('keeps prose that merely begins with "import <word>," instead of dropping it as an MDX import', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'prose.mdx');
+
+    await writeFile(
+      sourcePath,
+      ['# Heading', '', 'import them, then run setup to finish.', ''].join('\n'),
+      'utf-8'
+    );
+
+    const docNode = await new MarkdownFormatParser().parse(sourcePath);
+
+    expect(collectText(docNode)).toContain('import them, then run setup to finish.');
+  });
+
+  it('still strips real MDX default-plus-named imports', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'imports.mdx');
+
+    await writeFile(
+      sourcePath,
+      ["import Foo, { Bar } from './x';", '', '# Title', '', 'Body text survives.', ''].join('\n'),
+      'utf-8'
+    );
+
+    const docNode = await new MarkdownFormatParser().parse(sourcePath);
+    const text = collectText(docNode);
+
+    expect(text).not.toContain('./x');
+    expect(text).not.toContain('Bar');
+    expect(text).toContain('Body text survives.');
+  });
+
+  it('parses a large unterminated-quote MDX line in linear time', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'quadratic.mdx');
+
+    // ~400KB of quote/backslash pairs on one unterminated line took ~65s under
+    // the previous quadratic stripper; the linear scan must finish promptly.
+    const hugeLine = `{${'"\\'.repeat(200_000)}`;
+    await writeFile(sourcePath, ['# Heading', '', hugeLine, ''].join('\n'), 'utf-8');
+
+    const start = Date.now();
+    await new MarkdownFormatParser().parse(sourcePath);
+
+    expect(Date.now() - start).toBeLessThan(3000);
+  });
 });

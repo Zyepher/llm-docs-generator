@@ -5214,6 +5214,84 @@ describe('CLI compatibility behavior', () => {
     expect(report.contextFacts).toEqual([]);
   });
 
+  it('preserves a previously-good source-truth pack when a rerun names a missing source (regression)', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-source-truth-preserve-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export function realExport() {\n  return 1;\n}\n', 'utf-8');
+
+    await runCli(['source-truth', 'generate', '--source', sourceDir, '--output-dir', outputDir]);
+    expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(true);
+    expect(await pathExists(join(outputDir, 'source-truth-report.json'))).toBe(true);
+    const manifestBefore = await readFile(join(outputDir, 'manifest.json'), 'utf-8');
+
+    // A rerun with a missing --source must fail WITHOUT destroying the pack.
+    const result = await runCliWithExit([
+      'source-truth',
+      'generate',
+      '--source',
+      join(dir, 'missing-source'),
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('source path not found or cannot be read');
+    expect(await readFile(join(outputDir, 'manifest.json'), 'utf-8')).toBe(manifestBefore);
+    expect(await pathExists(join(outputDir, 'source-truth-report.json'))).toBe(true);
+  });
+
+  it('does not delete a ./llm-docs source pack when an unrelated --sdk request fails (regression)', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-sdk-cleanup-'));
+    tempDirs.push(dir);
+    await writeFile(join(dir, 'doc.md'), '# Doc\n\n## Section\n\nHello.\n', 'utf-8');
+
+    // Build a source pack at the default ./llm-docs (relative to the run cwd).
+    await runCli(['generate', '--source', join(dir, 'doc.md')], dir);
+    expect(await pathExists(join(dir, 'llm-docs', 'manifest.json'))).toBe(true);
+
+    // A failing SDK-shaped request must not touch the source-mode default dir.
+    const result = await runCliWithExit(['generate', '--sdk', 'swift', '--chunks', 'jsonl'], dir);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('generate --chunks is supported only for generate --source');
+    expect(await pathExists(join(dir, 'llm-docs', 'manifest.json'))).toBe(true);
+  });
+
+  it('resolves the packaged config so list-sdks works from any working directory (regression)', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-config-cwd-'));
+    tempDirs.push(dir);
+
+    const result = await runCliWithExit(['list-sdks'], dir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Configured SDKs');
+  });
+
+  it('resolves the packaged swift-book preset from any working directory (regression)', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-preset-cwd-'));
+    tempDirs.push(dir);
+    await writeFile(join(dir, 'doc.md'), '# Title\n\n## Section\n\nBody.\n', 'utf-8');
+
+    const result = await runCliWithExit(
+      [
+        'generate',
+        '--source',
+        join(dir, 'doc.md'),
+        '--preset',
+        'swift-book',
+        '--output-dir',
+        join(dir, 'out'),
+      ],
+      dir
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).not.toContain("Preset 'swift-book' not found");
+  });
+
   it('writes local source/docs reference evidence with exact export matches and unmatched references', async () => {
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-source-verify-cli-'));
     tempDirs.push(dir);
@@ -5806,6 +5884,19 @@ describe('CLI compatibility behavior', () => {
     expect(privateRange.stderr).toContain(
       'Refusing to fetch a private, link-local, or cloud-metadata'
     );
+
+    // IPv6 literals: url.hostname keeps the brackets, so the guard must strip
+    // them before isIP() — the previous code left the whole IPv6 branch dead and
+    // let every IPv6 private/link-local/ULA address through.
+    for (const ipv6Url of [
+      'http://[fe80::1]/docs',
+      'http://[fd00::1234]/docs',
+      'http://[::ffff:169.254.169.254]/latest/meta-data/',
+    ]) {
+      const blocked = await runCliWithExit(['discover', '--url', ipv6Url]);
+      expect(blocked.exitCode).toBe(1);
+      expect(blocked.stderr).toContain('Refusing to fetch a private, link-local, or cloud-metadata');
+    }
   }, 30000);
 
   it('validates discover input exclusivity and repo-only options', async () => {

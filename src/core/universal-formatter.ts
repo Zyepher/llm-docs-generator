@@ -6,17 +6,13 @@
  *
  * Performance optimizations:
  * - String concatenation using array join (O(n) vs O(n²))
- * - Streaming writes for large outputs
  * - Hierarchical numbering for precise navigation
  */
 
-import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { writeTextFileSafely } from '../utils/safe-write.js';
-import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
 
 import type { DocNode, ContentBlock } from './models.js';
 import { DocNodeType, ContentBlockType } from './models.js';
@@ -86,12 +82,11 @@ export class UniversalFormatter {
 
     const content = parts.join('');
 
-    // Stream for very large files; otherwise write atomically.
-    if (content.length > 10 * 1024 * 1024) {
-      await this.writeFileStream(filepath, content);
-    } else {
-      await writeTextFileSafely(filepath, content);
-    }
+    // The full document is already materialized in memory, so streaming it
+    // offers no memory benefit — write atomically for every size (temp + rename,
+    // symlink-refusing) so a crash mid-write can't truncate the output and a
+    // pre-existing symlink at the path is never followed.
+    await writeTextFileSafely(filepath, content);
 
     return filepath;
   }
@@ -277,15 +272,6 @@ export class UniversalFormatter {
     }
 
     return parts.join('');
-  }
-
-  /**
-   * Stream large file writes
-   */
-  private async writeFileStream(filepath: string, content: string): Promise<void> {
-    const readable = Readable.from([content]);
-    const writable = createWriteStream(filepath, { encoding: 'utf-8' });
-    await pipeline(readable, writable);
   }
 }
 

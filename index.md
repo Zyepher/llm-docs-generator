@@ -416,7 +416,10 @@ when the existing manifest recorded the `semantic-chunks-jsonl` output.
 
 The current CLI is implemented in:
 
-- [src/cli.ts](src/cli.ts)
+- [src/cli.ts](src/cli.ts) - command wiring and action handlers
+- [src/cli/metadata.ts](src/cli/metadata.ts) - CLI name/version constants
+- [src/cli/capabilities-contract.ts](src/cli/capabilities-contract.ts) - the `capabilities --json` contract
+- [src/cli/agent-context.ts](src/cli/agent-context.ts) - `agent context` / `agent doctor` builders
 
 Package metadata:
 
@@ -428,13 +431,29 @@ Core model and formatting:
 
 - [src/core/models.ts](src/core/models.ts)
 - [src/core/chunker.ts](src/core/chunker.ts)
+- [src/core/semantic-chunk-index.ts](src/core/semantic-chunk-index.ts)
 - [src/core/formatter.ts](src/core/formatter.ts)
 - [src/core/universal-formatter.ts](src/core/universal-formatter.ts)
-- [src/core/manifest.ts](src/core/manifest.ts)
-- [src/core/refresh.ts](src/core/refresh.ts)
+- [src/core/generated-output-metadata.ts](src/core/generated-output-metadata.ts)
 - [src/core/detector.ts](src/core/detector.ts)
-- [src/core/website-discovery.ts](src/core/website-discovery.ts)
-- [src/core/source-truth.ts](src/core/source-truth.ts)
+- [src/core/refresh.ts](src/core/refresh.ts)
+- [src/core/parser-plugin-manifest.ts](src/core/parser-plugin-manifest.ts)
+
+Manifest write/verify (facade plus decomposed modules):
+
+- [src/core/manifest.ts](src/core/manifest.ts) - public facade
+- `src/core/manifest/` - constants, predicates, field-validators, types, fs-verify, contract, provenance, refresh-provenance, artifact-summary, discovery-evidence, and `verify/<mode>.ts` (configured-sdk, source-docs, source-truth-docs, source-verification, discovery-report, shared)
+
+Discovery and source analysis:
+
+- [src/core/discovery.ts](src/core/discovery.ts) - local source discovery
+- [src/core/repo-discovery.ts](src/core/repo-discovery.ts) - repo clone/scope discovery
+- [src/core/website-discovery.ts](src/core/website-discovery.ts) - URL discovery (SSRF-guarded)
+- [src/core/source-truth.ts](src/core/source-truth.ts) - code-derived facts
+- [src/core/source-truth-docs.ts](src/core/source-truth-docs.ts) - source-truth evidence docs
+- [src/core/source-docs.ts](src/core/source-docs.ts) - `generate --source` pipeline
+- [src/core/source-verification.ts](src/core/source-verification.ts) - docs-vs-source verification
+- [src/core/source-verification-file-evidence-index.ts](src/core/source-verification-file-evidence-index.ts)
 
 Parsers:
 
@@ -459,6 +478,7 @@ Configuration and source hints:
 - [config/categories.json](config/categories.json)
 - [config/known-sources.json](config/known-sources.json) - compatibility path for non-authoritative source hints
 - [config/presets/swift-book.json](config/presets/swift-book.json)
+- [config/supabase_swift_v2.yml](config/supabase_swift_v2.yml) - vendored OpenRef spec snapshot that also serves as the `generate --sdk swift --sdk-version v2` spec cache when running from the repo/package root (pass `--force` to bypass and re-download)
 
 Utilities:
 
@@ -466,11 +486,13 @@ Utilities:
 - [src/config/schemas.ts](src/config/schemas.ts)
 - [src/utils/fetcher.ts](src/utils/fetcher.ts)
 - [src/utils/logger.ts](src/utils/logger.ts)
+- [src/utils/safe-write.ts](src/utils/safe-write.ts) - atomic temp+rename, symlink-refusing writes
+- [src/utils/json.ts](src/utils/json.ts) - shared JSON read / atomic write
+- [src/utils/hash.ts](src/utils/hash.ts), [src/utils/fs-path.ts](src/utils/fs-path.ts), [src/utils/guards.ts](src/utils/guards.ts), [src/utils/sort.ts](src/utils/sort.ts), [src/utils/text-metrics.ts](src/utils/text-metrics.ts), [src/utils/source-files-hash.ts](src/utils/source-files-hash.ts) - shared determinism/path/hash helpers
 
 Tests:
 
-- [tests/unit/models.test.ts](tests/unit/models.test.ts)
-- [tests/unit/cli.test.ts](tests/unit/cli.test.ts)
+- Full unit suite under [tests/unit/](tests/unit/) (parsers, chunker, fetcher, source-truth/docs, source-verification, manifest verify, and the end-to-end CLI suite in `cli.test.ts`).
 
 ## Planning And Design Files
 

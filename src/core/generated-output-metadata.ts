@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { sha256Prefixed } from '../utils/hash.js';
+import { estimateTokenCount } from '../utils/text-metrics.js';
 
 export interface GeneratedTextOutputMetadata {
   byteSize: number;
@@ -19,7 +20,12 @@ export async function describeGeneratedTextOutput(
     byteSize: bytes.byteLength,
     hash: sha256Prefixed(bytes),
     lineCount: countTextLines(text),
-    estimatedTokenCount: estimateTextTokens(text),
+    // Use the shared estimator (text-metrics) so per-output token counts match
+    // the per-chunk counts recorded by the chunker / semantic-chunk index. The
+    // previous local `Array.from(text).length / 4` both diverged from that
+    // shared formula (code points vs UTF-16 units on astral characters) and
+    // allocated a full per-code-point array for a single integer.
+    estimatedTokenCount: estimateTokenCount(text),
   };
 }
 
@@ -37,12 +43,4 @@ export function countTextLines(text: string): number {
   }
 
   return text.endsWith('\n') ? newlineCount : newlineCount + 1;
-}
-
-export function estimateTextTokens(text: string): number {
-  if (text.length === 0) {
-    return 0;
-  }
-
-  return Math.ceil(Array.from(text).length / 4);
 }

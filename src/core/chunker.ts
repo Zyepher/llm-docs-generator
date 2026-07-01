@@ -709,7 +709,28 @@ function findSafeBoundary(
     }
   }
 
+  // No safe textual boundary: split at the limit, but never in the middle of a
+  // surrogate pair. Splitting between the two code units would leave a lone high
+  // surrogate at the end of one chunk and a lone low surrogate at the start of
+  // the next — mojibake in the content served to agents. Back up one unit so the
+  // astral character (emoji, some CJK) stays whole.
+  if (
+    hardEnd - 1 > start &&
+    isHighSurrogate(text.charCodeAt(hardEnd - 1)) &&
+    isLowSurrogate(text.charCodeAt(hardEnd))
+  ) {
+    return { index: hardEnd - 1, kind: 'hard' };
+  }
+
   return { index: hardEnd, kind: 'hard' };
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
 }
 
 function normalizeNode(value: unknown): NormalizedNode | undefined {

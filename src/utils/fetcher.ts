@@ -161,12 +161,21 @@ async function checkRemoteSpecAvailability(url: string, timeout: number): Promis
     return;
   }
 
-  if (statusCode === 405 || statusCode === 501) {
-    warn(`Spec source HEAD check unsupported for ${redactUrl(url)} (HTTP ${statusCode}); trying GET`);
-    return;
+  // 404/410 mean the resource is definitively absent, so fail fast without a
+  // wasted GET. Every other non-success HEAD status is inconclusive: the server
+  // may simply restrict HEAD (405/501), require method-specific auth (401/403 on
+  // a presigned GET-only URL, e.g. S3/GCS SigV4), rate-limit, or be transiently
+  // erroring. Fall through to the authoritative GET rather than rejecting a spec
+  // that GET can actually download.
+  if (statusCode === 404 || statusCode === 410) {
+    throw new SourceAvailabilityError(
+      `Spec source unavailable at ${redactUrl(url)}: HTTP ${statusCode}`
+    );
   }
 
-  throw new SourceAvailabilityError(`Spec source unavailable at ${redactUrl(url)}: HTTP ${statusCode}`);
+  warn(
+    `Spec source HEAD check inconclusive for ${redactUrl(url)} (HTTP ${statusCode}); trying GET`
+  );
 }
 
 /**

@@ -358,36 +358,74 @@ function normalizeWebsiteUrl(input: string, allowPrivateHosts: boolean): string 
  * scope for this syntactic check.
  */
 function isBlockedPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
+  // URL hostnames keep IPv6 literals bracketed ("[fe80::1]"), and isIP() does
+  // not recognize the bracketed form (isIP("[fe80::1]") === 0), so strip the
+  // surrounding brackets before classifying — otherwise the entire IPv6 branch
+  // below is dead code and every IPv6 private/link-local address slips through.
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   const ipVersion = isIP(host);
 
   if (ipVersion === 4) {
-    const octets = host.split('.').map((part) => Number.parseInt(part, 10));
-    const [a, b] = octets;
-    if (a === undefined || b === undefined) {
-      return false;
-    }
-    if (a === 169 && b === 254) {
-      return true; // link-local, incl. cloud metadata
-    }
-    if (a === 10) {
-      return true; // RFC1918
-    }
-    if (a === 172 && b >= 16 && b <= 31) {
-      return true; // RFC1918
-    }
-    if (a === 192 && b === 168) {
-      return true; // RFC1918
-    }
-    return false; // loopback (127/8) and public addresses allowed
+    return isBlockedIpv4(host);
   }
 
   if (ipVersion === 6) {
+    // IPv4-mapped/compatible IPv6 (e.g. ::ffff:169.254.169.254, which the URL
+    // parser emits as ::ffff:a9fe:a9fe) must be judged by the embedded IPv4
+    // address, not the IPv6 prefix — otherwise a mapped metadata IP bypasses.
+    const embeddedIpv4 = extractEmbeddedIpv4(host);
+    if (embeddedIpv4 !== undefined) {
+      return isBlockedIpv4(embeddedIpv4);
+    }
+
     // fe80::/10 (link-local) and fc00::/7 (unique local). ::1 loopback allowed.
     return /^fe[89ab]/.test(host) || /^f[cd]/.test(host);
   }
 
   return false;
+}
+
+function isBlockedIpv4(host: string): boolean {
+  const octets = host.split('.').map((part) => Number.parseInt(part, 10));
+  const [a, b] = octets;
+  if (a === undefined || b === undefined) {
+    return false;
+  }
+  if (a === 169 && b === 254) {
+    return true; // link-local, incl. cloud metadata
+  }
+  if (a === 10) {
+    return true; // RFC1918
+  }
+  if (a === 172 && b >= 16 && b <= 31) {
+    return true; // RFC1918
+  }
+  if (a === 192 && b === 168) {
+    return true; // RFC1918
+  }
+  return false; // loopback (127/8) and public addresses allowed
+}
+
+/**
+ * Extract the embedded IPv4 address from an IPv4-mapped or IPv4-compatible IPv6
+ * literal, in either the dotted-quad tail form (::ffff:169.254.169.254) or the
+ * hex-hextet form the URL parser normalizes to (::ffff:a9fe:a9fe). Returns
+ * undefined for ordinary IPv6 addresses.
+ */
+function extractEmbeddedIpv4(host: string): string | undefined {
+  const dotted = host.match(/(?:^|:)((?:\d{1,3}\.){3}\d{1,3})$/);
+  if (dotted !== null && dotted[1] !== undefined) {
+    return dotted[1];
+  }
+
+  const mapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mapped !== null && mapped[1] !== undefined && mapped[2] !== undefined) {
+    const high = Number.parseInt(mapped[1], 16);
+    const low = Number.parseInt(mapped[2], 16);
+    return `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+  }
+
+  return undefined;
 }
 
 function buildResourcePlan(normalizedUrl: string): PlannedWebsiteResource[] {

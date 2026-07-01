@@ -14,6 +14,7 @@ import {
   isUrlLikeInput,
 } from './discovery.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
+import { isSameOrDescendant, realpathIfExists } from '../utils/fs-path.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -130,18 +131,18 @@ export async function discoverRepo(options: DiscoverRepoOptions): Promise<Discov
   const scopeInput = options.scope ?? '.';
   const scopePath = resolveScopePath(cachePath, scopeInput);
 
-  if (!isInsideOrSame(cachePath, scopePath)) {
+  if (!isSameOrDescendant(cachePath, scopePath)) {
     throw new Error(`scope path must stay inside the cached repository: ${scopeInput}`);
   }
 
   const realCachePath = await realpath(cachePath);
-  const realScopePath = await realpathOrNull(scopePath);
+  const realScopePath = await realpathIfExists(scopePath);
 
-  if (realScopePath === null) {
+  if (realScopePath === undefined) {
     throw new Error(`scope path not found or cannot be read: ${scopePath}`);
   }
 
-  if (!isInsideOrSame(realCachePath, realScopePath)) {
+  if (!isSameOrDescendant(realCachePath, realScopePath)) {
     throw new Error(`scope path must stay inside the cached repository: ${scopeInput}`);
   }
 
@@ -453,20 +454,6 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function realpathOrNull(path: string): Promise<string | null> {
-  try {
-    return await realpath(path);
-  } catch {
-    return null;
-  }
-}
-
-function isInsideOrSame(rootPath: string, targetPath: string): boolean {
-  const relativePath = relative(rootPath, targetPath);
-
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
 }
 
 function normalizePathForReport(path: string): string {

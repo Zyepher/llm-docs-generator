@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -29,8 +29,13 @@ import { FormatType, type Parser } from '../parsers/base.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { isRecord, isFileNotFoundError } from '../utils/guards.js';
-import { isSameOrDescendant, resolveEffectiveOutputPath } from '../utils/fs-path.js';
-import { readJsonFile } from '../utils/json.js';
+import {
+  isParentRelativePath,
+  isSameOrDescendant,
+  resolveEffectiveOutputPath,
+} from '../utils/fs-path.js';
+import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
+import { writeTextFileSafely } from '../utils/safe-write.js';
 import { sha256File } from '../utils/hash.js';
 
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
@@ -317,7 +322,7 @@ export async function generateSourceDocs(
       warnings,
     });
 
-    await writeJsonFile(manifestPath, manifest);
+    await writeJsonFileSafely(manifestPath, manifest);
 
     return {
       outputDir,
@@ -1228,7 +1233,7 @@ async function writeSemanticChunksJsonl(
   const jsonl = lines.length === 0 ? '' : `${lines.join('\n')}\n`;
 
   await mkdir(chunksDir, { recursive: true });
-  await writeFile(chunksPath, jsonl, 'utf-8');
+  await writeTextFileSafely(chunksPath, jsonl);
 
   const file = await describeGeneratedTextOutput(chunksPath);
   const outputPath = relativeOutputPath(outputDir, chunksPath);
@@ -1616,9 +1621,6 @@ function isSourceDocsArtifactPath(
   );
 }
 
-async function writeJsonFile(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
-}
 
 async function assertOutputDirOutsideSource(
   source: ResolvedSourceDocsInput,
@@ -1650,13 +1652,17 @@ function relativeSourcePath(rootPath: string, filePath: string): string {
 }
 
 function relativeOutputPath(outputDir: string, outputPath: string): string {
-  const relativePath = normalizeManifestPath(relative(outputDir, outputPath));
+  const relativePath = relative(outputDir, outputPath);
 
-  if (relativePath.length === 0 || relativePath.startsWith('../') || isAbsolute(relativePath)) {
+  // Use the shared parent-relative check so this guard matches the sibling
+  // source-truth-docs / source-verification writers exactly. The prior inline
+  // `startsWith('../')` missed a bare `..` (an output resolving to the output
+  // dir's own parent), the exact case isParentRelativePath handles.
+  if (relativePath === '' || isParentRelativePath(relativePath) || isAbsolute(relativePath)) {
     throw new Error(`generated output path escapes output directory: ${outputPath}`);
   }
 
-  return relativePath;
+  return normalizeManifestPath(relativePath);
 }
 
 function normalizeManifestPath(path: string): string {

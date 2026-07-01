@@ -15,6 +15,8 @@ import { readFile } from 'node:fs/promises';
 import { marked } from 'marked';
 import type { Token } from 'marked';
 
+import { ParserError } from '../base.js';
+
 type MarkdownSourceSyntax = 'markdown' | 'mdx';
 type MdxDeclarationKind = 'import' | 'export';
 
@@ -94,25 +96,39 @@ export class MarkdownParser {
     const metadata = this.extractMetadata(content);
     metadata.set('sourceSyntax', sourceSyntax);
 
-    // Clean unsupported Markdown/MDX syntax outside fenced code
-    const cleaned = this.cleanMarkdownContent(content, sourceSyntax);
+    try {
+      // Clean unsupported Markdown/MDX syntax outside fenced code
+      const cleaned = this.cleanMarkdownContent(content, sourceSyntax);
 
-    // Parse with marked
-    const tokens = marked.lexer(cleaned);
+      // Parse with marked
+      const tokens = marked.lexer(cleaned);
 
-    // Extract title (first H1 or filename)
-    const title = this.extractTitle(tokens, this.filePath);
+      // Extract title (first H1 or filename)
+      const title = this.extractTitle(tokens, this.filePath);
 
-    // Build hierarchical sections plus any document-level (headingless) content
-    const { content: documentContent, sections } = this.buildSections(tokens);
+      // Build hierarchical sections plus any document-level (headingless) content
+      const { content: documentContent, sections } = this.buildSections(tokens);
 
-    return {
-      path: this.filePath,
-      title,
-      content: documentContent,
-      sections,
-      metadata,
-    };
+      return {
+        path: this.filePath,
+        title,
+        content: documentContent,
+        sections,
+        metadata,
+      };
+    } catch (error) {
+      // Pathologically deep MDX component nesting overflows the recursive
+      // component cleaners; surface it as an honest ParserError instead of a raw
+      // RangeError (parity with the HTML and OpenAPI parsers).
+      if (error instanceof RangeError) {
+        throw new ParserError(
+          `Markdown/MDX is too deeply nested to parse safely: ${this.filePath}`,
+          'Markdown Parser'
+        );
+      }
+
+      throw error;
+    }
   }
 
   /**
@@ -391,7 +407,13 @@ export class MarkdownParser {
       /^import\s+/.test(line) &&
       (/^import\s+['"]/.test(line) ||
         /\bfrom\s+['"]/.test(line) ||
-        /^import\s+(?:type\s+)?(?:\{|\*|[\w$]+\s*,)/.test(line))
+        // A default binding followed by a comma is only a real import when the
+        // comma introduces named/namespace bindings (`import Foo, { … }` /
+        // `import Foo, * as NS`) or ends the line as a continuation. Requiring
+        // `{`, `*`, or end-of-line after the comma stops ordinary prose such as
+        // "import them, then run setup." from being misread as an import and
+        // silently dropped.
+        /^import\s+(?:type\s+)?(?:\{|\*|[\w$]+\s*,\s*(?:\{|\*|$))/.test(line))
     ) {
       return 'import';
     }
@@ -696,19 +718,31 @@ export class MarkdownParser {
   }
 
   private delimiterBalance(text: string): number {
-    // Strip quoted strings before counting brace/paren/bracket balance. Each
-    // alternative uses a negated class that excludes BOTH the delimiter and the
-    // backslash, so a backslash can only ever match `\\.`. This removes the
-    // ambiguity of the previous `(?:\\.|(?!\1).)*` pattern, which backtracked
-    // exponentially (ReDoS) on a run of backslashes with no closing delimiter.
-    const withoutStrings = text.replace(
-      /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g,
-      ''
-    );
+    // Count brace/paren/bracket balance while skipping quoted-string contents.
+    // A single linear pass tracks the active quote and honors backslash escapes,
+    // so this is O(n). The previous global quote-stripping regex, even after the
+    // ReDoS fix, still rescanned to end-of-line from every quote start on an
+    // unterminated quote run — O(n^2), ~65s on one ~400KB line. Only the sign of
+    // the result is consumed by the callers (they clamp negatives to zero).
     let balance = 0;
+    let quote: string | undefined;
+    let escaped = false;
 
-    for (const char of withoutStrings) {
-      if (char === '{' || char === '(' || char === '[') {
+    for (const char of text) {
+      if (quote !== undefined) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === '\\') {
+          escaped = true;
+        } else if (char === quote) {
+          quote = undefined;
+        }
+        continue;
+      }
+
+      if (char === "'" || char === '"' || char === '`') {
+        quote = char;
+      } else if (char === '{' || char === '(' || char === '[') {
         balance += 1;
       } else if (char === '}' || char === ')' || char === ']') {
         balance -= 1;

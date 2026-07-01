@@ -85,11 +85,11 @@
   "dependencies": {
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.2.0",
     "marked": "^11.1.1",
     "ora": "^8.0.1",
     "typescript": "^5.3.3",
-    "undici": "^6.6.2",
+    "undici": "^6.27.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {

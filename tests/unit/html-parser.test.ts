@@ -461,4 +461,35 @@ describe('static HTML parser foundation', () => {
     expect(text).toContain('First item.');
     expect(text).toContain('Trailing prose after the list.');
   });
+
+  it('tokenizes large malformed (unterminated) markup in linear time', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'unterminated.html');
+
+    // ~400KB of unclosed comment/markup starts; the previous global-regex
+    // tokenizer rescanned to end-of-input from every `<` (~54s). The linear scan
+    // must finish promptly.
+    await writeFile(sourcePath, '<!--a'.repeat(80_000), 'utf-8');
+
+    const start = Date.now();
+    await parseHtmlFile(sourcePath);
+
+    expect(Date.now() - start).toBeLessThan(3000);
+  });
+
+  it('strips a large flood of unterminated <script openings in linear time', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'script-flood.html');
+
+    // ~400KB of unclosed <script openings; the previous global lazy regex
+    // rescanned to end-of-input from every opening. The linear indexOf scan must
+    // finish promptly and leak no script text.
+    await writeFile(sourcePath, `<title>Doc</title><p>Keep this.</p>${'<script '.repeat(50_000)}`, 'utf-8');
+
+    const start = Date.now();
+    const doc = await parseHtmlFile(sourcePath);
+
+    expect(Date.now() - start).toBeLessThan(3000);
+    expect(JSON.stringify(doc)).toContain('Keep this.');
+  });
 });

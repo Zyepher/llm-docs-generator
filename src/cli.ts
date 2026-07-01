@@ -12,6 +12,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import { existsSync } from 'node:fs';
 import { lstat, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +65,33 @@ const SDK_DEFAULT_OUTPUT_DIR = '../../public/llms-openref';
 const SOURCE_DEFAULT_OUTPUT_DIR = './llm-docs';
 const LEGACY_FORMATTER_FORMAT = 'legacy-llm-docs';
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_CONFIG_DIR = 'config';
+
+/**
+ * Resolve the configuration directory so config-backed commands (generate
+ * --sdk, --preset, list-sdks, validate) work regardless of the current working
+ * directory. An existing config dir is always honored — whether an explicit
+ * --config-dir or a ./config in the CWD — otherwise the default falls back to
+ * the config/ shipped inside the package, so a globally-installed CLI is not
+ * limited to running from the package root.
+ */
+function resolveConfigDir(configDir: string): string {
+  const resolved = resolve(configDir);
+
+  if (existsSync(resolved)) {
+    return resolved;
+  }
+
+  if (configDir === DEFAULT_CONFIG_DIR) {
+    const packaged = resolve(PACKAGE_ROOT, DEFAULT_CONFIG_DIR);
+
+    if (existsSync(packaged)) {
+      return packaged;
+    }
+  }
+
+  return resolved;
+}
 const CONFIGURED_SDK_GENERATE_FORMATS = ['openref', 'openref-0.1'] as const;
 const CONFIGURED_SDK_CANONICAL_MANIFEST_FORMAT = 'openref-0.1';
 const SOURCE_GENERATE_FORMATS = [
@@ -480,7 +508,7 @@ async function resolveSourceGeneratePreset(options: {
     );
   }
 
-  const config = new ConfigLoader(options.configDir);
+  const config = new ConfigLoader(resolveConfigDir(options.configDir));
   let loadedPreset: Awaited<ReturnType<ConfigLoader['loadPreset']>>;
 
   try {
@@ -542,11 +570,19 @@ async function resolveSourceGeneratePreset(options: {
 }
 
 async function cleanupStaleSourceArtifactsForFailedSourceRequest(options: {
+  sdk?: string;
   source?: string;
+  preset?: string;
   outputDir?: string;
   parserPluginManifest?: string;
 }): Promise<void> {
-  if (options.parserPluginManifest !== undefined) {
+  // Only clean the source-mode output dir when the failed request was actually
+  // source-shaped. `--source` and `--preset` are source-only signals; a request
+  // that names an SDK (or nothing source-related, e.g. bare `generate`) targets
+  // a different output tree and must not disturb a prior `generate --source`
+  // pack in ./llm-docs. Parser-plugin requests own their own cleanup flow.
+  const isSourceShaped = options.source !== undefined || options.preset !== undefined;
+  if (options.parserPluginManifest !== undefined || !isSourceShaped) {
     return;
   }
 
@@ -1181,7 +1217,7 @@ program
 
       try {
         // Load configuration
-        const config = new ConfigLoader(options.configDir);
+        const config = new ConfigLoader(resolveConfigDir(options.configDir));
         await config.load();
 
         // Determine which SDKs to process
@@ -1488,7 +1524,7 @@ program
   .option('--config-dir <dir>', 'Configuration directory', 'config')
   .action(async (options: { configDir: string }) => {
     try {
-      const config = new ConfigLoader(options.configDir);
+      const config = new ConfigLoader(resolveConfigDir(options.configDir));
       await config.load();
 
       console.log(chalk.bold('\nConfigured SDKs:\n'));
@@ -1543,7 +1579,7 @@ program
       console.log(chalk.yellow(`\nValidating ${options.sdk} ${options.version}...\n`));
 
       try {
-        const config = new ConfigLoader(options.configDir);
+        const config = new ConfigLoader(resolveConfigDir(options.configDir));
         await config.load();
 
         // Fetch and parse spec - returns [specPath, resolvedVersion]

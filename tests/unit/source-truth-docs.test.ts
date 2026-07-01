@@ -53,11 +53,9 @@ function countTextLines(text: string): number {
 }
 
 function estimateTextTokens(text: string): number {
-  if (text.length === 0) {
-    return 0;
-  }
-
-  return Math.ceil(Array.from(text).length / 4);
+  // Mirror the shared estimator (src/utils/text-metrics.ts): ceil(UTF-16 code
+  // units / 4). Kept as a local oracle for the recorded estimatedTokenCount.
+  return Math.ceil(text.length / 4);
 }
 
 async function readJson<T>(path: string): Promise<T> {

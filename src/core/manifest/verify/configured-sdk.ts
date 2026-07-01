@@ -133,6 +133,13 @@ export async function verifyConfiguredSdkManifest(
     failures,
     fileChecks,
     requireTextMetadata: true,
+    // Intentionally lenient (unlike the source-* modes): the legacy
+    // configured-SDK path may have its generated outputs symlinked into a
+    // published docs tree, and verify must follow those symlinks. This is a
+    // deliberate compatibility affordance, exercised by the "continues to follow
+    // configured SDK generated output symlinks during verification" test — do
+    // not tighten to true without changing that contract. The byte-size + SHA-256
+    // check still detects tampered content through the symlink.
     rejectSymlinks: false,
     allowedKinds: CONFIGURED_SDK_GENERATED_OUTPUT_KINDS,
   });

@@ -177,7 +177,11 @@ describe('fetchSpec source availability checks', () => {
     );
   });
 
-  it.each([405, 501])(
+  // HEAD is only a hint: 404/410 fail fast (see the test above), but every other
+  // non-success status (auth-scoped GET-only URLs → 401/403, rate limits → 429,
+  // transient 5xx, or method-restricted 405/501) must fall through to the
+  // authoritative GET rather than rejecting a spec GET can actually download.
+  it.each([401, 403, 405, 429, 500, 501])(
     'falls back to GET and writes cache when remote HEAD returns HTTP %i',
     async (statusCode) => {
       let headCount = 0;

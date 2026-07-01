@@ -260,6 +260,40 @@ describe('semantic DocNode chunker', () => {
     expect(result.chunks[2]?.warnings).toEqual([]);
   });
 
+  it('never hard-splits in the middle of a surrogate pair', () => {
+    const hasLoneSurrogate = (value: string): boolean => {
+      for (let index = 0; index < value.length; index += 1) {
+        const code = value.charCodeAt(index);
+        if (code >= 0xd800 && code <= 0xdbff) {
+          const next = value.charCodeAt(index + 1);
+          if (!(next >= 0xdc00 && next <= 0xdfff)) {
+            return true;
+          }
+          index += 1;
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // No spaces/newlines/sentence marks, so the splitter must fall back to a hard
+    // split. The 4-byte emoji (two UTF-16 units) straddles the 60-char boundary.
+    const prose = `${'a'.repeat(59)}\u{1F600}${'b'.repeat(59)}`;
+    const root = createDocNode(DocNodeType.ROOT, 'docs', 'Docs', {
+      children: [
+        createDocNode(DocNodeType.SECTION, 'emoji', 'Emoji', {
+          content: [createContentBlock(ContentBlockType.PROSE, prose)],
+        }),
+      ],
+    });
+
+    const result = chunkDocNode(root, { maxCharacters: 60 });
+
+    expect(result.chunks.every((chunk) => !hasLoneSurrogate(chunk.content))).toBe(true);
+    expect(result.chunks.some((chunk) => chunk.content.includes('\u{1F600}'))).toBe(true);
+  });
+
   it('uses reserved split chunk segments that do not collide with real child paths', () => {
     const root = createDocNode(DocNodeType.ROOT, 'docs', 'Docs', {
       children: [
