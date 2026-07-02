@@ -80,7 +80,7 @@ Local path: agent verifies the path -> optional llm-docs discover --source <path
 
 When modifying this repository:
 
-1. Read `NEXT_GEN_PLAN.html`, `AGENT_CONTEXT.md`, `IMPLEMENTATION.md`, and relevant source/tests.
+1. Read `AGENT_CONTEXT.md`, `index.md`, and relevant source/tests.
 2. Define acceptance criteria before editing.
 3. Keep docs, CLI behavior, tests, and capability contracts aligned.
 4. Preserve the product boundary in code and wording.

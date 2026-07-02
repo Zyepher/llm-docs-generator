@@ -49,8 +49,7 @@ Read:
    package/product name, or local docs path
 3. [skills/llm-docs-generator/SKILL.md](skills/llm-docs-generator/SKILL.md)
    when maintaining this repo or checking the installed CLI contract
-4. [NEXT_GEN_PLAN.html](NEXT_GEN_PLAN.html)
-5. [README.md](README.md)
+4. [README.md](README.md)
 
 Use [AGENT_CONTEXT.md](AGENT_CONTEXT.md) to decide the user's intent before
 running commands.
@@ -59,21 +58,19 @@ running commands.
 
 Read:
 
-1. [NEXT_GEN_PLAN.html](NEXT_GEN_PLAN.html)
-2. [AGENT_CONTEXT.md](AGENT_CONTEXT.md)
-3. [README.md](README.md)
+1. [AGENT_CONTEXT.md](AGENT_CONTEXT.md)
+2. [README.md](README.md)
 
-The HTML plan explains the planned architecture, edge cases, skill
-integration, CLI shape, and roadmap.
+The agent context explains the implemented boundary, command surface, and
+workflow rules.
 
 ### Engineer Changing The Tool
 
 Read:
 
 1. [README.md](README.md)
-2. [IMPLEMENTATION.md](IMPLEMENTATION.md)
-3. [AGENT_CONTEXT.md](AGENT_CONTEXT.md)
-4. Source files listed below
+2. [AGENT_CONTEXT.md](AGENT_CONTEXT.md)
+3. Source files listed below
 
 Run relevant checks after changes:
 
@@ -96,7 +93,7 @@ check [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and source before promising support.
 | Generate docs from a GitHub repo         | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Determine whether user means repo docs or source-truth codebase docs |
 | Generate docs from source code           | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Intent 3: source-truth codebase docs                                 |
 | Refresh generated docs                   | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Intent 4: refresh or verify                                          |
-| Implement new functionality              | [IMPLEMENTATION.md](IMPLEMENTATION.md) | Intent 5: maintain or extend tool                                    |
+| Implement new functionality              | [AGENT_CONTEXT.md](AGENT_CONTEXT.md)   | Intent 5: maintain or extend tool                                    |
 
 ## Current CLI
 
@@ -499,10 +496,7 @@ Tests:
 
 ## Planning And Design Files
 
-- [NEXT_GEN_PLAN.html](NEXT_GEN_PLAN.html): visual product and
-  architecture plan.
 - [AGENT_CONTEXT.md](AGENT_CONTEXT.md): operational instructions for AI agents.
-- [IMPLEMENTATION.md](IMPLEMENTATION.md): current implementation notes.
 
 ## Planned Concepts
 
@@ -602,9 +596,7 @@ When an AI agent enters this repo, use this order:
 1. Read this [index.md](index.md).
 2. Read [AGENT_CONTEXT.md](AGENT_CONTEXT.md).
 3. Read [README.md](README.md) for current usage.
-4. Read [NEXT_GEN_PLAN.html](NEXT_GEN_PLAN.html) for product direction if the
-   task is about architecture or future work.
-5. Inspect source files only after intent is clear.
+4. Inspect source files only after intent is clear.
 
 Do not assume that every planned capability is already
 implemented. Verify in source before promising behavior.

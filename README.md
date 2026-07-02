@@ -182,7 +182,7 @@ Good agent documentation isn't just shorter documentation. It's structured, refr
 - **[`skills/`](skills/)**: installable skills that teach an agent to investigate sources and call the CLI
 - **`llm-docs capabilities --json`**: the source of truth for what's implemented vs. planned
 
-**For contributors:** see `NEXT_GEN_PLAN.html`, `IMPLEMENTATION.md`, and `index.md`, then:
+**For contributors:** see `index.md`, then:
 
 ```bash
 npm install

@@ -2619,7 +2619,6 @@ describe('CLI compatibility behavior', () => {
         [
           'README.md',
           'AGENT_CONTEXT.md',
-          'IMPLEMENTATION.md',
           'index.md',
           'skills/llm-docs-generator/SKILL.md',
         ].map(async (path) => [path, await readFile(join(repoRoot, path), 'utf-8')] as const)
@@ -2638,10 +2637,6 @@ describe('CLI compatibility behavior', () => {
     );
     expect(combined).toMatch(
       /Parser-plugin `local-source-docs`\s+manifests are\s+not refreshed\s+yet/
-    );
-    expect(docs.get('IMPLEMENTATION.md')).toContain('- [ ] Plugin system for custom parsers');
-    expect(docs.get('IMPLEMENTATION.md')).toMatch(
-      /- \[x\] Explicit parser plugin execution for a local file or opted-in directory\s+source/
     );
     expect(docs.get('skills/llm-docs-generator/SKILL.md')).toMatch(
       /one local source file or opted-in directory plus\s+one explicit local/
@@ -3795,7 +3790,7 @@ describe('CLI compatibility behavior', () => {
 
   it('documents source-verification local evidence refresh without broad verification claims', async () => {
     const docs = await Promise.all(
-      ['index.md', 'AGENT_CONTEXT.md', 'IMPLEMENTATION.md'].map(async (path) => ({
+      ['index.md', 'AGENT_CONTEXT.md'].map(async (path) => ({
         path,
         text: await readFile(join(repoRoot, path), 'utf-8'),
       }))
