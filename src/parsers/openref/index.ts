@@ -45,11 +45,16 @@ export class OpenRefFormatParser extends BaseParser {
       const content = await this.readFile(sourcePath);
       const parsed = yamlLoad(content);
 
-      if (!isRecord(parsed) || typeof parsed.openapi === 'string' || parsed.swagger !== undefined) {
+      if (!isRecord(parsed) || parsed.openapi !== undefined || parsed.swagger !== undefined) {
         return false;
       }
 
-      return Array.isArray(parsed.functions);
+      return (
+        'functions' in parsed &&
+        (Array.isArray(parsed.functions) ||
+          parsed.functions === null ||
+          parsed.functions === undefined)
+      );
     } catch {
       return false;
     }
@@ -92,8 +97,3 @@ export class OpenRefFormatParser extends BaseParser {
 
 // Export the parser instance
 export const openRefParser = new OpenRefFormatParser();
-
-// Re-export components for backward compatibility
-export { OpenRefParser } from './parser.js';
-export { openRefToDocNode, convertOperation, convertExample } from './adapter.js';
-export type { SpecData, Operation, Example, SpecInfo } from '../../core/models.js';

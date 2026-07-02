@@ -492,4 +492,119 @@ describe('static HTML parser foundation', () => {
     expect(Date.now() - start).toBeLessThan(3000);
     expect(JSON.stringify(doc)).toContain('Keep this.');
   });
+
+  it('survives a comment-wrapped script opener (regression: comment content treated as real opener)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'commented-script.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<title>Commented Script</title>',
+        '<p>Before the comment.</p>',
+        '<!-- <script src="x.js"> -->',
+        '<h2>After Heading</h2>',
+        '<p>After the comment.</p>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('Before the comment.');
+    expect(text).toContain('After Heading');
+    expect(text).toContain('After the comment.');
+    expect(text).not.toContain('x.js');
+    // The commented-out opener is not a real element, so nothing was stripped.
+    expect(root.metadata.get('strippedElementCounts')).toEqual({
+      script: 0,
+      style: 0,
+      template: 0,
+    });
+  });
+
+  it('treats an unterminated <!-- as commenting out the remainder without crashing', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'unterminated-comment.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<title>Unterminated Comment</title>',
+        '<p>Kept prose.</p>',
+        '<!-- never closed <p>Commented out.</p>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('Kept prose.');
+    expect(text).not.toContain('Commented out.');
+  });
+
+  it('still drops the remainder after a genuinely unclosed <script> (conservative behavior)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'unclosed-script.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<title>Unclosed Script</title>',
+        '<p>Before the script.</p>',
+        '<script>var LEAKED = true;',
+        '<p>Dropped tail.</p>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('Before the script.');
+    expect(text).not.toContain('LEAKED');
+    expect(text).not.toContain('Dropped tail.');
+  });
+
+  it('parses a ">" inside a quoted attribute value without leaking the tag tail (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'attr-gt.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<title>Arrow Attribute</title>',
+        '<p>See <img alt="A -> B" src="d.png"> for the flow.</p>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('See A -> B for the flow.');
+    expect(text).not.toContain('src=');
+    expect(text).not.toContain('d.png');
+  });
+
+  it('does not inject spaces inside words split by inline markup (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'inline-split.html');
+
+    await writeFile(
+      sourcePath,
+      ['<title>Inline Split</title>', '<p>The <code>get</code>ter and re<em>name</em>d</p>'].join(
+        '\n'
+      ),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('The getter and renamed');
+    expect(text).not.toContain('get ter');
+  });
 });

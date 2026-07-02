@@ -314,6 +314,100 @@ describe('reStructuredText parser foundation', () => {
     expect(proseText).toContain('Next paragraph.');
   });
 
+  it('consumes non-directive explicit markup silently while keeping directives working', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'comments.rst');
+    await writeFile(
+      sourcePath,
+      [
+        'Guide',
+        '=====',
+        '',
+        '.. _installation:',
+        '',
+        '.. TODO: internal note',
+        '',
+        'Visible prose.',
+        '',
+        '.. this comment has a body',
+        '   spanning indented lines',
+        '',
+        '   including blank-separated continuation',
+        '',
+        '.. |version| replace:: 2.0',
+        '',
+        '.. code-block:: python',
+        '',
+        '   print("still parsed")',
+        '',
+        'Closing prose.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new RstFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+    const codeBlocks = collectContentBlocks(root).filter(
+      (block) => block.type === ContentBlockType.CODE
+    );
+
+    expect(parsedText).not.toContain('_installation');
+    expect(parsedText).not.toContain('internal note');
+    expect(parsedText).not.toContain('this comment has a body');
+    expect(parsedText).not.toContain('spanning indented lines');
+    expect(parsedText).not.toContain('blank-separated continuation');
+    expect(parsedText).not.toContain('|version|');
+    expect(parsedText).toContain('Visible prose.');
+    expect(parsedText).toContain('Closing prose.');
+    expect(codeBlocks).toEqual([
+      expect.objectContaining({
+        language: 'python',
+        content: 'print("still parsed")',
+      }),
+    ]);
+  });
+
+  it('recognizes over-and-under section titles without leaking adornment prose', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'over-under.rst');
+    await writeFile(
+      sourcePath,
+      [
+        '==============',
+        'Document Title',
+        '==============',
+        '',
+        'Intro prose.',
+        '',
+        'Usage',
+        '=====',
+        '',
+        'Usage prose.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new RstFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+
+    expect(root.title).toBe('Document Title');
+    expect(parsedText).not.toContain('==');
+    expect(parsedText).toContain('Intro prose.');
+    expect(parsedText).toContain('Usage prose.');
+
+    // The over-and-under `=` title is level 1; the underline-only `=` section
+    // is a distinct style and must land on level 2 per docutils semantics.
+    expect(root.children).toHaveLength(1);
+    expect(root.children[0]).toMatchObject({
+      type: DocNodeType.CATEGORY,
+      id: 'usage',
+      title: 'Usage',
+    });
+    expect(root.children[0]?.metadata.get('level')).toBe(2);
+  });
+
   it('captures tab-indented literal block bodies (regression)', async () => {
     const dir = await createTempDir();
     const sourcePath = join(dir, 'tabbed.rst');

@@ -12,6 +12,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { load as yamlLoad } from 'js-yaml';
 import { marked } from 'marked';
 import type { Token } from 'marked';
 
@@ -185,7 +186,9 @@ export class MarkdownParser {
     let inJsxComment = false;
     let skippingDeclaration: MdxDeclarationKind | null = null;
     let declarationBalance = 0;
+    let declarationQuote: string | null = null;
     let expressionBalance = 0;
+    let expressionQuote: string | null = null;
     let pendingComponentLines: string[] | null = null;
 
     for (const originalLine of lines) {
@@ -211,17 +214,21 @@ export class MarkdownParser {
       }
 
       if (skippingDeclaration !== null) {
-        declarationBalance += this.delimiterBalance(line);
-        if (declarationBalance <= 0) {
+        const balanceResult = this.delimiterBalance(line, declarationQuote);
+        declarationBalance += balanceResult.balance;
+        declarationQuote = balanceResult.quote;
+        if (declarationBalance <= 0 && declarationQuote === null) {
           skippingDeclaration = null;
           declarationBalance = 0;
         }
         continue;
       }
 
-      if (expressionBalance > 0) {
-        expressionBalance += this.delimiterBalance(line);
-        if (expressionBalance <= 0) {
+      if (expressionBalance > 0 || expressionQuote !== null) {
+        const balanceResult = this.delimiterBalance(line, expressionQuote);
+        expressionBalance += balanceResult.balance;
+        expressionQuote = balanceResult.quote;
+        if (expressionBalance <= 0 && expressionQuote === null) {
           expressionBalance = 0;
         }
         continue;
@@ -234,19 +241,25 @@ export class MarkdownParser {
 
       const declarationKind = this.getMdxDeclarationKind(trimmed);
       if (declarationKind !== null) {
-        declarationBalance = this.delimiterBalance(trimmed);
+        const balanceResult = this.delimiterBalance(trimmed, null);
+        declarationBalance = balanceResult.balance;
+        declarationQuote = balanceResult.quote;
         if (this.shouldContinueMdxDeclaration(trimmed, declarationKind, declarationBalance)) {
           skippingDeclaration = declarationKind;
         } else {
           declarationBalance = 0;
+          declarationQuote = null;
         }
         continue;
       }
 
       if (this.isMdxExpressionOnlyLine(trimmed)) {
-        expressionBalance = this.delimiterBalance(trimmed);
+        const balanceResult = this.delimiterBalance(trimmed, null);
+        expressionBalance = balanceResult.balance;
+        expressionQuote = balanceResult.quote;
         if (expressionBalance <= 0) {
           expressionBalance = 0;
+          expressionQuote = null;
         }
         continue;
       }
@@ -336,14 +349,38 @@ export class MarkdownParser {
     for (let index = 1; index < lines.length; index += 1) {
       const trimmed = lines[index]?.trim();
       if (trimmed === '---' || trimmed === '...') {
+        const frontmatter = lines.slice(1, index).join('\n');
+        if (!this.isYamlMappingBlock(frontmatter)) {
+          return null;
+        }
+
         return {
-          frontmatter: lines.slice(1, index).join('\n'),
+          frontmatter,
           contentAfter: lines.slice(index + 1).join('\n'),
         };
       }
     }
 
     return null;
+  }
+
+  /**
+   * A leading '---' can open a thematic break rather than a frontmatter fence.
+   * Only treat the captured block as frontmatter when it parses as a YAML
+   * mapping (or is empty); a scalar, sequence, or parse error means the
+   * delimiters were real document content that must not be stripped.
+   */
+  private isYamlMappingBlock(block: string): boolean {
+    try {
+      const parsed = yamlLoad(block);
+      if (parsed === null || parsed === undefined) {
+        return true;
+      }
+
+      return typeof parsed === 'object' && Object.getPrototypeOf(parsed) === Object.prototype;
+    } catch {
+      return false;
+    }
   }
 
   private compressBlankLines(content: string): string {
@@ -717,25 +754,35 @@ export class MarkdownParser {
     return component.split('.')[0] ?? component;
   }
 
-  private delimiterBalance(text: string): number {
+  private delimiterBalance(
+    text: string,
+    openQuote: string | null
+  ): { balance: number; quote: string | null } {
     // Count brace/paren/bracket balance while skipping quoted-string contents.
     // A single linear pass tracks the active quote and honors backslash escapes,
     // so this is O(n). The previous global quote-stripping regex, even after the
     // ReDoS fix, still rescanned to end-of-line from every quote start on an
-    // unterminated quote run — O(n^2), ~65s on one ~400KB line. Only the sign of
-    // the result is consumed by the callers (they clamp negatives to zero).
+    // unterminated quote run: O(n^2), ~65s on one ~400KB line.
+    //
+    // `openQuote` carries an unterminated template literal in from the previous
+    // line, so delimiters inside multi-line backtick strings stay hidden. Only
+    // backticks survive the line break in the returned state: ' and " strings
+    // cannot span lines in JavaScript, and treating a stray apostrophe (e.g. in
+    // a trailing comment) as still open would swallow the rest of the document.
+    // A trailing backslash escapes the newline itself, so the escape state never
+    // carries into the next line.
     let balance = 0;
-    let quote: string | undefined;
+    let quote: string | null = openQuote;
     let escaped = false;
 
     for (const char of text) {
-      if (quote !== undefined) {
+      if (quote !== null) {
         if (escaped) {
           escaped = false;
         } else if (char === '\\') {
           escaped = true;
         } else if (char === quote) {
-          quote = undefined;
+          quote = null;
         }
         continue;
       }
@@ -749,7 +796,7 @@ export class MarkdownParser {
       }
     }
 
-    return balance;
+    return { balance, quote: quote === '`' ? quote : null };
   }
 
   private inferSourceSyntax(filePath: string): MarkdownSourceSyntax {
@@ -940,12 +987,4 @@ export class MarkdownParser {
       .replace(/-+/g, '-')
       .trim();
   }
-}
-
-/**
- * Parse markdown file (convenience function)
- */
-export async function parseMarkdownFile(filePath: string): Promise<MarkdownDocument> {
-  const parser = new MarkdownParser(filePath);
-  return await parser.parse();
 }

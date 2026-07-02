@@ -324,6 +324,61 @@ describe('Markdown parser MDX cleanup', () => {
     expect(parsedText).not.toContain('<Accordion>');
     expect(parsedText).not.toContain('<AccordionItem');
   });
+
+  it('keeps content after an expression with a multi-line template literal (regression: swallowed document)', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'template-literal.mdx');
+
+    await writeFile(
+      sourcePath,
+      [
+        '# Heading',
+        '',
+        '{`',
+        'inline template text',
+        '`}',
+        '',
+        'First paragraph survives.',
+        '',
+        'Second paragraph survives.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const docNode = await new MarkdownFormatParser().parse(sourcePath);
+    const parsedText = collectNonCodeText(docNode);
+
+    expect(parsedText).toContain('First paragraph survives.');
+    expect(parsedText).toContain('Second paragraph survives.');
+    expect(parsedText).not.toContain('inline template text');
+  });
+
+  it('honors escaped backticks inside a multi-line template-literal expression', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'escaped-backtick.mdx');
+
+    await writeFile(
+      sourcePath,
+      [
+        '# Heading',
+        '',
+        '{`',
+        'uses an escaped \\` backtick that must not close the literal',
+        '`}',
+        '',
+        'Trailing prose survives.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const docNode = await new MarkdownFormatParser().parse(sourcePath);
+    const parsedText = collectNonCodeText(docNode);
+
+    expect(parsedText).toContain('Trailing prose survives.');
+    expect(parsedText).not.toContain('escaped');
+  });
 });
 
 describe('Markdown parser structure preservation', () => {
@@ -443,5 +498,88 @@ describe('Markdown parser structure preservation', () => {
     await new MarkdownFormatParser().parse(sourcePath);
 
     expect(Date.now() - start).toBeLessThan(3000);
+  });
+});
+
+describe('Markdown parser frontmatter detection', () => {
+  it('preserves a document that opens with a thematic break instead of frontmatter', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'thematic-break.md');
+
+    await writeFile(
+      sourcePath,
+      [
+        '---',
+        '',
+        'Opening prose after a leading thematic break.',
+        '',
+        '# Title',
+        '',
+        'Body prose before the second rule.',
+        '',
+        '---',
+        '',
+        'Closing prose after the second rule.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const docNode = await new MarkdownFormatParser().parse(sourcePath);
+    const text = collectText(docNode);
+
+    expect(text).toContain('Opening prose after a leading thematic break.');
+    expect(text).toContain('Title');
+    expect(text).toContain('Body prose before the second rule.');
+    expect(text).toContain('Closing prose after the second rule.');
+  });
+
+  it('still strips genuine frontmatter with mappings and lists', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'frontmatter.md');
+
+    await writeFile(
+      sourcePath,
+      [
+        '---',
+        'title: Guide',
+        'tags:',
+        '  - alpha',
+        '  - beta',
+        '---',
+        '',
+        '# Guide',
+        '',
+        'Body prose survives.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const docNode = await new MarkdownFormatParser().parse(sourcePath);
+    const text = collectText(docNode);
+
+    expect(docNode.metadata.get('title')).toBe('Guide');
+    expect(text).toContain('Body prose survives.');
+    expect(text).not.toContain('title: Guide');
+    expect(text).not.toContain('alpha');
+    expect(text).not.toContain('beta');
+  });
+
+  it('keeps content when the leading block is a plain YAML scalar rather than a mapping', async () => {
+    const tempDir = await createTempDir();
+    const sourcePath = join(tempDir, 'scalar-block.md');
+
+    await writeFile(
+      sourcePath,
+      ['---', 'just prose', '---', '', 'Content after the rules survives.', ''].join('\n'),
+      'utf-8'
+    );
+
+    const docNode = await new MarkdownFormatParser().parse(sourcePath);
+    const text = collectText(docNode);
+
+    expect(text).toContain('just prose');
+    expect(text).toContain('Content after the rules survives.');
   });
 });

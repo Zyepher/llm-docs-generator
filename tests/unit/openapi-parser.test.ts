@@ -193,6 +193,7 @@ describe('OpenAPI / Swagger parser', () => {
     const dir = await createTempDir();
     const openApiPath = join(dir, 'openapi.yaml');
     const openRefPath = join(dir, 'openref.yaml');
+    const nullableOpenRefPath = join(dir, 'openref-empty.yaml');
 
     await writeFile(
       openApiPath,
@@ -237,11 +238,17 @@ describe('OpenAPI / Swagger parser', () => {
       ].join('\n'),
       'utf-8'
     );
+    await writeFile(
+      nullableOpenRefPath,
+      ['info:', '  id: supabase-js', '  title: Supabase JS', 'functions:', ''].join('\n'),
+      'utf-8'
+    );
 
     const detector = new FormatDetector();
 
     expect(await detector.detect(openApiPath)).toBe(FormatType.OPENAPI);
     expect(await detector.detect(openRefPath)).toBe(FormatType.OPENREF);
+    expect(await detector.detect(nullableOpenRefPath)).toBe(FormatType.OPENREF);
     expect(await openRefParser.detect(openApiPath)).toBe(false);
 
     const root = await parseOpenApiFile(openApiPath);
@@ -841,6 +848,126 @@ describe('OpenAPI / Swagger parser', () => {
 
     const root = await parseOpenApiFile(sourcePath);
     expect(root.children.length).toBeGreaterThan(0);
+  });
+
+  it('parses YAML with an unquoted swagger version number (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'unquoted-swagger.yaml');
+
+    // js-yaml parses unquoted `swagger: 2.0` as the number 2.
+    await writeFile(
+      sourcePath,
+      [
+        'swagger: 2.0',
+        'info:',
+        '  title: Unquoted Swagger',
+        '  version: 1.0.0',
+        'paths:',
+        '  /pets:',
+        '    get:',
+        '      operationId: listPets',
+        '      responses:',
+        "        '200':",
+        '          description: OK',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const parser = new OpenApiFormatParser();
+    expect(await parser.detect(sourcePath)).toBe(true);
+
+    const root = await parseOpenApiFile(sourcePath);
+
+    expect(root.metadata.get('sourceKind')).toBe('swagger');
+    expect(root.metadata.get('specVersion')).toBe('2.0');
+    expect(findNode(root, 'listPets')).toMatchObject({
+      type: DocNodeType.OPERATION,
+      title: 'listPets',
+    });
+  });
+
+  it('parses YAML with an unquoted openapi version number (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'unquoted-openapi.yaml');
+
+    // js-yaml parses unquoted `openapi: 3.0` as the number 3.
+    await writeFile(
+      sourcePath,
+      [
+        'openapi: 3.0',
+        'info:',
+        '  title: Unquoted OpenAPI',
+        '  version: 1.0.0',
+        'paths:',
+        '  /pets:',
+        '    get:',
+        '      operationId: listPets',
+        '      responses:',
+        "        '200':",
+        '          description: OK',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const parser = new OpenApiFormatParser();
+    expect(await parser.detect(sourcePath)).toBe(true);
+
+    const root = await parseOpenApiFile(sourcePath);
+
+    expect(root.metadata.get('sourceKind')).toBe('openapi');
+    expect(root.metadata.get('specVersion')).toBe('3.0.0');
+    expect(findNode(root, 'listPets')).toMatchObject({
+      type: DocNodeType.OPERATION,
+      title: 'listPets',
+    });
+  });
+
+  it('accepts an OpenAPI 3.1 operation without a responses object (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'no-responses-3-1.json');
+
+    await writeJson(sourcePath, {
+      openapi: '3.1.0',
+      info: { title: 'No Responses', version: '1.0.0' },
+      paths: {
+        '/events': {
+          post: {
+            operationId: 'publishEvent',
+            summary: 'Publish event',
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+    const operation = findNode(root, 'publishEvent');
+
+    expect(operation).toMatchObject({
+      type: DocNodeType.OPERATION,
+      title: 'Publish event',
+    });
+    expect(collectContent(operation as DocNode)).not.toContain('Responses');
+  });
+
+  it('still rejects a missing responses object for OpenAPI 3.0 (regression)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'no-responses-3-0.json');
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.3',
+      info: { title: 'No Responses', version: '1.0.0' },
+      paths: {
+        '/events': {
+          post: {
+            operationId: 'publishEvent',
+          },
+        },
+      },
+    });
+
+    await expect(parseOpenApiFile(sourcePath)).rejects.toThrow(
+      /responses for POST \/events must be present/
+    );
   });
 
   it('assigns unique category ids when slugs collide with disambiguated slugs (regression)', async () => {

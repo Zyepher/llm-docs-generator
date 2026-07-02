@@ -17,6 +17,7 @@ import {
   type ContentBlock,
   type DocNode,
 } from '../../core/models.js';
+import { slugifyAscii } from '../../utils/slug.js';
 import { ParserError } from '../base.js';
 
 const STRIPPED_ELEMENTS = ['script', 'style', 'template'] as const;
@@ -186,8 +187,12 @@ export class HtmlParser {
 
   private parseContent(content: string): ParsedHtml {
     const normalized = content.replace(/\r\n?/g, '\n');
-    const strippedElementCounts = countStrippedElements(normalized);
-    const safeHtml = stripUnsafeElements(normalized);
+    // Comments must be removed before unsafe-element stripping runs, so a
+    // commented-out <script>/<style>/<template> opener is never mistaken for a
+    // real one (which previously dropped the rest of the document).
+    const withoutComments = stripHtmlComments(normalized);
+    const strippedElementCounts = countStrippedElements(withoutComments);
+    const safeHtml = stripUnsafeElements(withoutComments);
     const tree = parseHtmlTree(safeHtml);
     const body = findFirstElement(tree, 'body') ?? tree;
     const htmlTitle = extractFirstElementText(tree, 'title');
@@ -367,7 +372,7 @@ class HtmlContentExtractor {
     const section: HtmlSection = {
       level,
       title,
-      id: this.uniqueId(slugify(title)),
+      id: this.uniqueId(slugifyAscii(title)),
       content: [],
       children: [],
     };
@@ -410,7 +415,10 @@ class HtmlContentExtractor {
       return;
     }
 
-    const content = rows.map((row) => row.join(' | ')).join('\n').trim();
+    const content = rows
+      .map((row) => row.join(' | '))
+      .join('\n')
+      .trim();
     if (content !== '') {
       this.currentContent().push(
         createContentBlock(ContentBlockType.DATA, content, {
@@ -470,10 +478,7 @@ class HtmlContentExtractor {
     });
   }
 
-  private extractInlineText(
-    node: HtmlNode,
-    shouldSkip?: (node: HtmlNode) => boolean
-  ): string {
+  private extractInlineText(node: HtmlNode, shouldSkip?: (node: HtmlNode) => boolean): string {
     if (shouldSkip?.(node)) {
       return '';
     }
@@ -483,7 +488,7 @@ class HtmlContentExtractor {
     }
 
     if (node.type === 'root') {
-      return node.children.map((child) => this.extractInlineText(child, shouldSkip)).join(' ');
+      return node.children.map((child) => this.extractInlineText(child, shouldSkip)).join('');
     }
 
     if (NON_CONTENT_ELEMENTS.has(node.tag)) {
@@ -496,7 +501,7 @@ class HtmlContentExtractor {
 
     if (node.tag === 'a') {
       const text = normalizeInlineWhitespace(
-        node.children.map((child) => this.extractInlineText(child, shouldSkip)).join(' ')
+        node.children.map((child) => this.extractInlineText(child, shouldSkip)).join('')
       );
       const href = normalizeInlineWhitespace(node.attrs.get('href') ?? '');
       if (href !== '') {
@@ -513,7 +518,9 @@ class HtmlContentExtractor {
       return normalizeInlineWhitespace(node.attrs.get('alt') ?? '');
     }
 
-    return node.children.map((child) => this.extractInlineText(child, shouldSkip)).join(' ');
+    // No separator: inline markup can split a word (<code>get</code>ter), and
+    // the source text carries its own whitespace between fragments.
+    return node.children.map((child) => this.extractInlineText(child, shouldSkip)).join('');
   }
 
   private currentContent(): ContentBlock[] {
@@ -621,8 +628,22 @@ function markupTokenEnd(content: string, start: number): number {
   const nameStart = afterLt === '/' ? content[start + 2] : afterLt;
 
   if (nameStart !== undefined && /[A-Za-z]/.test(nameStart)) {
-    const close = content.indexOf('>', start + 1);
-    return close === -1 ? content.length : close + 1;
+    // Quote-aware scan: a '>' inside a quoted attribute value, e.g.
+    // alt="A -> B", must not end the tag.
+    let quote = '';
+    for (let index = start + 1; index < content.length; index += 1) {
+      const char = content[index];
+      if (quote !== '') {
+        if (char === quote) {
+          quote = '';
+        }
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '>') {
+        return index + 1;
+      }
+    }
+    return content.length;
   }
 
   // A bare '<' that does not begin a tag or markup declaration: emit it alone so
@@ -667,6 +688,36 @@ function parseAttributes(token: string): Map<string, string> {
 
 function readTagName(token: string): string | undefined {
   return token.match(/^<\/?\s*([A-Za-z][\w:-]*)/)?.[1]?.toLowerCase();
+}
+
+/**
+ * Remove `<!-- ... -->` comments with a single linear indexOf scan, so the
+ * unsafe-element scan and the tokenizer see the same comment-free input. An
+ * unterminated `<!--` comments out the rest of the input, matching HTML
+ * tokenizer semantics.
+ */
+function stripHtmlComments(content: string): string {
+  let result = '';
+  let index = 0;
+
+  while (index < content.length) {
+    const start = content.indexOf('<!--', index);
+
+    if (start === -1) {
+      result += content.slice(index);
+      break;
+    }
+
+    result += content.slice(index, start);
+
+    const close = content.indexOf('-->', start + 4);
+    if (close === -1) {
+      break;
+    }
+    index = close + 3;
+  }
+
+  return result;
 }
 
 function stripUnsafeElements(content: string): string {
@@ -730,7 +781,9 @@ function stripElement(content: string, tag: string): string {
   return result;
 }
 
-function countStrippedElements(content: string): Record<(typeof STRIPPED_ELEMENTS)[number], number> {
+function countStrippedElements(
+  content: string
+): Record<(typeof STRIPPED_ELEMENTS)[number], number> {
   return STRIPPED_ELEMENTS.reduce(
     (counts, tag) => {
       counts[tag] = [...content.matchAll(new RegExp(`<${tag}\\b`, 'gi'))].length;
@@ -801,9 +854,9 @@ function collectText(
     }
   }
 
-  return node.children.map((child) => collectText(child, options)).join(
-    options.preserveWhitespace ? '' : ' '
-  );
+  return node.children
+    .map((child) => collectText(child, options))
+    .join(options.preserveWhitespace ? '' : ' ');
 }
 
 function extractCodeText(node: HtmlElementNode): string {
@@ -812,7 +865,7 @@ function extractCodeText(node: HtmlElementNode): string {
 }
 
 function inferCodeLanguage(node: HtmlElementNode): string {
-  const codeNode = node.tag === 'pre' ? findFirstElement(node, 'code') ?? node : node;
+  const codeNode = node.tag === 'pre' ? (findFirstElement(node, 'code') ?? node) : node;
   const className = codeNode.attrs.get('class') ?? node.attrs.get('class') ?? '';
   const classMatch = className.match(/(?:^|\s)(?:language|lang)-([A-Za-z0-9_+.-]+)/);
   const dataLanguage = codeNode.attrs.get('data-language') ?? node.attrs.get('data-language');
@@ -885,9 +938,12 @@ function collectTableCells(row: HtmlElementNode): string[] {
     (child): child is HtmlElementNode =>
       child.type === 'element' && (child.tag === 'th' || child.tag === 'td')
   );
-  const resolvedCells = cells.length > 0 ? cells : findElements(row, 'th').concat(findElements(row, 'td'));
+  const resolvedCells =
+    cells.length > 0 ? cells : findElements(row, 'th').concat(findElements(row, 'td'));
   return resolvedCells.map((cell) =>
-    normalizeInlineWhitespace(collectText(cell, { preserveWhitespace: false, skipNestedTables: true }))
+    normalizeInlineWhitespace(
+      collectText(cell, { preserveWhitespace: false, skipNestedTables: true })
+    )
   );
 }
 
@@ -991,14 +1047,6 @@ function decodeNumericEntity(entity: string, value: string, radix: number): stri
   } catch {
     return entity;
   }
-}
-
-function slugify(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug || 'section';
 }
 
 function basenameWithoutHtmlExtension(path: string): string {

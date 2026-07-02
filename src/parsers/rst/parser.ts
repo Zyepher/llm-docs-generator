@@ -17,12 +17,18 @@ import {
   type ContentBlock,
   type DocNode,
 } from '../../core/models.js';
+import { slugifyAscii } from '../../utils/slug.js';
 import { ParserError } from '../base.js';
 
 const SECTION_ADORNMENT_PATTERN = /^([=\-~^"`'#*+_:.<>])\1*\s*$/;
 const BULLET_PATTERN = /^\s*[-+*]\s+\S/;
 const ENUMERATED_PATTERN = /^\s*(?:\d+|[A-Za-z]|[ivxlcdmIVXLCDM]+|#)[.)]\s+\S/;
 const DIRECTIVE_PATTERN = /^\s*\.\.\s+([A-Za-z][\w-]*)::\s*(.*)$/;
+// Explicit-markup marker: `..` followed by whitespace or end of line. Lines
+// matching this but not DIRECTIVE_PATTERN (comments, hyperlink targets,
+// substitution definitions, footnote/citation targets) are consumed silently
+// like docutils comments, including their indented continuation block.
+const EXPLICIT_MARKUP_PATTERN = /^\s*\.\.(?:\s|$)/;
 const CODE_DIRECTIVES = new Set(['code-block', 'code']);
 
 export interface RstDocument {
@@ -56,6 +62,7 @@ interface RstSection {
 interface SectionHeading {
   title: string;
   adornment: string;
+  linesConsumed: number;
 }
 
 interface Directive {
@@ -118,14 +125,14 @@ export class RstParser {
         const level = getOrCreateLevel(sectionLevels, heading.adornment);
         if (title === '' && level === 1) {
           title = heading.title;
-          index += 2;
+          index += heading.linesConsumed;
           continue;
         }
 
         const section: RstSection = {
           level,
           title: heading.title,
-          id: slugify(heading.title),
+          id: slugifyAscii(heading.title),
           content: [],
           children: [],
         };
@@ -141,7 +148,7 @@ export class RstParser {
           parent.children.push(section);
         }
         stack.push(section);
-        index += 2;
+        index += heading.linesConsumed;
         continue;
       }
 
@@ -150,6 +157,13 @@ export class RstParser {
         const parsedDirective = this.parseDirective(lines, index, directive, warnings);
         currentContent().push(...parsedDirective.blocks);
         index = parsedDirective.nextIndex;
+        continue;
+      }
+
+      if (EXPLICIT_MARKUP_PATTERN.test(lines[index] ?? '')) {
+        // Not a directive (checked above), so this is a comment, hyperlink
+        // target, substitution definition, or footnote/citation target.
+        index = this.skipExplicitMarkupBlock(lines, index);
         continue;
       }
 
@@ -186,6 +200,11 @@ export class RstParser {
   }
 
   private readHeading(lines: string[], index: number): SectionHeading | null {
+    const overlined = this.readOverlinedHeading(lines, index);
+    if (overlined !== null) {
+      return overlined;
+    }
+
     const title = lines[index]?.trim();
     const underline = lines[index + 1]?.trim();
 
@@ -202,7 +221,32 @@ export class RstParser {
       return null;
     }
 
-    return { title, adornment: match[1] };
+    return { title, adornment: match[1], linesConsumed: 2 };
+  }
+
+  private readOverlinedHeading(lines: string[], index: number): SectionHeading | null {
+    const overline = lines[index]?.trim();
+    const title = lines[index + 1]?.trim();
+    const underline = lines[index + 2]?.trim();
+
+    if (overline === undefined || title === undefined || title === '' || underline === undefined) {
+      return null;
+    }
+
+    const overMatch = overline.match(SECTION_ADORNMENT_PATTERN);
+    const underMatch = underline.match(SECTION_ADORNMENT_PATTERN);
+    if (overMatch?.[1] === undefined || overMatch[1] !== underMatch?.[1]) {
+      return null;
+    }
+
+    if (overline.length < title.length || underline.length < title.length) {
+      return null;
+    }
+
+    // Docutils treats an overlined style as a different section level from
+    // the same character used underline-only, so key the level registry with
+    // a distinct prefix.
+    return { title, adornment: `over:${overMatch[1]}`, linesConsumed: 3 };
   }
 
   private readDirective(line: string): Directive | null {
@@ -306,7 +350,7 @@ export class RstParser {
       if (
         isBlank(line) ||
         this.readHeading(lines, cursor) !== null ||
-        this.readDirective(line) !== null ||
+        EXPLICIT_MARKUP_PATTERN.test(line) ||
         BULLET_PATTERN.test(line) ||
         ENUMERATED_PATTERN.test(line)
       ) {
@@ -327,6 +371,25 @@ export class RstParser {
       literalBlock: literal.lines.join('\n').trimEnd(),
       nextIndex: literal.nextIndex,
     };
+  }
+
+  private skipExplicitMarkupBlock(lines: string[], index: number): number {
+    const markerIndent = countIndent(lines[index] ?? '');
+    let cursor = index + 1;
+
+    while (cursor < lines.length) {
+      const line = lines[cursor] ?? '';
+      if (isBlank(line)) {
+        cursor += 1;
+        continue;
+      }
+      if (countIndent(line) <= markerIndent) {
+        break;
+      }
+      cursor += 1;
+    }
+
+    return cursor;
   }
 
   private readLiteralBlock(lines: string[], index: number): { lines: string[]; nextIndex: number } {
@@ -424,14 +487,6 @@ function countIndent(line: string): number {
 
 function isBlank(line: string | undefined): boolean {
   return line === undefined || line.trim() === '';
-}
-
-function slugify(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug || 'section';
 }
 
 export async function parseRstFile(filePath: string): Promise<RstDocument> {

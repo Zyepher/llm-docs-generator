@@ -20,7 +20,8 @@ import {
   type DocNode,
 } from '../../core/models.js';
 import { BaseParser, FormatType, ParserError } from '../base.js';
-import { isRecord } from '../../utils/guards.js';
+import { errorMessage, isRecord } from '../../utils/guards.js';
+import { slugifyAscii } from '../../utils/slug.js';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 const PARAMETER_LOCATION_ORDER = ['path', 'query', 'header', 'cookie', 'formData', 'body'] as const;
@@ -73,8 +74,11 @@ export class OpenApiFormatParser extends BaseParser {
 
     try {
       const document = await this.loadDocument(sourcePath);
+      // Numbers are accepted because unquoted YAML versions (`openapi: 3.0`,
+      // `swagger: 2.0`) parse as numbers.
       return (
         typeof document.openapi === 'string' ||
+        typeof document.openapi === 'number' ||
         typeof document.swagger === 'string' ||
         typeof document.swagger === 'number'
       );
@@ -104,11 +108,8 @@ export class OpenApiFormatParser extends BaseParser {
       // Surface unexpected conversion failures (e.g. a RangeError from deeply
       // nested schemas exhausting the call stack) as an honest ParserError
       // instead of leaking a raw runtime error.
-      const message = error instanceof Error ? error.message : String(error);
-      throw new ParserError(
-        `Failed to convert OpenAPI / Swagger document: ${message}`,
-        this.name
-      );
+      const message = errorMessage(error);
+      throw new ParserError(`Failed to convert OpenAPI / Swagger document: ${message}`, this.name);
     }
   }
 
@@ -121,7 +122,7 @@ export class OpenApiFormatParser extends BaseParser {
     try {
       parsed = fileFormat === 'json' ? JSON.parse(content) : yamlLoad(content);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       throw new ParserError(`Failed to parse OpenAPI / Swagger document: ${message}`, this.name);
     }
 
@@ -134,20 +135,29 @@ export class OpenApiFormatParser extends BaseParser {
 
   private getVersionInfo(document: ApiDocument): ApiVersionInfo {
     const openapi = document.openapi;
-    if (typeof openapi === 'string') {
-      if (/^3\.\d+(?:\.\d+)?(?:[-+].*)?$/.test(openapi.trim())) {
-        return { sourceKind: 'openapi', specVersion: openapi.trim() };
+    if (typeof openapi === 'string' || typeof openapi === 'number') {
+      // js-yaml parses unquoted `openapi: 3.0` as the number 3 and
+      // `openapi: 3.1` as the number 3.1; restore the intended version string.
+      let openapiVersion: string;
+      if (typeof openapi === 'number') {
+        openapiVersion = Number.isInteger(openapi) ? `${openapi}.0.0` : String(openapi);
+      } else {
+        openapiVersion = openapi.trim();
+      }
+      if (/^3\.\d+(?:\.\d+)?(?:[-+].*)?$/.test(openapiVersion)) {
+        return { sourceKind: 'openapi', specVersion: openapiVersion };
       }
 
       throw new ParserError(
-        `Unsupported OpenAPI version "${openapi}". Supported versions: OpenAPI 3.x and Swagger 2.0`,
+        `Unsupported OpenAPI version "${openapiVersion}". Supported versions: OpenAPI 3.x and Swagger 2.0`,
         this.name
       );
     }
 
     const swagger = document.swagger;
     if (typeof swagger === 'string' || typeof swagger === 'number') {
-      const swaggerVersion = String(swagger).trim();
+      // js-yaml parses unquoted `swagger: 2.0` as the number 2.
+      const swaggerVersion = swagger === 2 ? '2.0' : String(swagger).trim();
       if (swaggerVersion === '2.0') {
         return { sourceKind: 'swagger', specVersion: swaggerVersion };
       }
@@ -258,7 +268,7 @@ function collectOperationEntries(
       const responses = readResponsesObject(
         operation.responses,
         `responses for ${method.toUpperCase()} ${path}`,
-        versionInfo.sourceKind
+        versionInfo
       );
       const requestBody =
         versionInfo.sourceKind === 'openapi'
@@ -778,9 +788,15 @@ function readOpenApiRequestBodyObject(
 function readResponsesObject(
   value: unknown,
   context: string,
-  sourceKind: ApiSourceKind
+  versionInfo: ApiVersionInfo
 ): Record<string, unknown> {
   if (value === undefined) {
+    // OpenAPI 3.1 made the operation-level responses object optional; treat a
+    // missing one as empty so the operation renders with no responses section.
+    // Swagger 2.0 and OpenAPI 3.0.x still require it.
+    if (operationResponsesOptional(versionInfo)) {
+      return {};
+    }
     throw new ParserError(`${context} must be present`, 'OpenAPI / Swagger Parser');
   }
   if (!isRecord(value)) {
@@ -829,12 +845,21 @@ function readResponsesObject(
     if (response.content !== undefined) {
       validateMediaTypeMap(response.content, `content for response "${status}" in ${context}`);
     }
-    if (sourceKind === 'swagger' && response.examples !== undefined) {
+    if (versionInfo.sourceKind === 'swagger' && response.examples !== undefined) {
       validateSwaggerExamples(response.examples, `examples for response "${status}" in ${context}`);
     }
   }
 
   return value;
+}
+
+function operationResponsesOptional(versionInfo: ApiVersionInfo): boolean {
+  if (versionInfo.sourceKind !== 'openapi') {
+    return false;
+  }
+
+  const minor = /^3\.(\d+)/.exec(versionInfo.specVersion)?.[1];
+  return minor !== undefined && Number(minor) >= 1;
 }
 
 function validateMediaTypeMap(value: unknown, context: string): void {
@@ -1046,7 +1071,11 @@ function readTrimmedString(value: unknown): string | undefined {
 }
 
 function stringifySimpleExample(value: unknown): string | undefined {
-  const json = stableJsonStringify(value, new WeakSet<object>(), new WeakMap<object, string | undefined>());
+  const json = stableJsonStringify(
+    value,
+    new WeakSet<object>(),
+    new WeakMap<object, string | undefined>()
+  );
   if (json === undefined || json.length > MAX_EXAMPLE_LENGTH) {
     return undefined;
   }
@@ -1093,7 +1122,7 @@ function stableJsonStringify(
     if (Array.isArray(value)) {
       const items: string[] = [];
       let accumulated = 2; // surrounding []
-      result = "[]";
+      result = '[]';
       let bailed = false;
       for (const item of value) {
         const serialized = stableJsonStringify(item, seen, memo, maxLength);
@@ -1176,13 +1205,7 @@ function uniqueId(value: string, used: Map<string, number>): string {
 }
 
 function slugify(value: string): string {
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-  return slug || 'api-document';
+  return slugifyAscii(value, 'api-document');
 }
 
 function compareOperationEntries(left: OperationEntry, right: OperationEntry): number {
