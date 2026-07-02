@@ -28,6 +28,7 @@ import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import rootPackageJson from '../../package.json';
 import {
   DEFAULT_DISCOVERY_MAX_FILE_BYTES,
   discoverLocalSource,
@@ -49,6 +50,8 @@ import { discoverWebsite } from '../../src/core/website-discovery.js';
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const cliPath = join(repoRoot, 'src/cli.ts');
+const expectedGeneratorVersion = rootPackageJson.version;
+const expectedPackageLabel = `llm-docs-generator@${expectedGeneratorVersion}`;
 const tsxBin = join(
   repoRoot,
   'node_modules/.bin',
@@ -2700,7 +2703,7 @@ describe('CLI compatibility behavior', () => {
   it('keeps the root --version option available', async () => {
     const { stdout } = await runCli(['--version']);
 
-    expect(stdout.trim()).toBe('1.0.0');
+    expect(stdout.trim()).toBe(expectedGeneratorVersion);
   });
 
   it('exposes capabilities help and root help for agents', async () => {
@@ -2787,7 +2790,7 @@ describe('CLI compatibility behavior', () => {
       mode: 'agent-context-packaged-metadata',
       generator: {
         packageName: 'llm-docs-generator',
-        packageVersion: '1.0.0',
+        packageVersion: expectedGeneratorVersion,
         cliName: 'llm-docs',
         binary: 'llm-docs',
       },
@@ -2845,7 +2848,7 @@ describe('CLI compatibility behavior', () => {
 
     expect(stdout).toContain('llm-docs agent context');
     expect(stdout).toContain('Schema: 0.2.0');
-    expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
+    expect(stdout).toContain(`Package: ${expectedPackageLabel}`);
     expect(stdout).toContain('Binary: llm-docs');
     expect(stdout).toContain('Agent Context (agent-context)');
     expect(stdout).toContain('Project Index (project-index)');
@@ -2877,7 +2880,7 @@ describe('CLI compatibility behavior', () => {
       mode: 'agent-doctor-read-only-diagnostics',
       generator: {
         packageName: 'llm-docs-generator',
-        packageVersion: '1.0.0',
+        packageVersion: expectedGeneratorVersion,
         cliName: 'llm-docs',
         binary: 'llm-docs',
       },
@@ -3013,7 +3016,7 @@ describe('CLI compatibility behavior', () => {
 
     expect(stdout).toContain('llm-docs agent doctor');
     expect(stdout).toContain('Schema: 0.1.0');
-    expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
+    expect(stdout).toContain(`Package: ${expectedPackageLabel}`);
     expect(stdout).toContain('Binary: llm-docs');
     expect(stdout).toContain('Overall: warning');
     expect(stdout).toContain('Checks: 2 passed, 1 warning, 0 failed, 1 skipped');
@@ -3127,7 +3130,7 @@ describe('CLI compatibility behavior', () => {
       schemaVersion: '0.1.0',
       generator: {
         packageName: 'llm-docs-generator',
-        packageVersion: '1.0.0',
+        packageVersion: expectedGeneratorVersion,
         cliName: 'llm-docs',
         binary: 'llm-docs',
       },
@@ -3782,7 +3785,7 @@ describe('CLI compatibility behavior', () => {
 
     expect(stdout).toContain('llm-docs capabilities');
     expect(stdout).toContain('Schema: 0.1.0');
-    expect(stdout).toContain('Package: llm-docs-generator@1.0.0');
+    expect(stdout).toContain(`Package: ${expectedPackageLabel}`);
     expect(stdout).toContain('Implemented modes: 25');
     expect(stdout).toContain('Planned or unsupported modes: 9');
     expect(stdout).toContain('Use --json for the stable agent contract.');
@@ -4496,7 +4499,7 @@ describe('CLI compatibility behavior', () => {
       schemaVersion: '0.1.0',
       generator: {
         name: 'llm-docs-generator',
-        version: '1.0.0',
+        version: expectedGeneratorVersion,
         cliName: 'llm-docs',
       },
       mode: 'discovery-report',
@@ -7495,7 +7498,7 @@ describe('CLI compatibility behavior', () => {
       schemaVersion: '0.1.0',
       generator: {
         name: 'llm-docs-generator',
-        version: '1.0.0',
+        version: expectedGeneratorVersion,
         cliName: 'llm-docs',
       },
       mode: 'configured-sdk',
@@ -7512,12 +7515,12 @@ describe('CLI compatibility behavior', () => {
       },
       parser: {
         name: 'OpenRefParser',
-        version: '1.0.0',
+        version: expectedGeneratorVersion,
         format: 'openref-0.1',
       },
       formatter: {
         name: 'LLMFormatter',
-        version: '1.0.0',
+        version: expectedGeneratorVersion,
         format: 'legacy-llm-docs',
       },
       warnings: [],
@@ -7692,7 +7695,7 @@ describe('CLI compatibility behavior', () => {
       schemaVersion: '0.1.0',
       generator: {
         name: 'llm-docs-generator',
-        version: '1.0.0',
+        version: expectedGeneratorVersion,
         cliName: 'llm-docs',
       },
       mode: 'local-source-docs',
@@ -7706,12 +7709,12 @@ describe('CLI compatibility behavior', () => {
       },
       parser: {
         name: 'Markdown Parser',
-        version: '1.0.0',
+        version: expectedGeneratorVersion,
         format: 'markdown',
       },
       formatter: {
         name: 'UniversalFormatter',
-        version: '1.0.0',
+        version: expectedGeneratorVersion,
         format: 'universal-llm-docs',
       },
     });
@@ -7842,7 +7845,7 @@ describe('CLI compatibility behavior', () => {
       },
       formatter: {
         name: 'UniversalFormatter',
-        version: '1.0.0',
+        version: expectedGeneratorVersion,
         format: 'universal-llm-docs',
       },
     });
