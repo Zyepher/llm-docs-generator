@@ -1,9 +1,10 @@
 import { access, readFile, stat } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
-import { delimiter, isAbsolute, relative, resolve } from 'node:path';
+import { delimiter, resolve } from 'node:path';
 
 import packageJson from '../../package.json';
-import { isObjectRecord, isFileNotFoundError } from '../utils/guards.js';
+import { isSameOrDescendant } from '../utils/fs-path.js';
+import { errorMessage, isFileNotFoundError, isObjectRecord } from '../utils/guards.js';
 import { sha256Hex } from '../utils/hash.js';
 import { CLI_NAME, GENERATOR_NAME, GENERATOR_VERSION, EXPECTED_BINARY_NAME } from './metadata.js';
 
@@ -98,11 +99,21 @@ export type AgentDoctorContract = {
   limitations: string[];
 };
 
+type AgentArtifactDescriptor =
+  | (typeof AGENT_CONTEXT_ARTIFACTS)[number]
+  | (typeof AGENT_SKILL_ARTIFACTS)[number];
+
+type AgentArtifactFailure = {
+  id: string;
+  name: string;
+  path: string;
+  error: string;
+};
+
 function resolvePackageLocalPath(packageRoot: string, packageRelativePath: string): string {
   const resolvedPath = resolve(packageRoot, packageRelativePath);
-  const relativePath = relative(packageRoot, resolvedPath);
 
-  if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+  if (!isSameOrDescendant(packageRoot, resolvedPath)) {
     throw new Error(`context artifact path escapes package root: ${packageRelativePath}`);
   }
 
@@ -111,7 +122,7 @@ function resolvePackageLocalPath(packageRoot: string, packageRelativePath: strin
 
 async function readPackagedAgentArtifact(
   packageRoot: string,
-  artifact: (typeof AGENT_CONTEXT_ARTIFACTS)[number] | (typeof AGENT_SKILL_ARTIFACTS)[number]
+  artifact: AgentArtifactDescriptor
 ): Promise<AgentContextArtifact> {
   const artifactPath = resolvePackageLocalPath(packageRoot, artifact.path);
   let content: Buffer;
@@ -137,7 +148,47 @@ async function readPackagedAgentArtifact(
   };
 }
 
-export async function buildAgentContextContract(packageRoot: string): Promise<AgentContextContract> {
+async function readPackagedAgentArtifactsForDoctor(packageRoot: string): Promise<{
+  contextArtifacts: AgentContextArtifact[];
+  skillArtifacts: AgentContextArtifact[];
+  failures: AgentArtifactFailure[];
+}> {
+  const contextArtifacts: AgentContextArtifact[] = [];
+  const skillArtifacts: AgentContextArtifact[] = [];
+  const failures: AgentArtifactFailure[] = [];
+
+  for (const artifact of AGENT_CONTEXT_ARTIFACTS) {
+    try {
+      contextArtifacts.push(await readPackagedAgentArtifact(packageRoot, artifact));
+    } catch (error) {
+      failures.push({
+        id: artifact.id,
+        name: artifact.name,
+        path: artifact.path,
+        error: errorMessage(error),
+      });
+    }
+  }
+
+  for (const artifact of AGENT_SKILL_ARTIFACTS) {
+    try {
+      skillArtifacts.push(await readPackagedAgentArtifact(packageRoot, artifact));
+    } catch (error) {
+      failures.push({
+        id: artifact.id,
+        name: artifact.name,
+        path: artifact.path,
+        error: errorMessage(error),
+      });
+    }
+  }
+
+  return { contextArtifacts, skillArtifacts, failures };
+}
+
+export async function buildAgentContextContract(
+  packageRoot: string
+): Promise<AgentContextContract> {
   return {
     schemaVersion: AGENT_CONTEXT_SCHEMA_VERSION,
     mode: 'agent-context-packaged-metadata',
@@ -290,32 +341,53 @@ function summarizeDoctorChecks(
 }
 
 export async function buildAgentDoctorContract(packageRoot: string): Promise<AgentDoctorContract> {
-  const context = await buildAgentContextContract(packageRoot);
-  const packageBinEntry = readExpectedPackageBinaryEntry();
+  const artifacts = await readPackagedAgentArtifactsForDoctor(packageRoot);
+  let packageBinEntry: string | undefined;
+  let packageBinError: string | undefined;
+
+  try {
+    packageBinEntry = readExpectedPackageBinaryEntry();
+  } catch (error) {
+    packageBinError = errorMessage(error);
+  }
+
   const pathCheck = await findExecutableOnPath(EXPECTED_BINARY_NAME);
-  const contextArtifactCount = context.contextArtifacts.length;
-  const skillArtifactCount = context.skillArtifacts.length;
+  const contextArtifactCount = AGENT_CONTEXT_ARTIFACTS.length;
+  const skillArtifactCount = AGENT_SKILL_ARTIFACTS.length;
   const packagedArtifactCount = contextArtifactCount + skillArtifactCount;
+  const artifactCheckFailed = artifacts.failures.length > 0;
+  const expectedBinaryCheckFailed = packageBinEntry === undefined;
   const checks: AgentDoctorCheck[] = [
     {
       id: 'packaged-agent-artifacts',
       name: 'Packaged agent artifacts',
-      status: 'pass',
-      summary: 'Packaged context and skill artifacts are readable and hashable.',
+      status: artifactCheckFailed ? 'fail' : 'pass',
+      summary: artifactCheckFailed
+        ? 'One or more packaged context or skill artifacts could not be read.'
+        : 'Packaged context and skill artifacts are readable and hashable.',
       facts: {
+        expectedContextArtifactCount: contextArtifactCount,
+        expectedSkillArtifactCount: skillArtifactCount,
+        readableContextArtifactCount: artifacts.contextArtifacts.length,
+        readableSkillArtifactCount: artifacts.skillArtifacts.length,
         contextArtifactCount,
         skillArtifactCount,
-        artifacts: [...context.contextArtifacts, ...context.skillArtifacts],
+        artifacts: [...artifacts.contextArtifacts, ...artifacts.skillArtifacts],
+        failures: artifacts.failures,
       },
     },
     {
       id: 'expected-binary-name',
       name: 'Expected binary name',
-      status: 'pass',
-      summary: `Expected CLI binary name is ${EXPECTED_BINARY_NAME}.`,
+      status: expectedBinaryCheckFailed ? 'fail' : 'pass',
+      summary: expectedBinaryCheckFailed
+        ? `Package metadata does not expose the expected ${EXPECTED_BINARY_NAME} binary.`
+        : `Expected CLI binary name is ${EXPECTED_BINARY_NAME}.`,
       facts: {
         expectedBinary: EXPECTED_BINARY_NAME,
-        packageBinEntry,
+        packageBinEntry: packageBinEntry ?? null,
+        matchesExpectedBinary: packageBinEntry !== undefined,
+        error: packageBinError ?? null,
       },
     },
     {
@@ -349,7 +421,12 @@ export async function buildAgentDoctorContract(packageRoot: string): Promise<Age
   return {
     schemaVersion: AGENT_DOCTOR_SCHEMA_VERSION,
     mode: 'agent-doctor-read-only-diagnostics',
-    generator: context.generator,
+    generator: {
+      packageName: GENERATOR_NAME,
+      packageVersion: GENERATOR_VERSION,
+      cliName: CLI_NAME,
+      binary: EXPECTED_BINARY_NAME,
+    },
     summary: summarizeDoctorChecks(checks, {
       packagedArtifactCount,
       contextArtifactCount,

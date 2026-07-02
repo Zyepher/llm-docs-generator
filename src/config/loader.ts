@@ -9,7 +9,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 import {
   CategoriesConfigSchema,
@@ -21,6 +21,7 @@ import {
   type SDKVersionConfig,
 } from './schemas.js';
 import { isFileNotFoundError } from '../utils/guards.js';
+import { isSameOrDescendant } from '../utils/fs-path.js';
 
 // ============================================================================
 // CONFIG LOADER CLASS
@@ -32,7 +33,12 @@ export class ConfigLoader {
   private categoriesCache: Map<string, CategoryConfig> | null = null;
   private sortedCategoriesCache: [string, CategoryConfig][] | null = null;
 
-  constructor(private readonly configDir: string) {}
+  constructor(private readonly configDirectory: string) {}
+
+  /** Directory this loader reads config from; callers use it as the spec cache dir. */
+  get configDir(): string {
+    return this.configDirectory;
+  }
 
   /**
    * Load a deterministic source-generation preset by name.
@@ -46,11 +52,10 @@ export class ConfigLoader {
     config: PresetConfig;
   }> {
     const normalizedName = normalizePresetName(name);
-    const presetsDir = resolve(this.configDir, 'presets');
+    const presetsDir = resolve(this.configDirectory, 'presets');
     const configPath = resolve(presetsDir, `${normalizedName}.json`);
-    const relativeConfigPath = relative(presetsDir, configPath);
 
-    if (relativeConfigPath.startsWith('..') || isAbsolute(relativeConfigPath)) {
+    if (!isSameOrDescendant(presetsDir, configPath)) {
       throw new Error(`Preset '${name}' not found in configuration`);
     }
 
@@ -102,7 +107,7 @@ export class ConfigLoader {
       return; // Already loaded
     }
 
-    const content = await readFile(`${this.configDir}/sdks.json`, 'utf-8');
+    const content = await readFile(`${this.configDirectory}/sdks.json`, 'utf-8');
     const data = JSON.parse(content) as unknown;
 
     // Validate with Zod
@@ -121,7 +126,7 @@ export class ConfigLoader {
       return; // Already loaded
     }
 
-    const content = await readFile(`${this.configDir}/categories.json`, 'utf-8');
+    const content = await readFile(`${this.configDirectory}/categories.json`, 'utf-8');
     const data = JSON.parse(content) as unknown;
 
     // Validate with Zod
@@ -231,7 +236,20 @@ export class ConfigLoader {
         }
       }
 
-      return a < b ? 1 : a > b ? -1 : 0; // descending lexical tiebreak
+      // Equal numeric components: a bare release outranks its suffixed
+      // variants ('v2' > 'v2-beta'), so a proper prefix ranks first; otherwise
+      // keep the deterministic descending code-unit tiebreak.
+      if (a === b) {
+        return 0;
+      }
+      if (b.startsWith(a)) {
+        return -1;
+      }
+      if (a.startsWith(b)) {
+        return 1;
+      }
+
+      return a < b ? 1 : -1; // descending lexical tiebreak
     });
 
     return sorted[0]!;

@@ -1,20 +1,18 @@
 import { lstat, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
-import { writeTextFileSafely } from '../utils/safe-write.js';
 import { isObjectRecord, errorMessage, isFileNotFoundError } from '../utils/guards.js';
-import { isSameOrDescendant, realpathIfExists, resolveEffectiveOutputPath } from '../utils/fs-path.js';
-import { readJsonFile } from '../utils/json.js';
+import {
+  isSameOrDescendant,
+  realpathIfExists,
+  resolveEffectiveOutputPath,
+} from '../utils/fs-path.js';
+import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
 import { isSha256Hash } from '../utils/hash.js';
 
 import categoriesConfig from '../../config/categories.json';
 import type { CategoryConfig, SDKVersionConfig } from '../config/schemas.js';
-import {
-  DISCOVERY_REPORT_SCHEMA_VERSION,
-  LOCAL_BOUNDED_INSPECTION_MODE,
-  discoverLocalSources,
-  isUrlLikeInput,
-} from './discovery.js';
+import { discoverLocalSources, isUrlLikeInput } from './discovery.js';
 import { LLMFormatter, type LLMFormatterConfig } from './formatter.js';
 import type { SpecData } from './models.js';
 import {
@@ -30,6 +28,17 @@ import {
   type VerifyGenerationManifestResult,
 } from './manifest.js';
 import {
+  CONFIGURED_SDK_FORMATTER_FORMAT,
+  CONFIGURED_SDK_FORMATTER_NAME,
+  CONFIGURED_SDK_GENERATED_OUTPUT_KINDS,
+  CONFIGURED_SDK_PARSER_FORMAT,
+  CONFIGURED_SDK_PARSER_NAME,
+  DISCOVERY_REPORT_MODE_BY_KIND,
+  DISCOVERY_REPORT_SCHEMA_VERSION,
+  SOURCE_DOCS_FORMAT_HINTS,
+  SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND,
+} from './manifest/constants.js';
+import {
   generateSourceDocs,
   SOURCE_DOCS_MODE,
   type SourceDocsGeneratorMetadata,
@@ -44,21 +53,6 @@ import {
 } from './source-verification.js';
 import { OpenRefParser } from '../parsers/openref/parser.js';
 
-const SOURCE_DOCS_FORMAT_HINTS = new Set([
-  'auto',
-  'markdown',
-  'mdx',
-  'openapi',
-  'openref',
-  'rst',
-  'html',
-]);
-const SOURCE_DOCS_CHUNKS_JSONL_KIND = 'semantic-chunks-jsonl';
-const CONFIGURED_SDK_PARSER_NAME = 'OpenRefParser';
-const CONFIGURED_SDK_FORMAT = 'openref-0.1';
-const CONFIGURED_SDK_FORMATTER_NAME = 'LLMFormatter';
-const CONFIGURED_SDK_FORMATTER_FORMAT = 'legacy-llm-docs';
-const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS = new Set(['parsed-spec-json', 'llm-docs']);
 const CONFIGURED_SDK_FULL_DOC_PATH_PATTERN = /^llm-docs\/(.+)-full-llms\.txt$/;
 
 export class RefreshManifestError extends Error {
@@ -251,7 +245,11 @@ async function refreshDiscoveryReportManifest(options: {
   const previousReport = await readSourceDiscoveryRefreshReport(reportPath);
 
   await assertExistingLocalSourcePath(previousReport.sourcePath);
-  await assertSourceOutsideRefreshOutput({ sourcePath: previousReport.sourcePath, outputDir });
+  await assertSourceOutsideRefreshOutput({
+    sourcePath: previousReport.sourcePath,
+    sourceType: previousReport.sourceType,
+    outputDir,
+  });
 
   const result = await discoverLocalSources({
     source: previousReport.sourcePath,
@@ -266,7 +264,6 @@ async function refreshDiscoveryReportManifest(options: {
     generator: options.generator,
     discoveryKind: 'source',
     reportPath: result.reportPath,
-    report: result.report,
   });
 
   return withPostRefreshVerification({
@@ -326,7 +323,7 @@ async function refreshSourceDocsManifest(options: {
 
   if (!SOURCE_DOCS_FORMAT_HINTS.has(formatHint)) {
     throw new RefreshManifestError(
-      "malformed manifest: source.formatHint must be a supported source format hint"
+      'malformed manifest: source.formatHint must be a supported source format hint'
     );
   }
 
@@ -335,7 +332,7 @@ async function refreshSourceDocsManifest(options: {
   await assertExistingLocalSourcePath(sourcePath);
   await assertSourceOutsideRefreshOutput({ sourcePath, outputDir });
   const chunks = generatedOutputs.some(
-    (output) => isObjectRecord(output) && output.kind === SOURCE_DOCS_CHUNKS_JSONL_KIND
+    (output) => isObjectRecord(output) && output.kind === SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND
   )
     ? 'jsonl'
     : undefined;
@@ -358,7 +355,7 @@ async function refreshSourceDocsManifest(options: {
     generator: options.generator,
   });
   const chunkOutput = result.manifest.generatedOutputs.find(
-    (output) => output.kind === SOURCE_DOCS_CHUNKS_JSONL_KIND
+    (output) => output.kind === SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND
   );
 
   return withPostRefreshVerification({
@@ -507,23 +504,21 @@ async function quarantineFailedRefresh(params: {
   try {
     await rm(params.manifestPath, { force: true });
 
-    const message = params.error instanceof Error ? params.error.message : String(params.error);
+    const message = errorMessage(params.error);
     const failure: Record<string, unknown> = {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       mode: REFRESH_FAILURE_MODE,
       reason: params.reason,
       message,
-      manifestPath: relative(params.outputDir, params.manifestPath) || basename(params.manifestPath),
+      manifestPath:
+        relative(params.outputDir, params.manifestPath) || basename(params.manifestPath),
     };
 
     if (params.error instanceof RefreshManifestVerificationError) {
       failure.verificationFailures = params.error.failures;
     }
 
-    await writeTextFileSafely(
-      join(params.outputDir, REFRESH_FAILURE_FILE),
-      `${JSON.stringify(failure, null, 2)}\n`
-    );
+    await writeJsonFileSafely(join(params.outputDir, REFRESH_FAILURE_FILE), failure);
   } catch {
     // Best-effort cleanup: never let a quarantine failure hide the real error.
   }
@@ -606,9 +601,9 @@ function readConfiguredSdkSourceMetadata(value: unknown): {
   const source = requiredObject(value, 'source');
   const format = requiredNonEmptyString(source.format, 'source.format');
 
-  if (format !== CONFIGURED_SDK_FORMAT) {
+  if (format !== CONFIGURED_SDK_PARSER_FORMAT) {
     throw new RefreshManifestError(
-      `malformed manifest: source.format must be ${CONFIGURED_SDK_FORMAT}`
+      `malformed manifest: source.format must be ${CONFIGURED_SDK_PARSER_FORMAT}`
     );
   }
 
@@ -642,9 +637,9 @@ function readConfiguredSdkParserMetadata(value: unknown): {
     );
   }
 
-  if (format !== CONFIGURED_SDK_FORMAT) {
+  if (format !== CONFIGURED_SDK_PARSER_FORMAT) {
     throw new RefreshManifestError(
-      `malformed manifest: parser.format must be ${CONFIGURED_SDK_FORMAT}`
+      `malformed manifest: parser.format must be ${CONFIGURED_SDK_PARSER_FORMAT}`
     );
   }
 
@@ -936,6 +931,7 @@ async function assertSafeSourceVerificationReportReadPath(reportPath: string): P
 
 async function readSourceDiscoveryRefreshReport(reportPath: string): Promise<{
   sourcePath: string;
+  sourceType: 'file' | 'directory';
   traversal: {
     maxDepth: number;
     maxEntries: number;
@@ -964,9 +960,9 @@ async function readSourceDiscoveryRefreshReport(reportPath: string): Promise<{
     );
   }
 
-  if (report.mode !== LOCAL_BOUNDED_INSPECTION_MODE) {
+  if (report.mode !== DISCOVERY_REPORT_MODE_BY_KIND.source) {
     throw new RefreshManifestError(
-      `malformed discovery report: mode must be ${LOCAL_BOUNDED_INSPECTION_MODE}`
+      `malformed discovery report: mode must be ${DISCOVERY_REPORT_MODE_BY_KIND.source}`
     );
   }
 
@@ -1005,6 +1001,7 @@ async function readSourceDiscoveryRefreshReport(reportPath: string): Promise<{
 
   return {
     sourcePath,
+    sourceType,
     traversal: {
       maxDepth: requiredDiscoveryTraversalBound(traversal.maxDepth, 'traversal.maxDepth', true),
       maxEntries: requiredDiscoveryTraversalBound(
@@ -1480,6 +1477,7 @@ async function assertInputsOutsideRefreshOutput(options: {
 
 async function assertSourceOutsideRefreshOutput(options: {
   sourcePath: string;
+  sourceType?: 'file' | 'directory';
   outputDir: string;
 }): Promise<void> {
   const resolvedOutputDir = resolve(options.outputDir);
@@ -1493,6 +1491,17 @@ async function assertSourceOutsideRefreshOutput(options: {
   ) {
     throw new RefreshManifestError(
       'manifest source path must not be the same as, or inside, the manifest output directory'
+    );
+  }
+
+  if (
+    options.sourceType === 'directory' &&
+    ((canonicalSourcePath !== undefined &&
+      isSameOrDescendant(canonicalSourcePath, effectiveOutputPath)) ||
+      isSameOrDescendant(options.sourcePath, resolvedOutputDir))
+  ) {
+    throw new RefreshManifestError(
+      'manifest output directory must not be the same as, or inside, the explicit --source directory'
     );
   }
 }

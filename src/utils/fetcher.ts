@@ -8,12 +8,15 @@
  * - Connection pooling via undici
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { request } from 'undici';
 
 import type { ConfigLoader } from '../config/loader.js';
+import { errorMessage } from './guards.js';
 import { info, warn, error as logError } from './logger.js';
+import { writeTextFileSafely } from './safe-write.js';
 
 // ============================================================================
 // CONSTANTS
@@ -30,20 +33,37 @@ class SourceAvailabilityError extends Error {
   }
 }
 
-const REDACTED_QUERY_PARAMS = ['token', 'access_token', 'apikey', 'api_key', 'key', 'sig', 'signature'];
+const REDACTED_QUERY_PARAMS = new Set([
+  'token',
+  'access_token',
+  'apikey',
+  'api_key',
+  'key',
+  'sig',
+  'signature',
+  'x-amz-signature',
+  'x-amz-credential',
+  'x-amz-security-token',
+  'x-goog-signature',
+  'x-goog-credential',
+  'awsaccesskeyid',
+]);
 
 /**
  * Strip credentials from a URL before logging: remove userinfo (user:token@)
- * and mask common secret query parameters, so a spec URL carrying a token does
- * not leak into logs/error messages.
+ * and mask common secret query parameters (including presigned-URL signature
+ * and credential families), so a spec URL carrying a token does not leak into
+ * logs/error messages. Param names are matched case-insensitively.
  */
-function redactUrl(value: string): string {
+export function redactUrl(value: string): string {
   try {
     const url = new URL(value);
     url.username = '';
     url.password = '';
-    for (const param of REDACTED_QUERY_PARAMS) {
-      if (url.searchParams.has(param)) {
+    // Snapshot the keys first: mutating searchParams while iterating its
+    // live view can skip entries.
+    for (const param of [...new Set(url.searchParams.keys())]) {
+      if (REDACTED_QUERY_PARAMS.has(param.toLowerCase())) {
         url.searchParams.set(param, 'REDACTED');
       }
     }
@@ -64,6 +84,7 @@ function redactUrl(value: string): string {
  * @param sdkName - SDK name (e.g., 'javascript', 'swift')
  * @param version - Version string (e.g., 'v2', 'latest')
  * @param config - Configuration loader
+ * @param cacheDir - Absolute directory for cached spec files
  * @param forceDownload - Force download even if cached
  * @returns Tuple of [specPath, resolvedVersion]
  */
@@ -71,6 +92,7 @@ export async function fetchSpec(
   sdkName: string,
   version: string,
   config: ConfigLoader,
+  cacheDir: string,
   forceDownload = false
 ): Promise<[string, string]> {
   // Get version config
@@ -92,9 +114,8 @@ export async function fetchSpec(
   }
 
   // Build cache path
-  const cacheDir = 'config';
   const cacheFileName = `supabase_${sdkName}_${actualVersion}.yml`;
-  const cachePath = `${cacheDir}/${cacheFileName}`;
+  const cachePath = join(cacheDir, cacheFileName);
 
   // Check cache (unless force download)
   if (!forceDownload && existsSync(cachePath)) {
@@ -113,8 +134,9 @@ export async function fetchSpec(
     // Ensure cache directory exists
     await mkdir(cacheDir, { recursive: true });
 
-    // Write to cache
-    await writeFile(cachePath, content, 'utf-8');
+    // Write to cache atomically (temp + rename) so a crashed download can
+    // never leave a truncated spec that later cache hits would trust.
+    await writeTextFileSafely(cachePath, content);
 
     info(`Spec downloaded and cached: ${cachePath}`);
     return [cachePath, actualVersion];
@@ -124,8 +146,9 @@ export async function fetchSpec(
       throw err;
     }
 
-    logError(`Failed to download spec from ${redactUrl(specUrl)}: ${String(err)}`);
-    throw new Error(`Failed to download spec from ${redactUrl(specUrl)}: ${String(err)}`);
+    const message = errorMessage(err);
+    logError(`Failed to download spec from ${redactUrl(specUrl)}: ${message}`);
+    throw new Error(`Failed to download spec from ${redactUrl(specUrl)}: ${message}`);
   }
 }
 
@@ -142,22 +165,37 @@ async function checkRemoteSpecAvailability(url: string, timeout: number): Promis
       },
     });
   } catch (err) {
-    throw new SourceAvailabilityError(
-      `Spec source availability check failed for ${redactUrl(url)}: ${String(err)}`
+    // A transport failure (reset, timeout, DNS) only proves the HEAD did not
+    // get through; some servers drop HEAD while serving GET fine. Advisory
+    // only: let the authoritative GET decide.
+    warn(
+      `Spec source availability check inconclusive for ${redactUrl(url)} (${errorMessage(err)}), proceeding to download`
     );
+    return;
   }
 
   try {
     await response.body.text();
   } catch (err) {
-    throw new SourceAvailabilityError(
-      `Spec source availability check failed for ${redactUrl(url)}: ${String(err)}`
+    warn(
+      `Spec source availability check inconclusive for ${redactUrl(url)} (${errorMessage(err)}), proceeding to download`
     );
+    return;
   }
 
   const { statusCode } = response;
 
-  if (statusCode >= 200 && statusCode < 400) {
+  if (statusCode >= 200 && statusCode < 300) {
+    return;
+  }
+
+  // The GET path never follows redirects and requires 200, so a 3xx HEAD says
+  // nothing about whether the download will succeed; let the GET produce the
+  // real outcome.
+  if (statusCode >= 300 && statusCode < 400) {
+    warn(
+      `Spec source availability check inconclusive for ${redactUrl(url)} (HTTP ${statusCode}), proceeding to download`
+    );
     return;
   }
 
@@ -244,9 +282,9 @@ async function readBodyWithLimit(
  * Check if spec is cached
  * Performance: O(1) - file existence check
  */
-export function isSpecCached(sdkName: string, version: string): boolean {
+export function isSpecCached(sdkName: string, version: string, cacheDir: string): boolean {
   const cacheFileName = `supabase_${sdkName}_${version}.yml`;
-  const cachePath = `config/${cacheFileName}`;
+  const cachePath = join(cacheDir, cacheFileName);
 
   return existsSync(cachePath);
 }
@@ -255,51 +293,30 @@ export function isSpecCached(sdkName: string, version: string): boolean {
  * Get cached spec path (does not download)
  * Performance: O(1)
  */
-export function getCachedSpecPath(sdkName: string, version: string): string | null {
+export function getCachedSpecPath(
+  sdkName: string,
+  version: string,
+  cacheDir: string
+): string | null {
   const cacheFileName = `supabase_${sdkName}_${version}.yml`;
-  const cachePath = `config/${cacheFileName}`;
+  const cachePath = join(cacheDir, cacheFileName);
 
   return existsSync(cachePath) ? cachePath : null;
-}
-
-/**
- * Download spec to specific path (advanced usage)
- * Performance: O(n) where n = file size
- */
-export async function downloadSpecTo(url: string, outputPath: string): Promise<void> {
-  info(`Downloading from ${redactUrl(url)} to ${outputPath}`);
-
-  try {
-    const content = await downloadFile(url, FETCH_TIMEOUT);
-
-    // Extract directory from path
-    const lastSlash = outputPath.lastIndexOf('/');
-    const dir = lastSlash > 0 ? outputPath.substring(0, lastSlash) : '.';
-
-    // Ensure directory exists
-    await mkdir(dir, { recursive: true });
-
-    // Write file
-    await writeFile(outputPath, content, 'utf-8');
-
-    info(`Downloaded successfully: ${outputPath}`);
-  } catch (err) {
-    logError(`Download failed: ${String(err)}`);
-    throw err;
-  }
 }
 
 /**
  * Clear spec cache
  * Performance: O(n) where n = number of cached files
  */
-export async function clearSpecCache(sdkName?: string, version?: string): Promise<number> {
-  const cacheDir = 'config';
-
+export async function clearSpecCache(
+  cacheDir: string,
+  sdkName?: string,
+  version?: string
+): Promise<number> {
   if (sdkName !== undefined && version !== undefined) {
     // Clear specific cache file
     const cacheFileName = `supabase_${sdkName}_${version}.yml`;
-    const cachePath = `${cacheDir}/${cacheFileName}`;
+    const cachePath = join(cacheDir, cacheFileName);
 
     if (existsSync(cachePath)) {
       const { unlink } = await import('node:fs/promises');
@@ -322,7 +339,7 @@ export async function clearSpecCache(sdkName?: string, version?: string): Promis
 
   let deletedCount = 0;
   for (const file of cacheFiles) {
-    await unlink(`${cacheDir}/${file}`);
+    await unlink(join(cacheDir, file));
     deletedCount++;
   }
 

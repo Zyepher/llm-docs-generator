@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { lstat, mkdir, realpath, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -13,7 +13,9 @@ import {
   inspectLocalSource,
   isUrlLikeInput,
 } from './discovery.js';
-import { writeTextFileSafely } from '../utils/safe-write.js';
+import { errorMessage } from '../utils/guards.js';
+import { sha256Hex } from '../utils/hash.js';
+import { writeJsonFileSafely } from '../utils/json.js';
 import { isSameOrDescendant, realpathIfExists } from '../utils/fs-path.js';
 
 const execFileAsync = promisify(execFile);
@@ -200,7 +202,7 @@ export async function discoverRepo(options: DiscoverRepoOptions): Promise<Discov
   };
 
   await mkdir(outputDir, { recursive: true });
-  await writeTextFileSafely(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  await writeJsonFileSafely(reportPath, report);
 
   return { report, reportPath };
 }
@@ -269,6 +271,7 @@ async function cloneRepo(repo: string, cachePath: string): Promise<void> {
 async function updateExistingCache(path: string, warnings: string[]): Promise<RepoUpdateState> {
   try {
     await git(['-C', path, 'fetch', '--tags', '--prune', 'origin']);
+    warnings.push('Cached repo refs updated; current checkout inspected without advancing HEAD.');
     return { attempted: true, successful: true };
   } catch (error) {
     const message = formatGitError(error);
@@ -396,7 +399,7 @@ function defaultOutputDirForRepoCache(cachePath: string): string {
 
 function cacheKeyForRepo(normalizedInput: string): string {
   const base = cacheBaseNameForRepo(normalizedInput);
-  const digest = createHash('sha256').update(normalizedInput).digest('hex').slice(0, 12);
+  const digest = sha256Hex(normalizedInput).slice(0, 12);
 
   return `${base}--${digest}`;
 }
@@ -466,8 +469,8 @@ function formatGitError(error: unknown): string {
     const stderr = maybeExecError.stderr?.toString().trim();
     const stdout = maybeExecError.stdout?.toString().trim();
 
-    return stderr || stdout || error.message;
+    return stderr || stdout || errorMessage(error);
   }
 
-  return String(error);
+  return errorMessage(error);
 }

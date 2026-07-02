@@ -17,6 +17,7 @@ export async function writeTextFileSafely(path: string, content: string): Promis
 
     try {
       await file.writeFile(content, 'utf-8');
+      await file.sync();
     } finally {
       await file.close();
     }

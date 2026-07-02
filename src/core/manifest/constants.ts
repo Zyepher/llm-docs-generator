@@ -7,10 +7,8 @@ export const CONFIGURED_SDK_MODE = 'configured-sdk';
 export const DISCOVERY_REPORT_MODE = 'discovery-report';
 export const SOURCE_DOCS_MODE = 'local-source-docs';
 export const SOURCE_TRUTH_DOCS_MODE = 'source-truth-local-docs';
-export const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS = new Set<GeneratedOutputKind>([
-  'parsed-spec-json',
-  'llm-docs',
-]);
+export const CONFIGURED_SDK_GENERATED_OUTPUT_KINDS: ReadonlySet<string> =
+  new Set<GeneratedOutputKind>(['parsed-spec-json', 'llm-docs']);
 export const DISCOVERY_REPORT_SCHEMA_VERSION = '0.2.0';
 export const DISCOVERY_REPORT_OUTPUT_KIND = 'discovery-report';
 export const DISCOVERY_REPORT_GENERATED_OUTPUT_KINDS = new Set([DISCOVERY_REPORT_OUTPUT_KIND]);
@@ -65,7 +63,12 @@ export const DISCOVERY_URL_CANDIDATE_EVIDENCE_INDEX_CANDIDATE_KEYS = new Set([
   'external',
   'sourceResources',
 ]);
-export const DISCOVERY_CANDIDATE_EVIDENCE_KEYS = new Set(['category', 'signals', 'relations', 'flags']);
+export const DISCOVERY_CANDIDATE_EVIDENCE_KEYS = new Set([
+  'category',
+  'signals',
+  'relations',
+  'flags',
+]);
 export const DISCOVERY_CANDIDATE_SOURCE_RESOURCE_KEYS = new Set(['url', 'sourceRole', 'evidence']);
 export const SOURCE_TRUTH_REPORT_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_TRUTH_INSPECTION_MODE = 'source-truth-local-evidence';
@@ -114,7 +117,13 @@ export const SOURCE_DOCS_FORMAT_HINTS = new Set([
   'rst',
   'html',
 ]);
-export const SOURCE_DOCS_RESOLVED_FORMATS = new Set(['markdown', 'openapi', 'openref', 'rst', 'html']);
+export const SOURCE_DOCS_RESOLVED_FORMATS = new Set([
+  'markdown',
+  'openapi',
+  'openref',
+  'rst',
+  'html',
+]);
 export const SOURCE_DOCS_PLUGIN_FORMAT_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const SOURCE_DOCS_SEMANTIC_CHUNK_INDEX_KEYS = new Set([
   'path',
@@ -257,7 +266,6 @@ export const INPUT_PROVENANCE_INPUT_KINDS = new Set([
   'source-verification-local-evidence',
 ]);
 
-
 export const ARTIFACT_SUMMARY_SCHEMA = 'llm-docs-generator.artifact-summary.v1';
 
 export const ARTIFACT_SUMMARY_KEYS = new Set([
@@ -293,7 +301,6 @@ export const ARTIFACT_SUMMARY_INDEX_KEYS = new Set([
   'sourceVerificationDocsFileCount',
 ]);
 
-
 export const REFRESH_PROVENANCE_KEYS = new Set([
   'refreshedAt',
   'sourceManifestMode',
@@ -301,7 +308,8 @@ export const REFRESH_PROVENANCE_KEYS = new Set([
   'inputBoundary',
   'limitations',
 ]);
-export const REFRESH_PROVENANCE_ISO_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+export const REFRESH_PROVENANCE_ISO_DATETIME_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 export const REFRESH_PROVENANCE_BY_MODE = {
   [SOURCE_DOCS_MODE]: {
     strategy: 'explicit-local-source-docs',

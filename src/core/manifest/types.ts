@@ -72,5 +72,4 @@ export interface WriteDiscoveryReportManifestOptions {
   generator: GeneratorMetadata;
   discoveryKind: DiscoveryReportKind;
   reportPath: string;
-  report: unknown;
 }

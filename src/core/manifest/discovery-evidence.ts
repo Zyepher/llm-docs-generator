@@ -3,11 +3,8 @@
  * and equality check shared by the discovery writer and verifier.
  */
 
-import { createHash } from 'node:crypto';
-
-import { errorMessage, isObjectRecord } from '../../utils/guards.js';
-import { HASH_PREFIX } from '../../utils/hash.js';
-import { readJsonFile } from '../../utils/json.js';
+import { isNonEmptyString, isObjectRecord } from '../../utils/guards.js';
+import { sha256Prefixed } from '../../utils/hash.js';
 import { DISCOVERY_REPORT_MODE_BY_KIND, DISCOVERY_REPORT_SCHEMA_VERSION } from './constants.js';
 import type { DiscoveryReportKind } from './constants.js';
 import {
@@ -109,22 +106,12 @@ export interface WebsiteResourceFreshnessIndexEntry {
   lastModified: string | null;
 }
 
-export interface DiscoveryReportSummary {
+interface DiscoveryReportSummary {
   schemaVersion: string;
   mode: string;
   candidateCount: number;
   warningCount: number;
   urlResourceCount?: number;
-}
-
-export async function readDiscoveryReportJson(reportPath: string): Promise<unknown> {
-  try {
-    return await readJsonFile(reportPath);
-  } catch (error) {
-    throw new Error(
-      `discovery report must be readable JSON before writing manifest: ${errorMessage(error)}`
-    );
-  }
 }
 
 export function summarizeDiscoveryReport(
@@ -216,8 +203,7 @@ export function buildDiscoveryCandidateEvidenceIndex(
     candidates: hashData.candidates,
   };
 }
-
-export function buildDiscoveryCandidateEvidenceContext(
+function buildDiscoveryCandidateEvidenceContext(
   discoveryKind: DiscoveryReportKind,
   report: Record<string, unknown>
 ): DiscoveryCandidateEvidenceContext {
@@ -298,8 +284,7 @@ export function buildDiscoveryCandidateEvidenceContext(
     resourceFreshness,
   };
 }
-
-export function buildDiscoveryWebsiteResourceFreshnessIndexEntry(
+function buildDiscoveryWebsiteResourceFreshnessIndexEntry(
   resource: unknown,
   resourceIndex: number
 ): WebsiteResourceFreshnessIndexEntry {
@@ -321,8 +306,7 @@ export function buildDiscoveryWebsiteResourceFreshnessIndexEntry(
     lastModified: optionalStringOrNullField(freshness, 'lastModified', freshnessLabel),
   };
 }
-
-export function buildDiscoveryCandidateEvidenceIndexCandidate(
+function buildDiscoveryCandidateEvidenceIndexCandidate(
   discoveryKind: DiscoveryReportKind,
   candidate: unknown,
   index: number
@@ -404,8 +388,7 @@ export function buildDiscoveryCandidateEvidenceIndexCandidate(
 
   return entry;
 }
-
-export function buildDiscoveryCandidateEvidence(
+function buildDiscoveryCandidateEvidence(
   evidence: unknown,
   candidateIndex: number
 ): DiscoveryCandidateEvidenceIndexCandidate['evidence'] {
@@ -421,7 +404,7 @@ export function buildDiscoveryCandidateEvidence(
   const relations = evidence.relations;
   const flags = evidence.flags;
 
-  if (typeof category === 'string') {
+  if (isNonEmptyString(category)) {
     entry.category = category;
   }
 
@@ -448,8 +431,7 @@ export function buildDiscoveryCandidateEvidence(
 
   return entry;
 }
-
-export function buildDiscoveryCandidateSourceResource(
+function buildDiscoveryCandidateSourceResource(
   sourceResource: unknown,
   candidateIndex: number,
   sourceIndex: number
@@ -472,13 +454,9 @@ export function buildDiscoveryCandidateSourceResource(
 export function hashDiscoveryCandidateEvidenceIndex(
   index: DiscoveryCandidateEvidenceIndexHashData
 ): string {
-  const hash = createHash('sha256');
-
-  hash.update(DISCOVERY_CANDIDATE_EVIDENCE_INDEX_HASH_SEED);
-  hash.update(JSON.stringify(index));
-  hash.update('\n');
-
-  return `${HASH_PREFIX}${hash.digest('hex')}`;
+  return sha256Prefixed(
+    `${DISCOVERY_CANDIDATE_EVIDENCE_INDEX_HASH_SEED}${JSON.stringify(index)}\n`
+  );
 }
 
 export function discoveryCandidateEvidenceIndexesEqual(

@@ -14,18 +14,18 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { existsSync } from 'node:fs';
 import { lstat, rm } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ConfigLoader } from './config/loader.js';
 import {
-  DISCOVERY_REPORT_SCHEMA_VERSION,
-  LOCAL_BOUNDED_INSPECTION_MODE,
+  assertOutputOutsideDirectorySource,
+  defaultOutputDirForSource,
   discoverLocalSource,
 } from './core/discovery.js';
-import { REPO_BOUNDED_INSPECTION_MODE, discoverRepo } from './core/repo-discovery.js';
+import { discoverRepo } from './core/repo-discovery.js';
 import type { SourceDocsPresetMetadata } from './core/source-docs.js';
-import { WEBSITE_BOUNDED_INSPECTION_MODE, discoverWebsite } from './core/website-discovery.js';
+import { discoverWebsite } from './core/website-discovery.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
 import {
@@ -37,10 +37,20 @@ import {
   writeDiscoveryReportManifest,
   writeGenerationManifest,
 } from './core/manifest.js';
+import {
+  DISCOVERY_REPORT_MODE_BY_KIND,
+  DISCOVERY_REPORT_OUTPUT_KIND,
+  DISCOVERY_REPORT_SCHEMA_VERSION,
+} from './core/manifest/constants.js';
 import { validateParserPluginManifestFile } from './core/parser-plugin-manifest.js';
 import { SOURCE_VERIFICATION_MODE } from './core/source-verification.js';
 import { fetchSpec } from './utils/fetcher.js';
-import { isObjectRecord, isNonNegativeInteger, isFileNotFoundError } from './utils/guards.js';
+import {
+  errorMessage,
+  isFileNotFoundError,
+  isNonNegativeInteger,
+  isObjectRecord,
+} from './utils/guards.js';
 import { readJsonFile } from './utils/json.js';
 import { Logger, LogLevel } from './utils/logger.js';
 import {
@@ -78,16 +88,21 @@ const DEFAULT_CONFIG_DIR = 'config';
 function resolveConfigDir(configDir: string): string {
   const resolved = resolve(configDir);
 
-  if (existsSync(resolved)) {
+  if (configDir !== DEFAULT_CONFIG_DIR) {
     return resolved;
   }
 
-  if (configDir === DEFAULT_CONFIG_DIR) {
-    const packaged = resolve(PACKAGE_ROOT, DEFAULT_CONFIG_DIR);
+  // For the default './config', prefer the CWD directory only when it actually
+  // holds the config catalog. A stray ./config (for example one that contains
+  // nothing but cached spec downloads) must not shadow the packaged config.
+  if (existsSync(join(resolved, 'sdks.json'))) {
+    return resolved;
+  }
 
-    if (existsSync(packaged)) {
-      return packaged;
-    }
+  const packaged = resolve(PACKAGE_ROOT, DEFAULT_CONFIG_DIR);
+
+  if (existsSync(join(packaged, 'sdks.json'))) {
+    return packaged;
   }
 
   return resolved;
@@ -109,20 +124,17 @@ const SOURCE_GENERATE_PRESETS = ['swift-book'] as const;
 const SWIFT_BOOK_PRESET_FORMATS = ['markdown'] as const;
 const DISCOVERY_REPORT_FILE = 'discovery-report.json';
 const DISCOVERY_MANIFEST_FILE = 'manifest.json';
-const DISCOVERY_REPORT_OUTPUT_KIND = 'discovery-report';
-const DISCOVERY_REPORT_MODES = new Set([
-  LOCAL_BOUNDED_INSPECTION_MODE,
-  REPO_BOUNDED_INSPECTION_MODE,
-  WEBSITE_BOUNDED_INSPECTION_MODE,
-]);
-const DISCOVERY_MANIFEST_KINDS = new Set(['source', 'repo', 'url']);
+const DISCOVERY_REPORT_MODES: ReadonlySet<string> = new Set(
+  Object.values(DISCOVERY_REPORT_MODE_BY_KIND)
+);
+const DISCOVERY_MANIFEST_KINDS: ReadonlySet<string> = new Set(
+  Object.keys(DISCOVERY_REPORT_MODE_BY_KIND)
+);
 type CliDiscoveryKind = 'source' | 'repo' | 'url';
-
 
 async function writeCliDiscoveryReportManifest(options: {
   discoveryKind: CliDiscoveryKind;
   reportPath: string;
-  report: unknown;
 }): Promise<string> {
   const manifestPath = resolve(dirname(options.reportPath), DISCOVERY_MANIFEST_FILE);
 
@@ -136,7 +148,6 @@ async function writeCliDiscoveryReportManifest(options: {
       },
       discoveryKind: options.discoveryKind,
       reportPath: options.reportPath,
-      report: options.report,
     });
   } catch (error) {
     await removeJustWrittenDiscoveryReport(options.reportPath);
@@ -259,8 +270,6 @@ function isDiscoveryManifestArtifact(value: unknown): boolean {
     firstOutput.path === discovery.reportPath
   );
 }
-
-
 
 function resolvePlannedOutputVersion(
   sdkName: string,
@@ -514,7 +523,7 @@ async function resolveSourceGeneratePreset(options: {
   try {
     loadedPreset = await config.loadPreset(presetName);
   } catch (error) {
-    failGenerateRequest(error instanceof Error ? error.message : String(error));
+    failGenerateRequest(errorMessage(error));
   }
 
   const presetFormat = loadedPreset.config.format.trim().toLowerCase();
@@ -598,7 +607,7 @@ async function cleanupStaleSourceArtifactsForFailedSourceRequest(options: {
       options.source === undefined ? {} : { protectedSourcePath: options.source }
     );
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorMsg = errorMessage(error);
     console.error(
       chalk.yellow(`Warning: failed to clean stale source-mode artifacts: ${errorMsg}`)
     );
@@ -692,7 +701,7 @@ agentCommand
 
       console.log('  Use --json for the stable agent metadata contract.');
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       console.error(chalk.red(`Agent context failed: ${errorMsg}`));
       process.exit(1);
     }
@@ -710,7 +719,7 @@ agentCommand
       if (options.json === true) {
         console.log(JSON.stringify(diagnostics, null, 2));
         if (doctorFailed) {
-          process.exit(1);
+          process.exitCode = 1;
         }
         return;
       }
@@ -742,10 +751,10 @@ agentCommand
       // warning and still exits 0). Currently no check reports 'fail', so this
       // is a forward-looking guard, not a behavior change.
       if (doctorFailed) {
-        process.exit(1);
+        process.exitCode = 1;
       }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       console.error(chalk.red(`Agent doctor failed: ${errorMsg}`));
       process.exit(1);
     }
@@ -771,7 +780,7 @@ pluginsCommand
       console.log(JSON.stringify(result, null, 2));
 
       if (!result.valid) {
-        process.exit(1);
+        process.exitCode = 1;
       }
 
       return;
@@ -829,7 +838,7 @@ sourceTruthCommand
 
       console.log(`${JSON.stringify(report, null, 2)}`);
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       console.error(chalk.red(`Source-truth inspection failed: ${errorMsg}`));
       process.exit(1);
     }
@@ -858,7 +867,7 @@ sourceTruthCommand
       console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
     } catch (error) {
       const { SourceTruthDocsNoFactsError } = await import('./core/source-truth-docs.js');
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
 
       if (error instanceof SourceTruthDocsNoFactsError) {
         console.error(chalk.red(`Source-truth generation failed: ${errorMsg}`));
@@ -905,7 +914,7 @@ sourceTruthCommand
       const { SourceVerificationNoDocsEvidenceError } = await import(
         './core/source-verification.js'
       );
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
 
       if (error instanceof SourceVerificationNoDocsEvidenceError) {
         console.error(chalk.red(`Local source/docs evidence failed: ${errorMsg}`));
@@ -965,19 +974,26 @@ program
             throw new Error('discover --scope and --cache-dir are only supported with --repo.');
           }
 
-          if (options.outputDir !== undefined) {
-            await removeKnownDiscoveryArtifacts(options.outputDir);
-          }
-
-          const report = await discoverLocalSource(
+          const resolvedSourcePath = resolve(options.source);
+          const sourceStats = await lstat(resolvedSourcePath).catch(() => undefined);
+          const outputDir =
             options.outputDir === undefined
-              ? { source: options.source }
-              : { source: options.source, outputDir: options.outputDir }
-          );
+              ? defaultOutputDirForSource(resolvedSourcePath)
+              : resolve(options.outputDir);
+
+          if (sourceStats !== undefined && (sourceStats.isFile() || sourceStats.isDirectory())) {
+            await assertOutputOutsideDirectorySource({
+              sourcePath: resolvedSourcePath,
+              sourceType: sourceStats.isDirectory() ? 'directory' : 'file',
+              outputDir,
+            });
+          }
+          await removeKnownDiscoveryArtifacts(outputDir);
+
+          const report = await discoverLocalSource({ source: options.source, outputDir });
           const manifestPath = await writeCliDiscoveryReportManifest({
             discoveryKind: 'source',
             reportPath: report.output.reportPath,
-            report,
           });
 
           console.log(chalk.bold('Local source discovery'));
@@ -1012,7 +1028,6 @@ program
           const manifestPath = await writeCliDiscoveryReportManifest({
             discoveryKind: 'url',
             reportPath: report.output.reportPath,
-            report,
           });
 
           console.log(chalk.bold('Website discovery'));
@@ -1055,7 +1070,6 @@ program
         const manifestPath = await writeCliDiscoveryReportManifest({
           discoveryKind: 'repo',
           reportPath: report.output.reportPath,
-          report,
         });
 
         console.log(chalk.bold('Repo discovery'));
@@ -1075,7 +1089,7 @@ program
           console.error(chalk.yellow(`Warning: ${warning}`));
         }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorMsg = errorMessage(error);
         console.error(chalk.red(`Discovery failed: ${errorMsg}`));
         process.exit(1);
       }
@@ -1123,6 +1137,8 @@ program
       verbose: boolean;
       force: boolean;
     }) => {
+      Logger.setLevel(options.verbose ? LogLevel.DEBUG : LogLevel.INFO);
+
       let generateMode: GenerateMode;
 
       try {
@@ -1202,16 +1218,16 @@ program
             process.exit(1);
           }
 
-          const errorMsg = error instanceof Error ? error.message : String(error);
+          const errorMsg = errorMessage(error);
           console.error(chalk.red(`Generate failed: ${errorMsg}`));
+          if (options.verbose && error instanceof Error && error.stack !== undefined) {
+            console.error(chalk.gray(error.stack));
+          }
           process.exit(1);
         }
 
         return;
       }
-
-      // Set log level
-      Logger.setLevel(options.verbose ? LogLevel.DEBUG : LogLevel.INFO);
 
       console.log(chalk.bold.blue('\nLLM Documentation Generator\n'));
 
@@ -1267,6 +1283,7 @@ program
               sdkName,
               ver,
               config,
+              config.configDir,
               options.force
             );
             const resolvedSpecPath = resolve(specPath);
@@ -1333,7 +1350,7 @@ program
             spinner.succeed(chalk.green(`Completed ${sdkName} ${resolvedVersion}`));
             successCount++;
           } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
+            const errorMsg = errorMessage(error);
             spinner.fail(chalk.red(`Failed ${sdkName} ${ver}: ${errorMsg}`));
             failureCount++;
 
@@ -1344,16 +1361,18 @@ program
         }
 
         // Summary
-        console.log(chalk.bold.green("\nGeneration complete!"));
+        console.log(chalk.bold.green('\nGeneration complete!'));
         console.log(`  Successful: ${successCount}`);
         if (failureCount > 0) {
           console.log(chalk.red(`  Failed: ${failureCount}`));
         }
         console.log(`\nOutput location: ${chalk.cyan(resolvedOutputDir)}`);
 
-        process.exit(failureCount > 0 ? 1 : 0);
+        if (failureCount > 0) {
+          process.exitCode = 1;
+        }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorMsg = errorMessage(error);
         console.error(chalk.bold.red(`\nFatal error: ${errorMsg}`));
 
         if (options.verbose && error instanceof Error && error.stack !== undefined) {
@@ -1407,7 +1426,7 @@ program
         console.log(`  Preset: ${result.presetName}`);
       }
       if (result.mode === DISCOVERY_REPORT_MODE) {
-        console.log("  Candidate evidence report: refreshed");
+        console.log('  Candidate evidence report: refreshed');
         console.log(`  Candidate files: ${result.candidateCount ?? 0}`);
         if (result.reportPath !== undefined) {
           console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
@@ -1417,7 +1436,7 @@ program
         if (result.docsPath !== undefined) {
           console.log(`  Docs: ${result.docsPath}`);
         }
-        console.log("  Local source/docs evidence: refreshed");
+        console.log('  Local source/docs evidence: refreshed');
         console.log(`  Source files: ${result.sourceFiles}`);
         console.log(`  Evidence files: ${result.generatedOutputs}`);
         console.log(`  Docs references: ${result.docsReferences ?? 0}`);
@@ -1443,7 +1462,7 @@ program
       console.log(`  Checked files: ${result.postRefreshVerification.checkedFiles}`);
       console.log(chalk.green('Refresh complete'));
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       console.error(chalk.red(`Refresh failed: ${errorMsg}`));
 
       if (isRefreshManifestVerificationError(error)) {
@@ -1503,7 +1522,7 @@ program
 
       console.log(chalk.green('Verification passed'));
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       console.error(chalk.red(`Verification failed: ${errorMsg}`));
 
       if (options.verbose && error instanceof Error && error.stack !== undefined) {
@@ -1555,7 +1574,7 @@ program
 
       console.log(chalk.gray(`Total SDKs: ${sdks.length}`));
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       console.error(chalk.red(`Error: ${errorMsg}`));
       process.exit(1);
     }
@@ -1583,7 +1602,12 @@ program
         await config.load();
 
         // Fetch and parse spec - returns [specPath, resolvedVersion]
-        const [specPath, resolvedVersion] = await fetchSpec(options.sdk, options.version, config);
+        const [specPath, resolvedVersion] = await fetchSpec(
+          options.sdk,
+          options.version,
+          config,
+          config.configDir
+        );
         const parser = new OpenRefParser(specPath);
         const parsedData = await parser.parse();
 
@@ -1598,7 +1622,7 @@ program
           )}`
         );
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorMsg = errorMessage(error);
         console.error(chalk.red(`\nValidation failed: ${errorMsg}`));
 
         if (options.verbose && error instanceof Error && error.stack !== undefined) {
@@ -1618,7 +1642,7 @@ program
 // promise surfaces as an unhandled rejection. Convert it into an honest,
 // non-zero-exit failure instead of a raw stack trace / inconsistent exit code.
 process.on('unhandledRejection', (reason) => {
-  const message = reason instanceof Error ? reason.message : String(reason);
+  const message = errorMessage(reason);
   console.error(chalk.red(`Error: ${message}`));
   process.exit(1);
 });

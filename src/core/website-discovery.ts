@@ -5,7 +5,8 @@ import { join, resolve } from 'node:path';
 import { request } from 'undici';
 
 import { DISCOVERY_REPORT_SCHEMA_VERSION } from './discovery.js';
-import { writeTextFileSafely } from '../utils/safe-write.js';
+import { errorMessage } from '../utils/guards.js';
+import { writeJsonFileSafely } from '../utils/json.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 
 export const WEBSITE_BOUNDED_INSPECTION_MODE = 'website-bounded-inspection';
@@ -131,7 +132,7 @@ export interface DiscoverWebsiteResult {
   reportPath: string;
 }
 
-interface PlannedWebsiteResource {
+export interface PlannedWebsiteResource {
   url: string;
   sourceRole: WebsiteResourceRole;
 }
@@ -159,7 +160,7 @@ class BodyReadError extends Error {
   }
 }
 
-interface CandidateAccumulator {
+export interface CandidateAccumulator {
   url: string;
   sameOrigin: boolean;
   external: boolean;
@@ -170,7 +171,7 @@ interface CandidateAccumulator {
   sourceResources: Map<string, WebsiteCandidateSourceResource>;
 }
 
-interface CandidateCollectionState {
+export interface CandidateCollectionState {
   candidatesByUrl: Map<string, CandidateAccumulator>;
   maxCandidates: number;
   nextObservedOrder: number;
@@ -203,7 +204,7 @@ export async function discoverWebsite(
   };
 
   await mkdir(outputDir, { recursive: true });
-  await writeTextFileSafely(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  await writeJsonFileSafely(reportPath, report);
 
   return { report, reportPath };
 }
@@ -560,7 +561,7 @@ async function readBodyWithLimit(
   };
 }
 
-function extractCandidatesFromResource(options: {
+export function extractCandidatesFromResource(options: {
   plannedResource: PlannedWebsiteResource;
   text: string;
   websiteOrigin: string;
@@ -591,8 +592,8 @@ function extractHtmlCandidates(options: {
 }): void {
   const { plannedResource, text, websiteOrigin, state, warnings } = options;
 
-  for (const tag of text.matchAll(/<link\b[^>]*>/gi)) {
-    const attributes = parseHtmlAttributes(tag[0]);
+  for (const tag of findHtmlTags(text, 'link')) {
+    const attributes = parseHtmlAttributes(tag);
     const rel = attributes.get('rel');
     const href = attributes.get('href');
 
@@ -618,8 +619,8 @@ function extractHtmlCandidates(options: {
     }
   }
 
-  for (const tag of text.matchAll(/<a\b[^>]*>/gi)) {
-    const href = parseHtmlAttributes(tag[0]).get('href');
+  for (const tag of findHtmlTags(text, 'a')) {
+    const href = parseHtmlAttributes(tag).get('href');
 
     if (href === undefined) {
       continue;
@@ -647,13 +648,7 @@ function extractLlmsTxtCandidates(options: {
 }): void {
   const { plannedResource, text, websiteOrigin, state, warnings } = options;
 
-  for (const match of text.matchAll(/!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g)) {
-    const rawUrl = match[1];
-
-    if (rawUrl === undefined) {
-      continue;
-    }
-
+  for (const rawUrl of extractMarkdownLinkUrls(text)) {
     addCandidate({
       rawUrl,
       baseUrl: plannedResource.url,
@@ -678,6 +673,47 @@ function extractLlmsTxtCandidates(options: {
       warnings,
     });
   }
+}
+
+/**
+ * Extract markdown link targets. A regex capture like `[^)\s]+` would stop at
+ * the first ')' inside the URL, so this scanner tracks paren depth instead:
+ * the URL runs from '](' until whitespace or the ')' that closes the link at
+ * depth 0. URLs with balanced parens (e.g. .../Chunking_(writing)) survive.
+ */
+export function extractMarkdownLinkUrls(text: string): string[] {
+  const urls: string[] = [];
+
+  for (const label of text.matchAll(/\[[^\]]*]\(/g)) {
+    const urlStart = (label.index ?? 0) + label[0].length;
+    let index = urlStart;
+    let depth = 0;
+
+    while (index < text.length) {
+      const ch = text[index]!;
+
+      if (ch === '(') {
+        depth += 1;
+      } else if (ch === ')') {
+        if (depth === 0) {
+          break;
+        }
+        depth -= 1;
+      } else if (/\s/.test(ch)) {
+        break;
+      }
+
+      index += 1;
+    }
+
+    const url = text.slice(urlStart, index);
+
+    if (url !== '') {
+      urls.push(url);
+    }
+  }
+
+  return urls;
 }
 
 function extractSitemapCandidates(options: {
@@ -794,7 +830,10 @@ function normalizeCandidateUrl(
   plannedResource: PlannedWebsiteResource,
   warnings: string[]
 ): string | null {
-  const trimmed = decodeHtmlEntities(rawUrl).trim();
+  // Entity decoding already happened once at the extraction boundary
+  // (parseHtmlAttributes for HTML, decodeXmlEntities for sitemap <loc>);
+  // llms.txt URLs are plain text and must never be entity-decoded.
+  const trimmed = rawUrl.trim();
 
   if (trimmed === '') {
     return null;
@@ -858,6 +897,63 @@ function finalizeCandidates(
 
 function isAttributeNameChar(ch: string): boolean {
   return !/\s/.test(ch) && !'"\'=<>`'.includes(ch);
+}
+
+/**
+ * Find complete opening tags for a tag name. A regex like /<a\b[^>]*>/ stops
+ * at the first '>' even inside a quoted attribute value (e.g. title="a>b"),
+ * clipping the tag; this scanner tracks the active quote so '>' only ends the
+ * tag when it appears outside quoted values.
+ */
+export function findHtmlTags(text: string, tagName: string): string[] {
+  const tags: string[] = [];
+  const lowerText = text.toLowerCase();
+  const needle = `<${tagName.toLowerCase()}`;
+  let searchFrom = 0;
+
+  while (searchFrom < text.length) {
+    const start = lowerText.indexOf(needle, searchFrom);
+
+    if (start === -1) {
+      break;
+    }
+
+    const afterName = lowerText[start + needle.length];
+
+    // Word boundary after the tag name so '<a' does not match '<abbr'.
+    if (afterName !== undefined && /[a-z0-9-]/.test(afterName)) {
+      searchFrom = start + needle.length;
+      continue;
+    }
+
+    let index = start + needle.length;
+    let quote: '"' | "'" | null = null;
+
+    while (index < text.length) {
+      const ch = text[index]!;
+
+      if (quote !== null) {
+        if (ch === quote) {
+          quote = null;
+        }
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === '>') {
+        break;
+      }
+
+      index += 1;
+    }
+
+    if (index >= text.length) {
+      break;
+    }
+
+    tags.push(text.slice(start, index + 1));
+    searchFrom = index + 1;
+  }
+
+  return tags;
 }
 
 /**
@@ -1082,21 +1178,65 @@ function formatContentTypeForWarning(contentType: string | null): string {
   return contentType ?? 'none';
 }
 
-function trimBareUrl(value: string): string {
-  return value.replace(/[),.;!?]+$/g, '');
+export function trimBareUrl(value: string): string {
+  let openParens = 0;
+  let closeParens = 0;
+
+  for (const ch of value) {
+    if (ch === '(') {
+      openParens += 1;
+    } else if (ch === ')') {
+      closeParens += 1;
+    }
+  }
+
+  let end = value.length;
+
+  while (end > 0) {
+    const ch = value[end - 1];
+
+    if (ch === ',' || ch === '.' || ch === ';' || ch === '!' || ch === '?') {
+      end -= 1;
+      continue;
+    }
+
+    // Trim a trailing ')' only while parens are unbalanced, so URLs with
+    // balanced parens (e.g. .../Chunking_(writing)) survive intact.
+    if (ch === ')' && closeParens > openParens) {
+      closeParens -= 1;
+      end -= 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return value.slice(0, end);
 }
 
-function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+const ENTITY_REPLACEMENTS: Record<string, string> = {
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&apos;': "'",
+  '&#39;': "'",
+};
+
+// Single pass so double-escaped input decodes exactly once:
+// '&amp;lt;' becomes '&lt;', not '<'.
+export function decodeHtmlEntities(value: string): string {
+  return value.replace(
+    /&(?:amp|lt|gt|quot|#39);/g,
+    (entity) => ENTITY_REPLACEMENTS[entity] ?? entity
+  );
 }
 
-function decodeXmlEntities(value: string): string {
-  return decodeHtmlEntities(value).replace(/&apos;/g, "'");
+export function decodeXmlEntities(value: string): string {
+  return value.replace(
+    /&(?:amp|lt|gt|quot|apos|#39);/g,
+    (entity) => ENTITY_REPLACEMENTS[entity] ?? entity
+  );
 }
 
 function sortRelations(
@@ -1157,9 +1297,5 @@ function resolvePositiveSafeInteger(
 }
 
 function formatFetchError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
+  return errorMessage(error);
 }

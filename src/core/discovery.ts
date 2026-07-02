@@ -4,31 +4,18 @@ import type { Dirent, Stats } from 'node:fs';
 import { lstat, mkdir, opendir } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 
+import { isSameOrDescendant, resolveEffectiveOutputPath } from '../utils/fs-path.js';
+import { writeJsonFileSafely } from '../utils/json.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
-import { writeTextFileSafely } from '../utils/safe-write.js';
+import { isSkippedTraversalDirectory, SKIPPED_DIRECTORY_NAMES } from '../utils/traversal.js';
 
 export const DISCOVERY_REPORT_SCHEMA_VERSION = '0.2.0';
 export const LOCAL_BOUNDED_INSPECTION_MODE = 'local-bounded-inspection';
 export const DEFAULT_DISCOVERY_MAX_DEPTH = 8;
 export const DEFAULT_DISCOVERY_MAX_FILES = 5000;
 export const DEFAULT_DISCOVERY_MAX_ENTRIES = 20000;
+export const DEFAULT_DISCOVERY_MAX_FILE_BYTES = 8_388_608;
 const CONTENT_PREFIX_BYTES = 8192;
-const SKIPPED_DIRECTORY_NAMES = [
-  '.cache',
-  '.git',
-  '.next',
-  '.nuxt',
-  '.output',
-  '.turbo',
-  'build',
-  'coverage',
-  'dist',
-  'node_modules',
-  'out',
-  'target',
-  'vendor',
-] as const;
-
 const URL_LIKE_SOURCE_PATTERNS = [
   /^[a-z][a-z0-9+.-]*:\/\//i,
   /^git@[^:]+:/i,
@@ -151,6 +138,7 @@ interface MutableTraversalState {
   emittedMaxFileWarning: boolean;
   emittedMaxEntryWarning: boolean;
   emittedMaxDepthWarning: boolean;
+  skippedOversizedFile: boolean;
 }
 
 interface CandidateHint {
@@ -176,6 +164,11 @@ export async function discoverLocalSources(
     options.outputDir === undefined
       ? defaultOutputDirForSource(inspection.source.resolvedPath)
       : resolve(options.outputDir);
+  await assertOutputOutsideDirectorySource({
+    sourcePath: inspection.source.resolvedPath,
+    sourceType: inspection.source.type,
+    outputDir,
+  });
   const reportPath = join(outputDir, 'discovery-report.json');
 
   const report: DiscoveryReport = {
@@ -192,7 +185,7 @@ export async function discoverLocalSources(
   };
 
   await mkdir(outputDir, { recursive: true });
-  await writeTextFileSafely(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  await writeJsonFileSafely(reportPath, report);
 
   return { report, reportPath };
 }
@@ -233,6 +226,7 @@ export async function inspectLocalSource(
     emittedMaxFileWarning: false,
     emittedMaxEntryWarning: false,
     emittedMaxDepthWarning: false,
+    skippedOversizedFile: false,
   };
 
   if (sourceType === 'file') {
@@ -243,6 +237,7 @@ export async function inspectLocalSource(
       warnings,
       state,
       maxFiles,
+      maxFileBytes: DEFAULT_DISCOVERY_MAX_FILE_BYTES,
       includeUnknown: true,
     });
   } else {
@@ -256,6 +251,7 @@ export async function inspectLocalSource(
       maxDepth,
       maxEntries,
       maxFiles,
+      maxFileBytes: DEFAULT_DISCOVERY_MAX_FILE_BYTES,
     });
   }
 
@@ -276,7 +272,7 @@ export async function inspectLocalSource(
       visitedEntries: state.visitedEntries,
       visitedFiles: state.visitedFiles,
       candidateCount: candidates.length,
-      truncated: state.truncated || state.depthLimited,
+      truncated: state.truncated || state.depthLimited || state.skippedOversizedFile,
     },
     candidates,
     warnings,
@@ -329,8 +325,30 @@ async function statSource(sourcePath: string): Promise<Stats> {
   }
 }
 
-function defaultOutputDirForSource(sourcePath: string): string {
+export function defaultOutputDirForSource(sourcePath: string): string {
   return join(dirname(sourcePath), `${basename(sourcePath)}-discovery`);
+}
+
+export async function assertOutputOutsideDirectorySource(options: {
+  sourcePath: string;
+  sourceType: DiscoverySourceType;
+  outputDir: string;
+}): Promise<void> {
+  if (options.sourceType !== 'directory') {
+    return;
+  }
+
+  const literalOutputPath = resolve(options.outputDir);
+  const effectiveOutputPath = await resolveEffectiveOutputPath(literalOutputPath);
+
+  if (
+    isSameOrDescendant(options.sourcePath, literalOutputPath) ||
+    isSameOrDescendant(options.sourcePath, effectiveOutputPath)
+  ) {
+    throw new Error(
+      'discover --output-dir must not be the same as, or inside, the explicit --source directory'
+    );
+  }
 }
 
 async function traverseDirectory(options: {
@@ -343,6 +361,7 @@ async function traverseDirectory(options: {
   maxDepth: number;
   maxEntries: number;
   maxFiles: number;
+  maxFileBytes: number;
 }): Promise<void> {
   const {
     rootPath,
@@ -354,6 +373,7 @@ async function traverseDirectory(options: {
     maxDepth,
     maxEntries,
     maxFiles,
+    maxFileBytes,
   } = options;
 
   if (state.truncated) {
@@ -388,9 +408,7 @@ async function traverseDirectory(options: {
     }
 
     if (entry.isDirectory()) {
-      if (
-        SKIPPED_DIRECTORY_NAMES.includes(entry.name as (typeof SKIPPED_DIRECTORY_NAMES)[number])
-      ) {
+      if (isSkippedTraversalDirectory(entry.name)) {
         warnings.push(`Skipped directory by default: ${relativePath}`);
         continue;
       }
@@ -400,7 +418,9 @@ async function traverseDirectory(options: {
         // single deep branch cannot drop all later in-bounds candidates.
         state.depthLimited = true;
         if (!state.emittedMaxDepthWarning) {
-          warnings.push(`Traversal pruned subtrees at max depth ${maxDepth} (first: ${relativePath})`);
+          warnings.push(
+            `Traversal pruned subtrees at max depth ${maxDepth} (first: ${relativePath})`
+          );
           state.emittedMaxDepthWarning = true;
         }
         continue;
@@ -416,6 +436,7 @@ async function traverseDirectory(options: {
         maxDepth,
         maxEntries,
         maxFiles,
+        maxFileBytes,
       });
 
       continue;
@@ -429,6 +450,7 @@ async function traverseDirectory(options: {
         warnings,
         state,
         maxFiles,
+        maxFileBytes,
         includeUnknown: false,
       });
     }
@@ -442,10 +464,19 @@ async function inspectFile(options: {
   warnings: string[];
   state: MutableTraversalState;
   maxFiles: number;
+  maxFileBytes: number;
   includeUnknown: boolean;
 }): Promise<void> {
-  const { absolutePath, relativePath, candidates, warnings, state, maxFiles, includeUnknown } =
-    options;
+  const {
+    absolutePath,
+    relativePath,
+    candidates,
+    warnings,
+    state,
+    maxFiles,
+    maxFileBytes,
+    includeUnknown,
+  } = options;
 
   if (state.visitedFiles >= maxFiles) {
     state.truncated = true;
@@ -465,6 +496,15 @@ async function inspectFile(options: {
   }
 
   try {
+    const fileStats = await lstat(absolutePath);
+    if (fileStats.size > maxFileBytes) {
+      state.skippedOversizedFile = true;
+      warnings.push(
+        `Skipped oversized file: ${normalizePathForReport(relativePath)} (${fileStats.size} bytes, max ${maxFileBytes} bytes)`
+      );
+      return;
+    }
+
     const fileInfo = await readFileInfo(absolutePath);
     const hint = inferCandidateHint(relativePath, fileInfo.contentPrefix);
 

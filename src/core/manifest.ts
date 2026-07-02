@@ -2,18 +2,19 @@
  * Generation manifest writer for the configured SDK compatibility flow.
  */
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-import { describeGeneratedTextOutput } from './generated-output-metadata.js';
+import { countTextLines, describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
   isObjectRecord,
   errorMessage,
   isFileNotFoundError,
 } from '../utils/guards.js';
-import { writeTextFileSafely } from '../utils/safe-write.js';
+import { sha256Prefixed } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
-import { readJsonFile } from '../utils/json.js';
+import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
+import { estimateTokenCount } from '../utils/text-metrics.js';
 import {
   CONFIGURED_SDK_MODE,
   DISCOVERY_REPORT_MODE,
@@ -39,7 +40,6 @@ import { buildInputProvenanceForManifest } from './manifest/provenance.js';
 import { buildArtifactSummaryForManifest } from './manifest/artifact-summary.js';
 import {
   buildDiscoveryCandidateEvidenceIndex,
-  readDiscoveryReportJson,
   summarizeDiscoveryReport,
 } from './manifest/discovery-evidence.js';
 import { verifyConfiguredSdkManifest } from './manifest/verify/configured-sdk.js';
@@ -50,47 +50,21 @@ import { verifySourceDocsManifest } from './manifest/verify/source-docs.js';
 
 export { buildManifestContract } from './manifest/contract.js';
 export type { ManifestContract } from './manifest/contract.js';
-export type { RefreshProvenance } from './manifest/refresh-provenance.js';
 export { buildInputProvenanceForManifest } from './manifest/provenance.js';
-export type {
-  InputProvenance,
-  InputProvenanceEndpoint,
-  InputProvenanceParser,
-  InputProvenanceParserPlugin,
-  InputProvenanceReport,
-} from './manifest/provenance.js';
+export type { InputProvenance } from './manifest/provenance.js';
 export { buildArtifactSummaryForManifest } from './manifest/artifact-summary.js';
-export type {
-  ArtifactFileSummary,
-  ArtifactIndexSummary,
-  ArtifactSourceFileSummary,
-  ArtifactSummary,
-} from './manifest/artifact-summary.js';
+export type { ArtifactSummary } from './manifest/artifact-summary.js';
 
 export {
   CONFIGURED_SDK_MODE,
   DISCOVERY_REPORT_MODE,
   MANIFEST_SCHEMA_VERSION,
   SOURCE_DOCS_SWIFT_BOOK_PRESET_LIMITATIONS,
-  SOURCE_DOCS_SWIFT_BOOK_PRESET_METADATA,
-  SOURCE_DOCS_SWIFT_BOOK_PRESET_NAME,
 } from './manifest/constants.js';
+export type { RefreshSourceManifestMode } from './manifest/constants.js';
 export type {
-  DiscoveryReportKind,
-  GeneratedOutputKind,
-  ManifestContractMode,
-  RefreshSourceManifestMode,
-} from './manifest/constants.js';
-export type {
-  FormatterManifestMetadata,
-  GeneratedOutputInput,
-  GeneratedOutputManifestEntry,
-  GeneratorMetadata,
-  ParserManifestMetadata,
-  SourceManifestInput,
   VerifyGenerationManifestOptions,
   VerifyGenerationManifestResult,
-  WriteDiscoveryReportManifestOptions,
   WriteGenerationManifestOptions,
 } from './manifest/types.js';
 export { validateSourceDocsPresetContract } from './manifest/verify/source-docs.js';
@@ -152,23 +126,36 @@ export async function writeGenerationManifest(
   // Atomic, symlink-refusing write (parity with the sibling manifest writers),
   // so a crash mid-write can't leave a truncated manifest and a pre-existing
   // symlink at the path can't redirect the write.
-  await writeTextFileSafely(
-    options.manifestPath,
-    `${JSON.stringify(manifestWithSummary, null, 2)}\n`
-  );
+  await writeJsonFileSafely(options.manifestPath, manifestWithSummary);
 }
 
 export async function writeDiscoveryReportManifest(
   options: WriteDiscoveryReportManifestOptions
 ): Promise<void> {
   const manifestDir = dirname(options.manifestPath);
-  const report = await readDiscoveryReportJson(options.reportPath);
+  const reportBytes = await readFile(options.reportPath);
+  const reportText = reportBytes.toString('utf-8');
+  let report: unknown;
+
+  try {
+    report = JSON.parse(reportText) as unknown;
+  } catch (error) {
+    throw new Error(
+      `discovery report must be readable JSON before writing manifest: ${errorMessage(error)}`
+    );
+  }
+
   const reportSummary = summarizeDiscoveryReport(options.discoveryKind, report);
   const candidateEvidenceIndex = buildDiscoveryCandidateEvidenceIndex(
     options.discoveryKind,
     report
   );
-  const reportFile = await describeGeneratedTextOutput(options.reportPath);
+  const reportFile = {
+    byteSize: reportBytes.byteLength,
+    hash: sha256Prefixed(reportBytes),
+    lineCount: countTextLines(reportText),
+    estimatedTokenCount: estimateTokenCount(reportText),
+  };
   const reportPath = toManifestRelativePath(manifestDir, options.reportPath);
   const discovery = {
     kind: options.discoveryKind,
@@ -209,10 +196,7 @@ export async function writeDiscoveryReportManifest(
   };
 
   await mkdir(manifestDir, { recursive: true });
-  await writeTextFileSafely(
-    options.manifestPath,
-    `${JSON.stringify(manifestWithSummary, null, 2)}\n`
-  );
+  await writeJsonFileSafely(options.manifestPath, manifestWithSummary);
 }
 
 export async function recordRefreshProvenanceInManifest(options: {
@@ -236,7 +220,7 @@ export async function recordRefreshProvenanceInManifest(options: {
   manifest.inputProvenance = buildInputProvenanceForManifest(manifest);
   manifest.artifactSummary = buildArtifactSummaryForManifest(manifest);
   manifest.refresh = refresh;
-  await writeTextFileSafely(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeJsonFileSafely(options.manifestPath, manifest);
 
   return refresh;
 }
