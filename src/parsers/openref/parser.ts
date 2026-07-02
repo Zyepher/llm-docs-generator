@@ -247,28 +247,6 @@ export async function parseOpenRefSpec(specPath: string): Promise<SpecData> {
 }
 
 /**
- * Validate parsed spec data structure
- * Performance: O(n) - validates all operations
- *
- * Use sparingly - only when validation is critical
- */
-export function validateSpecData(data: SpecData): boolean {
-  try {
-    // Validate info
-    SpecInfoSchema.parse(data.info);
-
-    // Validate all operations (O(n))
-    for (const op of data.operations) {
-      OperationSchema.parse(op);
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Get parser statistics for debugging/logging
  * Performance: O(1) - uses cached values
  */

@@ -181,17 +181,3 @@ export function mergeMarkdownDocuments(docs: MarkdownDocument[], rootTitle: stri
 
   return root;
 }
-
-/**
- * Convert DocNode back to MarkdownDocument (for testing/export)
- *
- * This is mainly for validation purposes
- *
- * @param node - DocNode to convert
- * @returns MarkdownDocument
- */
-export function docNodeToMarkdown(_node: DocNode): MarkdownDocument {
-  // Note: This is a lossy conversion
-  // Implement only if needed for export/testing
-  throw new Error('docNodeToMarkdown not yet implemented');
-}

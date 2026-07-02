@@ -2,9 +2,7 @@
  * Type-guard predicates and small classifiers shared across manifest modules.
  */
 
-import { isAbsolute, relative } from 'node:path';
-
-import { isParentRelativePath } from '../../utils/fs-path.js';
+import { isSameOrDescendant } from '../../utils/fs-path.js';
 import {
   DISCOVERY_REPORT_MODE_BY_KIND,
   MANIFEST_CONTRACT_BY_MODE,
@@ -34,7 +32,10 @@ export function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
-export function isAllowedOutputKind(value: unknown, allowedKinds: ReadonlySet<string>): value is string {
+export function isAllowedOutputKind(
+  value: unknown,
+  allowedKinds: ReadonlySet<string>
+): value is string {
   return typeof value === 'string' && allowedKinds.has(value);
 }
 
@@ -59,12 +60,8 @@ export function isSourceDocsSourceType(value: unknown): value is 'file' | 'direc
   return typeof value === 'string' && SOURCE_DOCS_SOURCE_TYPES.has(value);
 }
 
-export function isSourceTruthSourceType(value: unknown): value is 'file' | 'directory' {
-  return typeof value === 'string' && SOURCE_DOCS_SOURCE_TYPES.has(value);
-}
+export const isSourceTruthSourceType = isSourceDocsSourceType;
 
 export function isInsideDirectory(parentDir: string, childPath: string): boolean {
-  const relativePath = relative(parentDir, childPath);
-
-  return relativePath === '' || (!isParentRelativePath(relativePath) && !isAbsolute(relativePath));
+  return isSameOrDescendant(parentDir, childPath);
 }

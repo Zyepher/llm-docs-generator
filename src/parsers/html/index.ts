@@ -113,6 +113,5 @@ export class HtmlFormatParser extends BaseParser {
 
 export const htmlParser = new HtmlFormatParser();
 
-export { HtmlParser, getParserDetails, parseHtmlFile } from './parser.js';
-export { htmlToDocNode, mergeHtmlDocuments } from './adapter.js';
+export { parseHtmlFile } from './parser.js';
 export type { HtmlDocument, HtmlLink, HtmlParserWarning } from './parser.js';

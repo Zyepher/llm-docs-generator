@@ -42,18 +42,22 @@ import {
   SOURCE_DOCS_SWIFT_BOOK_PRESET_NAME,
 } from '../constants.js';
 import {
+  formatAllowedOutputKinds,
   isInsideDirectory,
   isPositiveInteger,
   isSourceDocsSourceType,
   isStringArray,
 } from '../predicates.js';
-import { validateAllowedKeys, validateOptionalStringArray } from '../field-validators.js';
+import {
+  optionalStringArraysEqual,
+  stringArraysEqual,
+  validateAllowedKeys,
+  validateOptionalStringArray,
+} from '../field-validators.js';
 import {
   describeFile,
   hasEmptyOrParentPathSegment,
   isUrlLikePath,
-  sameOptionalStringArray,
-  sameStringArray,
   verifyFile,
   verifyPathType,
 } from '../fs-verify.js';
@@ -353,8 +357,7 @@ export async function verifySourceDocsManifest(
     failures,
   };
 }
-
-export interface SourceDocsParserPluginRecord {
+interface SourceDocsParserPluginRecord {
   manifestPath: string;
   resolvedManifestPath: string;
   manifestByteSize: number;
@@ -367,8 +370,7 @@ export interface SourceDocsParserPluginRecord {
   };
   format: ParserPluginFormatMetadata;
 }
-
-export function validateSourceDocsParserMetadata(
+function validateSourceDocsParserMetadata(
   parser: Record<string, unknown>,
   sourceResolvedFormat: unknown,
   parserPluginFormatId: string | undefined,
@@ -402,8 +404,7 @@ export function validateSourceDocsParserMetadata(
     failures.push('malformed manifest: parser.format must match source.resolvedFormat');
   }
 }
-
-export function validateSourceDocsParserPluginMetadata(
+function validateSourceDocsParserPluginMetadata(
   plugin: unknown,
   failures: string[],
   fileChecks: FileCheck[]
@@ -498,8 +499,7 @@ export function validateSourceDocsParserPluginMetadata(
     format: formatRecord,
   };
 }
-
-export function validateSourceDocsParserPluginModuleMetadata(
+function validateSourceDocsParserPluginModuleMetadata(
   moduleMetadata: unknown,
   failures: string[]
 ): SourceDocsParserPluginRecord['module'] | undefined {
@@ -542,8 +542,7 @@ export function validateSourceDocsParserPluginModuleMetadata(
       }
     : undefined;
 }
-
-export function validateSourceDocsParserPluginFormatMetadata(
+function validateSourceDocsParserPluginFormatMetadata(
   formatMetadata: unknown,
   failures: string[]
 ): ParserPluginFormatMetadata | undefined {
@@ -590,9 +589,7 @@ export function validateSourceDocsParserPluginFormatMetadata(
       valid = false;
     }
 
-    if (
-      parsedMediaTypes?.some((mediaType) => mediaType.length === 0)
-    ) {
+    if (parsedMediaTypes?.some((mediaType) => mediaType.length === 0)) {
       failures.push(
         'malformed manifest: parser.plugin.format.mediaTypes must contain only non-empty strings'
       );
@@ -621,8 +618,7 @@ export function validateSourceDocsParserPluginFormatMetadata(
       }
     : undefined;
 }
-
-export function validateSourceDocsParserPluginExecutionMetadata(
+function validateSourceDocsParserPluginExecutionMetadata(
   execution: unknown,
   failures: string[]
 ): void {
@@ -649,8 +645,7 @@ export function validateSourceDocsParserPluginExecutionMetadata(
     );
   }
 }
-
-export function validateSourceDocsParserPluginGeneratedOutputs(
+function validateSourceDocsParserPluginGeneratedOutputs(
   generatedOutputs: unknown[],
   failures: string[]
 ): void {
@@ -666,8 +661,7 @@ export function validateSourceDocsParserPluginGeneratedOutputs(
     }
   }
 }
-
-export async function verifySourceDocsParserPluginManifestMetadata(
+async function verifySourceDocsParserPluginManifestMetadata(
   recorded: SourceDocsParserPluginRecord,
   failures: string[]
 ): Promise<void> {
@@ -708,8 +702,7 @@ export async function verifySourceDocsParserPluginManifestMetadata(
 
   compareParserPluginManifestMetadata(recorded, validation.manifest, failures);
 }
-
-export function compareParserPluginManifestMetadata(
+function compareParserPluginManifestMetadata(
   recorded: SourceDocsParserPluginRecord,
   manifest: ParserPluginManifestMetadata,
   failures: string[]
@@ -735,8 +728,7 @@ export function compareParserPluginManifestMetadata(
 
   compareParserPluginFormatMetadata(recorded.format, selectedFormat, failures);
 }
-
-export function compareParserPluginFormatMetadata(
+function compareParserPluginFormatMetadata(
   recorded: ParserPluginFormatMetadata,
   selectedFormat: ParserPluginFormatMetadata,
   failures: string[]
@@ -747,13 +739,13 @@ export function compareParserPluginFormatMetadata(
     );
   }
 
-  if (!sameStringArray(recorded.extensions, selectedFormat.extensions)) {
+  if (!stringArraysEqual(recorded.extensions, selectedFormat.extensions)) {
     failures.push(
       'parser.plugin.format.extensions must match parser plugin manifest selected format'
     );
   }
 
-  if (!sameOptionalStringArray(recorded.mediaTypes, selectedFormat.mediaTypes)) {
+  if (!optionalStringArraysEqual(recorded.mediaTypes, selectedFormat.mediaTypes)) {
     failures.push(
       'parser.plugin.format.mediaTypes must match parser plugin manifest selected format'
     );
@@ -765,8 +757,7 @@ export function compareParserPluginFormatMetadata(
     );
   }
 }
-
-export function validateSourceDocsFormatterMetadata(
+function validateSourceDocsFormatterMetadata(
   formatter: Record<string, unknown>,
   failures: string[]
 ): void {
@@ -782,8 +773,7 @@ export function validateSourceDocsFormatterMetadata(
     failures.push(`malformed manifest: formatter.format must be ${SOURCE_DOCS_FORMATTER_FORMAT}`);
   }
 }
-
-export function validateSourceDocsSemanticChunkIndexes(options: {
+function validateSourceDocsSemanticChunkIndexes(options: {
   semanticChunkIndexes: unknown;
   generatedOutputs: unknown[];
   manifestDir: string;
@@ -951,8 +941,7 @@ export function validateSourceDocsSemanticChunkIndexes(options: {
 
   return entries;
 }
-
-export function validateSourceDocsSemanticChunkIndexChunk(options: {
+function validateSourceDocsSemanticChunkIndexChunk(options: {
   chunkEntry: unknown;
   label: string;
   expectedOrder: number;
@@ -1065,8 +1054,7 @@ export function validateSourceDocsSemanticChunkIndexChunk(options: {
 
   return normalizedChunk;
 }
-
-export async function verifySourceDocsSemanticChunkIndexes(options: {
+async function verifySourceDocsSemanticChunkIndexes(options: {
   manifestDir: string;
   semanticChunkIndexes: SemanticChunkManifestIndex[];
   failures: string[];
@@ -1093,8 +1081,7 @@ export async function verifySourceDocsSemanticChunkIndexes(options: {
     }
   }
 }
-
-export function sourceDocsSemanticChunkOutputPaths(
+function sourceDocsSemanticChunkOutputPaths(
   generatedOutputs: unknown[],
   manifestDir: string
 ): Set<string> {
@@ -1118,8 +1105,7 @@ export function sourceDocsSemanticChunkOutputPaths(
 
   return paths;
 }
-
-export function validateSourceDocsPresetMetadata(preset: unknown, failures: string[]): void {
+function validateSourceDocsPresetMetadata(preset: unknown, failures: string[]): void {
   for (const failure of validateSourceDocsPresetContract(preset)) {
     failures.push(`malformed manifest: ${failure}`);
   }
@@ -1172,7 +1158,7 @@ export function validateSourceDocsPresetContract(preset: unknown): string[] {
 
       if (unsupportedPromptClaims.length > 0) {
         failures.push(
-          `preset.defaults.systemPrompt must not claim ${formatList(unsupportedPromptClaims)}`
+          `preset.defaults.systemPrompt must not claim ${formatAllowedOutputKinds(new Set(unsupportedPromptClaims))}`
         );
       }
     }
@@ -1217,8 +1203,7 @@ export function validateSourceDocsPresetContract(preset: unknown): string[] {
 
   return failures;
 }
-
-export function findUnsupportedPresetPromptClaims(prompt: string): string[] {
+function findUnsupportedPresetPromptClaims(prompt: string): string[] {
   const normalizedPrompt = prompt.toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
   const claims: string[] = [];
 
@@ -1240,24 +1225,14 @@ export function findUnsupportedPresetPromptClaims(prompt: string): string[] {
 
   return claims;
 }
-
-export function formatList(values: string[]): string {
-  if (values.length <= 1) {
-    return values[0] ?? '';
-  }
-
-  return `${values.slice(0, -1).join(', ')} or ${values[values.length - 1]}`;
-}
-
-export interface SourceFileEntry {
+interface SourceFileEntry {
   path: string;
   resolvedPath: string;
   byteSize: number;
   hash: string;
   format: string;
 }
-
-export function validateSourceFiles(options: {
+function validateSourceFiles(options: {
   sourceFiles: unknown[];
   sourcePath: unknown;
   sourceType: unknown;

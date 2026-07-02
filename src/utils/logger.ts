@@ -102,4 +102,4 @@ export class Logger {
 // CONVENIENCE EXPORTS
 // ============================================================================
 
-export const { debug, info, warn, error, setLevel } = Logger;
+export const { info, warn, error } = Logger;

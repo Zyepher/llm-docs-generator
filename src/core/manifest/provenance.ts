@@ -31,8 +31,7 @@ import {
   validateAllowedKeys,
 } from './field-validators.js';
 import { isDiscoveryReportKind, isManifestContractMode } from './predicates.js';
-
-export interface InputProvenanceEndpoint {
+interface InputProvenanceEndpoint {
   input?: string;
   configuredUrl?: string;
   configuredLocalPath?: string | null;
@@ -43,8 +42,7 @@ export interface InputProvenanceEndpoint {
   formatHint?: string;
   resolvedFormat?: string;
 }
-
-export interface InputProvenanceParserPlugin {
+interface InputProvenanceParserPlugin {
   manifestPath: string;
   resolvedManifestPath: string;
   manifestByteSize: number;
@@ -63,15 +61,13 @@ export interface InputProvenanceParserPlugin {
     directorySupport?: boolean;
   };
 }
-
-export interface InputProvenanceParser {
+interface InputProvenanceParser {
   name: string;
   version: string;
   format: string;
   plugin?: InputProvenanceParserPlugin;
 }
-
-export interface InputProvenanceReport {
+interface InputProvenanceReport {
   path: string;
   kind: string;
   schemaVersion: string;
@@ -293,24 +289,21 @@ export function buildInputProvenanceForManifest(
     },
   };
 }
-
-export function inputProvenanceBase(mode: ManifestContractMode): Omit<InputProvenance, 'inputKind'> {
+function inputProvenanceBase(mode: ManifestContractMode): Omit<InputProvenance, 'inputKind'> {
   return {
     schema: INPUT_PROVENANCE_SCHEMA,
     manifestMode: mode,
     artifactRole: MANIFEST_CONTRACT_BY_MODE[mode].artifactRole,
   };
 }
-
-export function inputProvenanceSdk(sdk: Record<string, unknown>): NonNullable<InputProvenance['sdk']> {
+function inputProvenanceSdk(sdk: Record<string, unknown>): NonNullable<InputProvenance['sdk']> {
   return {
     name: requiredStringField(sdk, 'name', 'input provenance sdk'),
     resolvedVersion: requiredStringField(sdk, 'resolvedVersion', 'input provenance sdk'),
     displayName: requiredStringField(sdk, 'displayName', 'input provenance sdk'),
   };
 }
-
-export function inputProvenanceParser(
+function inputProvenanceParser(
   parser: Record<string, unknown>,
   plugin?: InputProvenanceParserPlugin
 ): InputProvenanceParser {
@@ -321,8 +314,7 @@ export function inputProvenanceParser(
     ...(plugin === undefined ? {} : { plugin }),
   };
 }
-
-export function inputProvenanceParserPlugin(plugin: Record<string, unknown>): InputProvenanceParserPlugin {
+function inputProvenanceParserPlugin(plugin: Record<string, unknown>): InputProvenanceParserPlugin {
   const module = requiredObjectField(plugin, 'module', 'input provenance parser.plugin');
   const format = requiredObjectField(plugin, 'format', 'input provenance parser.plugin');
   const mediaTypes = optionalStringArrayField(
@@ -375,8 +367,7 @@ export function inputProvenanceParserPlugin(plugin: Record<string, unknown>): In
     },
   };
 }
-
-export function inputProvenanceFormatter(
+function inputProvenanceFormatter(
   formatter: Record<string, unknown>
 ): NonNullable<InputProvenance['formatter']> {
   return {
@@ -385,8 +376,7 @@ export function inputProvenanceFormatter(
     format: requiredStringField(formatter, 'format', 'input provenance formatter'),
   };
 }
-
-export function inputProvenanceGeneratedOutput(
+function inputProvenanceGeneratedOutput(
   manifest: Record<string, unknown>,
   kind: string,
   label: string
@@ -404,8 +394,7 @@ export function inputProvenanceGeneratedOutput(
     path: requiredStringField(reportOutput, 'path', label),
   };
 }
-
-export function buildDiscoveryInputProvenance(
+function buildDiscoveryInputProvenance(
   manifest: Record<string, unknown>,
   base: Omit<InputProvenance, 'inputKind'>
 ): InputProvenance {
@@ -521,8 +510,7 @@ export function buildDiscoveryInputProvenance(
 
   throw new Error('input provenance discovery.kind must be source, repo, or url');
 }
-
-export function inputProvenanceDiscoveryReport(discovery: Record<string, unknown>): InputProvenanceReport {
+function inputProvenanceDiscoveryReport(discovery: Record<string, unknown>): InputProvenanceReport {
   const discoveryKind = requiredStringField(discovery, 'kind', 'input provenance discovery');
 
   if (!isDiscoveryReportKind(discoveryKind)) {
@@ -577,8 +565,7 @@ export function validateRequiredInputProvenance(
 
   validateInputProvenance(provenance, expectedMode, manifest, failures);
 }
-
-export function validateInputProvenance(
+function validateInputProvenance(
   provenance: unknown,
   expectedMode: ManifestContractMode,
   manifest: Record<string, unknown>,
@@ -660,8 +647,7 @@ export function validateInputProvenance(
     );
   }
 }
-
-export function validateInputProvenanceAllowedShape(
+function validateInputProvenanceAllowedShape(
   actual: unknown,
   expected: unknown,
   label: string,
@@ -696,8 +682,7 @@ export function validateInputProvenanceAllowedShape(
     }
   }
 }
-
-export function inputProvenanceValuesEqual(actual: unknown, expected: unknown): boolean {
+function inputProvenanceValuesEqual(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(expected)) {
     return (
       Array.isArray(actual) &&

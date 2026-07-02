@@ -98,8 +98,7 @@ export function validateRefreshProvenance(
     );
   }
 }
-
-export function isRefreshIsoDatetimeString(value: unknown): value is string {
+function isRefreshIsoDatetimeString(value: unknown): value is string {
   if (typeof value !== 'string' || !REFRESH_PROVENANCE_ISO_DATETIME_PATTERN.test(value)) {
     return false;
   }

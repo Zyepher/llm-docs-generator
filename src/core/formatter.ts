@@ -25,6 +25,7 @@ import {
   type Operation,
   type SpecData,
 } from './models.js';
+import { warn } from '../utils/logger.js';
 
 // ============================================================================
 // CONSTANTS (Compile once, reuse)
@@ -154,7 +155,7 @@ export class LLMFormatter {
     // Log uncategorized operations (if any remain in map)
     if (operationMap.size > 0) {
       const uncategorized = Array.from(operationMap.keys());
-      console.warn(
+      warn(
         `Warning: ${uncategorized.length} uncategorized operations: ${uncategorized.join(', ')}`
       );
     }
@@ -231,10 +232,7 @@ export class LLMFormatter {
     // If operationNum provided, use hierarchical numbering (H3)
     if (operationNum !== undefined) {
       // Hierarchical: categoryNum.operationNum
-      parts.push(
-        `### ${categoryOrSectionNum}.${operationNum}. ${operation.title}`,
-        DOUBLE_NEWLINE
-      );
+      parts.push(`### ${categoryOrSectionNum}.${operationNum}. ${operation.title}`, DOUBLE_NEWLINE);
     } else {
       // Flat: sectionNum only (for standalone modules)
       parts.push(`# ${categoryOrSectionNum}. ${operation.title}`, DOUBLE_NEWLINE);
@@ -255,9 +253,7 @@ export class LLMFormatter {
     for (const example of operation.examples) {
       if (operationNum !== undefined) {
         // Hierarchical numbering
-        parts.push(
-          this.formatExample(example, categoryOrSectionNum, operationNum, exampleNum)
-        );
+        parts.push(this.formatExample(example, categoryOrSectionNum, operationNum, exampleNum));
       } else {
         // Flat numbering
         parts.push(this.formatExample(example, categoryOrSectionNum, exampleNum));
@@ -304,7 +300,17 @@ export class LLMFormatter {
       // Data Source (SQL)
       if (example.dataSql.length > 0) {
         const cleanSql = this.cleanMarkdownFences(example.dataSql);
-        parts.push(NEWLINE, '// Data Source', NEWLINE, '/*', NEWLINE, cleanSql, NEWLINE, '*/', NEWLINE);
+        parts.push(
+          NEWLINE,
+          '// Data Source',
+          NEWLINE,
+          '/*',
+          NEWLINE,
+          cleanSql,
+          NEWLINE,
+          '*/',
+          NEWLINE
+        );
       }
 
       // Response (JSON)
@@ -385,7 +391,7 @@ export class LLMFormatter {
     const generatedDate = now.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
-      day: 'numeric'
+      day: 'numeric',
     });
 
     const headerParts: string[] = [];
@@ -399,10 +405,7 @@ export class LLMFormatter {
       `<!-- SDK: ${this.sdkName}, Version: ${this.version}, Generated: ${generatedDate} -->`,
       DOUBLE_NEWLINE
     );
-    headerParts.push(
-      `# ${this.versionConfig.displayName} Reference`,
-      DOUBLE_NEWLINE
-    );
+    headerParts.push(`# ${this.versionConfig.displayName} Reference`, DOUBLE_NEWLINE);
     headerParts.push(
       `Complete reference for ${this.versionConfig.displayName} covering all modules.`,
       DOUBLE_NEWLINE

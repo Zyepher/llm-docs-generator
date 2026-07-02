@@ -7,6 +7,7 @@
  */
 
 import type { DocNode } from '../core/models.js';
+import { errorMessage } from '../utils/guards.js';
 
 /**
  * Format types supported by the generator
@@ -160,7 +161,7 @@ export abstract class BaseParser implements Parser {
       return { valid: true, errors, warnings };
     } catch (error) {
       errors.push({
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       });
       return { valid: false, errors, warnings };
     }

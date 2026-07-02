@@ -49,8 +49,7 @@ export function validateRequiredManifestContract(
 
   validateManifestContract(contract, expectedMode, failures);
 }
-
-export function validateManifestContract(
+function validateManifestContract(
   contract: unknown,
   expectedMode: ManifestContractMode,
   failures: string[]
@@ -117,8 +116,7 @@ export function validateManifestContract(
     failures
   );
 }
-
-export function validateManifestContractStringArray(
+function validateManifestContractStringArray(
   value: unknown,
   expected: readonly string[],
   key: 'cliGuarantees' | 'agentResponsibilities' | 'unsupportedAutomation',

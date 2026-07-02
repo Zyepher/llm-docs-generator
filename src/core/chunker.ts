@@ -7,7 +7,7 @@
 
 import { isRecord } from '../utils/guards.js';
 import { sha256Hex } from '../utils/hash.js';
-import { DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN, estimateTokenCount } from '../utils/text-metrics.js';
+import { estimateTokenCount } from '../utils/text-metrics.js';
 import { ContentBlockType, type ContentBlock, type DocNode } from './models.js';
 
 const DOUBLE_NEWLINE = '\n\n';
@@ -71,10 +71,6 @@ export interface ChunkDocNodeOptions {
    * with an explicit warning.
    */
   maxCharacters?: number;
-  /**
-   * Deterministic token estimate divisor. Defaults to 4 characters per token.
-   */
-  estimatedCharactersPerToken?: number;
 }
 
 export interface ChunkDocNodeResult {
@@ -141,11 +137,6 @@ export function chunkDocNode(root: DocNode, options: ChunkDocNodeOptions = {}): 
     options.maxCharacters,
     DEFAULT_CHUNK_MAX_CHARACTERS
   );
-  const estimatedCharactersPerToken = normalizePositiveInteger(
-    options.estimatedCharactersPerToken,
-    DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN
-  );
-
   const warnings: SemanticChunkWarning[] = [];
   const rootNode = normalizeNode(root);
 
@@ -232,7 +223,6 @@ export function chunkDocNode(root: DocNode, options: ChunkDocNodeOptions = {}): 
       draft,
       index + 1,
       maxCharacters,
-      estimatedCharactersPerToken,
       splitIndex,
       chunkSplitCounts.get(key) ?? 1
     );
@@ -569,7 +559,6 @@ function finalizeChunk(
   draft: ChunkDraft,
   ordinal: number,
   maxCharacters: number,
-  estimatedCharactersPerToken: number,
   splitIndex: number,
   splitCount: number
 ): SemanticChunk {
@@ -597,7 +586,7 @@ function finalizeChunk(
     content: draft.content,
     contentHash,
     characterCount: draft.content.length,
-    estimatedTokenCount: estimateTokenCount(draft.content, estimatedCharactersPerToken),
+    estimatedTokenCount: estimateTokenCount(draft.content),
     warnings,
     metadata,
   };

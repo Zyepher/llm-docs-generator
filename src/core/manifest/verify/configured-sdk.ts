@@ -160,8 +160,7 @@ export async function verifyConfiguredSdkManifest(
 
   return runFileChecks(manifestPath, failures, fileChecks);
 }
-
-export function validateConfiguredSdkMetadata(sdk: Record<string, unknown>, failures: string[]): void {
+function validateConfiguredSdkMetadata(sdk: Record<string, unknown>, failures: string[]): void {
   if (!isNonEmptyString(sdk.name)) {
     failures.push('malformed manifest: sdk.name must be a non-empty string');
   }
@@ -174,8 +173,7 @@ export function validateConfiguredSdkMetadata(sdk: Record<string, unknown>, fail
     failures.push('malformed manifest: sdk.displayName must be a non-empty string');
   }
 }
-
-export function validateConfiguredSdkParserMetadata(
+function validateConfiguredSdkParserMetadata(
   parser: Record<string, unknown>,
   failures: string[]
 ): void {
@@ -193,8 +191,7 @@ export function validateConfiguredSdkParserMetadata(
     failures.push(`malformed manifest: parser.format must be ${CONFIGURED_SDK_PARSER_FORMAT}`);
   }
 }
-
-export function validateConfiguredSdkFormatterMetadata(
+function validateConfiguredSdkFormatterMetadata(
   formatter: Record<string, unknown>,
   failures: string[]
 ): void {

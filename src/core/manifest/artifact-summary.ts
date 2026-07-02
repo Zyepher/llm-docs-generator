@@ -2,10 +2,13 @@
  * Artifact summary types, builders, content-free hashers, and validators.
  */
 
-import { createHash } from 'node:crypto';
-
-import { errorMessage, isNonEmptyString, isNonNegativeInteger, isObjectRecord } from '../../utils/guards.js';
-import { HASH_PREFIX, isSha256Hash } from '../../utils/hash.js';
+import {
+  errorMessage,
+  isNonEmptyString,
+  isNonNegativeInteger,
+  isObjectRecord,
+} from '../../utils/guards.js';
+import { isSha256Hash, sha256Prefixed } from '../../utils/hash.js';
 import { compareStringsByCodeUnit } from '../../utils/sort.js';
 import {
   ARTIFACT_SUMMARY_FILE_SECTION_KEYS,
@@ -34,8 +37,7 @@ import {
 import { isManifestContractMode, isStringArray } from './predicates.js';
 
 const ARTIFACT_SUMMARY_HASH_SEED = 'llm-docs-generator:artifact-summary:v1\n';
-
-export interface ArtifactFileSummary {
+interface ArtifactFileSummary {
   count: number;
   kinds: string[];
   totalByteSize: number;
@@ -43,8 +45,7 @@ export interface ArtifactFileSummary {
   totalEstimatedTokenCount?: number;
   aggregateHash: string;
 }
-
-export interface ArtifactSourceFileSummary {
+interface ArtifactSourceFileSummary {
   count: number;
   formats?: string[];
   totalByteSize: number;
@@ -52,8 +53,7 @@ export interface ArtifactSourceFileSummary {
   totalEstimatedTokenCount?: number;
   aggregateHash: string;
 }
-
-export interface ArtifactIndexSummary {
+interface ArtifactIndexSummary {
   semanticChunkIndexCount?: number;
   semanticChunkCount?: number;
   candidateEvidenceCandidateCount?: number;
@@ -107,8 +107,7 @@ export function buildArtifactSummaryForManifest(
 
   return summary;
 }
-
-export function summarizeGeneratedArtifactFiles(files: unknown[]): ArtifactFileSummary {
+function summarizeGeneratedArtifactFiles(files: unknown[]): ArtifactFileSummary {
   const entries = files.map((file, index) =>
     artifactSummaryFileMetadata(file, `artifact summary generatedOutputs[${index}]`, 'kind')
   );
@@ -120,8 +119,7 @@ export function summarizeGeneratedArtifactFiles(files: unknown[]): ArtifactFileS
     ...summarizeArtifactFileTotals(entries, 'generatedOutputs'),
   };
 }
-
-export function summarizeSourceArtifactFiles(files: unknown[]): ArtifactSourceFileSummary {
+function summarizeSourceArtifactFiles(files: unknown[]): ArtifactSourceFileSummary {
   const entries = files.map((file, index) =>
     artifactSummaryFileMetadata(file, `artifact summary sourceFiles[${index}]`, 'format')
   );
@@ -139,8 +137,7 @@ export function summarizeSourceArtifactFiles(files: unknown[]): ArtifactSourceFi
 
   return summary;
 }
-
-export interface ArtifactSummaryFileMetadata {
+interface ArtifactSummaryFileMetadata {
   path?: string;
   resolvedPath?: string;
   kind?: string;
@@ -150,8 +147,7 @@ export interface ArtifactSummaryFileMetadata {
   lineCount?: number;
   estimatedTokenCount?: number;
 }
-
-export function artifactSummaryFileMetadata(
+function artifactSummaryFileMetadata(
   file: unknown,
   label: string,
   classificationField: 'kind' | 'format'
@@ -205,8 +201,7 @@ export function artifactSummaryFileMetadata(
 
   return metadata;
 }
-
-export function summarizeArtifactFileTotals(
+function summarizeArtifactFileTotals(
   entries: ArtifactSummaryFileMetadata[],
   section: 'generatedOutputs' | 'sourceFiles'
 ): Omit<ArtifactFileSummary, 'count' | 'kinds'> {
@@ -224,27 +219,16 @@ export function summarizeArtifactFileTotals(
     aggregateHash: hashArtifactSummaryFileMetadata(section, entries),
   };
 }
-
-export function hashArtifactSummaryFileMetadata(
+function hashArtifactSummaryFileMetadata(
   section: 'generatedOutputs' | 'sourceFiles',
   entries: ArtifactSummaryFileMetadata[]
 ): string {
-  const hash = createHash('sha256');
-
-  hash.update(ARTIFACT_SUMMARY_HASH_SEED);
-  hash.update(section);
-  hash.update('\n');
-  hash.update(JSON.stringify(entries));
-  hash.update('\n');
-
-  return `${HASH_PREFIX}${hash.digest('hex')}`;
+  return sha256Prefixed(`${ARTIFACT_SUMMARY_HASH_SEED}${section}\n${JSON.stringify(entries)}\n`);
 }
-
-export function uniqueSortedStrings(values: string[]): string[] {
+function uniqueSortedStrings(values: string[]): string[] {
   return [...new Set(values)].sort(compareStringsByCodeUnit);
 }
-
-export function artifactSummarySourceFiles(
+function artifactSummarySourceFiles(
   mode: ManifestContractMode,
   manifest: Record<string, unknown>
 ): unknown[] | undefined {
@@ -272,8 +256,7 @@ export function artifactSummarySourceFiles(
 
   return undefined;
 }
-
-export function artifactSummaryWarningCount(
+function artifactSummaryWarningCount(
   mode: ManifestContractMode,
   manifest: Record<string, unknown>
 ): number {
@@ -309,8 +292,7 @@ export function artifactSummaryWarningCount(
 
   return requiredNonNegativeIntegerField(summary, 'warningCount', 'artifact summary summary');
 }
-
-export function artifactSummaryIndexes(
+function artifactSummaryIndexes(
   mode: ManifestContractMode,
   manifest: Record<string, unknown>
 ): ArtifactIndexSummary | undefined {
@@ -414,8 +396,7 @@ export function validateRequiredArtifactSummary(
 
   validateArtifactSummary(summary, expectedMode, manifest, failures);
 }
-
-export function validateArtifactSummary(
+function validateArtifactSummary(
   summary: unknown,
   expectedMode: ManifestContractMode,
   manifest: Record<string, unknown>,
@@ -487,8 +468,7 @@ export function validateArtifactSummary(
     validateArtifactSummaryIndexes(summary.indexes, expected.indexes, failures);
   }
 }
-
-export function validateGeneratedArtifactSummarySection(
+function validateGeneratedArtifactSummarySection(
   value: unknown,
   expected: ArtifactFileSummary,
   failures: string[]
@@ -561,8 +541,7 @@ export function validateGeneratedArtifactSummarySection(
     );
   }
 }
-
-export function validateSourceArtifactSummarySection(
+function validateSourceArtifactSummarySection(
   value: unknown,
   expected: ArtifactSourceFileSummary,
   failures: string[]
@@ -635,8 +614,7 @@ export function validateSourceArtifactSummarySection(
     );
   }
 }
-
-export function validateWarningArtifactSummarySection(
+function validateWarningArtifactSummarySection(
   value: unknown,
   expected: ArtifactSummary['warnings'],
   failures: string[]
@@ -657,8 +635,7 @@ export function validateWarningArtifactSummarySection(
     );
   }
 }
-
-export function validateArtifactSummaryIndexes(
+function validateArtifactSummaryIndexes(
   value: unknown,
   expected: ArtifactIndexSummary,
   failures: string[]
@@ -680,8 +657,7 @@ export function validateArtifactSummaryIndexes(
     failures.push('malformed manifest: artifactSummary.indexes must match manifest index counters');
   }
 }
-
-export function validateArtifactSummaryNonNegativeInteger(
+function validateArtifactSummaryNonNegativeInteger(
   value: unknown,
   label: string,
   failures: string[]
@@ -690,8 +666,7 @@ export function validateArtifactSummaryNonNegativeInteger(
     failures.push(`malformed manifest: ${label} must be a non-negative integer`);
   }
 }
-
-export function validateArtifactSummaryOptionalNonNegativeInteger(
+function validateArtifactSummaryOptionalNonNegativeInteger(
   value: Record<string, unknown>,
   key: string,
   label: string,
@@ -701,8 +676,7 @@ export function validateArtifactSummaryOptionalNonNegativeInteger(
     failures.push(`malformed manifest: ${label} must be a non-negative integer when present`);
   }
 }
-
-export function validateArtifactSummaryStringArray(
+function validateArtifactSummaryStringArray(
   value: unknown,
   label: string,
   failures: string[]
@@ -711,8 +685,7 @@ export function validateArtifactSummaryStringArray(
     failures.push(`malformed manifest: ${label} must be a string array`);
   }
 }
-
-export function validateArtifactSummaryOptionalStringArray(
+function validateArtifactSummaryOptionalStringArray(
   value: Record<string, unknown>,
   key: string,
   label: string,
@@ -722,8 +695,7 @@ export function validateArtifactSummaryOptionalStringArray(
     failures.push(`malformed manifest: ${label} must be a string array when present`);
   }
 }
-
-export function artifactIndexSummariesEqual(
+function artifactIndexSummariesEqual(
   actual: Record<string, unknown>,
   expected: ArtifactIndexSummary
 ): boolean {

@@ -221,17 +221,3 @@ function inferLanguage(code: string): string {
   // Default to generic code
   return 'code';
 }
-
-/**
- * Convert DocNode back to OpenRef SpecData (for backward compatibility)
- *
- * This is mainly for testing and validation purposes.
- *
- * @param root - Root DocNode
- * @returns OpenRef SpecData
- */
-export function docNodeToOpenRef(_root: DocNode): SpecData {
-  // Note: This is a lossy conversion since DocNode is more generic
-  // Only implement if needed for backward compatibility tests
-  throw new Error('docNodeToOpenRef not yet implemented');
-}

@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { isObjectRecord, errorMessage } from '../utils/guards.js';
-import { HASH_PREFIX, sha256Hex, isUnprefixedSha256Hash } from '../utils/hash.js';
+import { sha256Hex, sha256Prefixed, isUnprefixedSha256Hash } from '../utils/hash.js';
 import { estimateTokenCount } from '../utils/text-metrics.js';
 
 const SEMANTIC_CHUNK_INDEX_HASH_CONTEXT =
@@ -64,21 +63,15 @@ export function semanticChunkManifestIndexesEqual(
   left: SemanticChunkManifestIndex,
   right: SemanticChunkManifestIndex
 ): boolean {
-  return (
-    JSON.stringify(canonicalSemanticChunkManifestIndex(left)) ===
-    JSON.stringify(canonicalSemanticChunkManifestIndex(right))
-  );
+  return left.aggregateHash === right.aggregateHash;
 }
 
 export function hashSemanticChunkManifestIndex(
   index: SemanticChunkManifestIndexWithoutHash
 ): string {
-  const hash = createHash('sha256');
-  hash.update(`${SEMANTIC_CHUNK_INDEX_HASH_CONTEXT}\n`);
-  hash.update(JSON.stringify(canonicalSemanticChunkManifestIndexForHash(index)));
-  hash.update('\n');
-
-  return `${HASH_PREFIX}${hash.digest('hex')}`;
+  return sha256Prefixed(
+    `${SEMANTIC_CHUNK_INDEX_HASH_CONTEXT}\n${JSON.stringify(canonicalSemanticChunkManifestIndexForHash(index))}\n`
+  );
 }
 
 function canonicalSemanticChunkManifestIndexForHash(
@@ -112,19 +105,6 @@ function canonicalSemanticChunkManifestIndexForHash(
 
       return canonicalChunk;
     }),
-  };
-}
-
-function canonicalSemanticChunkManifestIndex(
-  index: SemanticChunkManifestIndex
-): SemanticChunkManifestIndex {
-  return {
-    path: index.path,
-    format: index.format,
-    chunkCount: index.chunkCount,
-    aggregateHash: index.aggregateHash,
-    warningCount: index.warningCount,
-    chunks: canonicalSemanticChunkManifestIndexForHash(index).chunks,
   };
 }
 
@@ -204,9 +184,7 @@ function parseSemanticChunkJsonlLine(
 
   const actualEstimatedTokenCount = estimateTokenCount(content);
   if (estimatedTokenCount !== actualEstimatedTokenCount) {
-    throw new Error(
-      `${outputPath}: line ${lineNumber} estimatedTokenCount does not match content`
-    );
+    throw new Error(`${outputPath}: line ${lineNumber} estimatedTokenCount does not match content`);
   }
 
   return {

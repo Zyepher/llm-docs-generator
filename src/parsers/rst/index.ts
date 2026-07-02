@@ -117,6 +117,5 @@ export class RstFormatParser extends BaseParser {
 
 export const rstParser = new RstFormatParser();
 
-export { RstParser, parseRstFile } from './parser.js';
-export { mergeRstDocuments, rstToDocNode } from './adapter.js';
+export { parseRstFile } from './parser.js';
 export type { RstDocument } from './parser.js';

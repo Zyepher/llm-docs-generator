@@ -160,8 +160,3 @@ export class MarkdownFormatParser extends BaseParser {
 
 // Export the parser instance
 export const markdownParser = new MarkdownFormatParser();
-
-// Re-export components
-export { MarkdownParser } from './parser.js';
-export { markdownToDocNode, convertSection, convertContent } from './adapter.js';
-export type { MarkdownDocument, MarkdownSection, MarkdownContent } from './parser.js';

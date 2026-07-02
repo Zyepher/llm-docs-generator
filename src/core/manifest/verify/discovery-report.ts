@@ -259,8 +259,7 @@ export async function verifyDiscoveryReportManifest(
     failures,
   };
 }
-
-export async function verifyDiscoveryReportFile(options: {
+async function verifyDiscoveryReportFile(options: {
   manifestDir: string;
   reportPath: string;
   expected: {
@@ -324,8 +323,7 @@ export async function verifyDiscoveryReportFile(options: {
     });
   }
 }
-
-export function validateDiscoveryReportKindShape(
+function validateDiscoveryReportKindShape(
   report: Record<string, unknown>,
   kind: DiscoveryReportKind,
   failures: string[]
@@ -358,8 +356,7 @@ export function validateDiscoveryReportKindShape(
     failures.push('discovery report: url discovery must include crawlPolicy object');
   }
 }
-
-export function validateDiscoveryReportCounts(
+function validateDiscoveryReportCounts(
   report: Record<string, unknown>,
   expected: {
     kind: DiscoveryReportKind;
@@ -404,8 +401,7 @@ export function validateDiscoveryReportCounts(
     );
   }
 }
-
-export function validateDiscoveryCandidateEvidenceIndex(options: {
+function validateDiscoveryCandidateEvidenceIndex(options: {
   index: unknown;
   discoveryKind: DiscoveryReportKind;
   failures: string[];
@@ -499,8 +495,7 @@ export function validateDiscoveryCandidateEvidenceIndex(options: {
     candidates: candidateEntries,
   };
 }
-
-export function validateDiscoveryCandidateEvidenceIndexContext(options: {
+function validateDiscoveryCandidateEvidenceIndexContext(options: {
   context: unknown;
   discoveryKind: DiscoveryReportKind;
   failures: string[];
@@ -529,8 +524,7 @@ export function validateDiscoveryCandidateEvidenceIndexContext(options: {
 
   return validateDiscoveryWebsiteCandidateEvidenceContext(context, failures);
 }
-
-export function validateDiscoverySourceCandidateEvidenceContext(
+function validateDiscoverySourceCandidateEvidenceContext(
   context: Record<string, unknown>,
   failures: string[]
 ): DiscoveryCandidateEvidenceContext | undefined {
@@ -567,8 +561,7 @@ export function validateDiscoverySourceCandidateEvidenceContext(
     },
   };
 }
-
-export function validateDiscoveryRepoCandidateEvidenceContext(
+function validateDiscoveryRepoCandidateEvidenceContext(
   context: Record<string, unknown>,
   failures: string[]
 ): DiscoveryCandidateEvidenceContext | undefined {
@@ -646,8 +639,7 @@ export function validateDiscoveryRepoCandidateEvidenceContext(
     },
   };
 }
-
-export function validateDiscoveryWebsiteCandidateEvidenceContext(
+function validateDiscoveryWebsiteCandidateEvidenceContext(
   context: Record<string, unknown>,
   failures: string[]
 ): DiscoveryCandidateEvidenceContext | undefined {
@@ -739,8 +731,7 @@ export function validateDiscoveryWebsiteCandidateEvidenceContext(
     resourceFreshness: resourceFreshnessEntries,
   };
 }
-
-export function validateDiscoveryWebsiteResourceFreshnessIndex(
+function validateDiscoveryWebsiteResourceFreshnessIndex(
   value: unknown,
   label: string,
   failures: string[]
@@ -815,8 +806,7 @@ export function validateDiscoveryWebsiteResourceFreshnessIndex(
 
   return entries;
 }
-
-export function validateDiscoveryCandidateEvidenceIndexCandidate(options: {
+function validateDiscoveryCandidateEvidenceIndexCandidate(options: {
   candidate: unknown;
   candidateIndex: number;
   discoveryKind: DiscoveryReportKind;
@@ -868,8 +858,7 @@ export function validateDiscoveryCandidateEvidenceIndexCandidate(options: {
     failures,
   });
 }
-
-export function validateDiscoveryPathCandidateEvidenceIndexCandidate(options: {
+function validateDiscoveryPathCandidateEvidenceIndexCandidate(options: {
   candidate: Record<string, unknown>;
   label: string;
   order: unknown;
@@ -938,8 +927,7 @@ export function validateDiscoveryPathCandidateEvidenceIndexCandidate(options: {
 
   return entry;
 }
-
-export function validateDiscoveryUrlCandidateEvidenceIndexCandidate(options: {
+function validateDiscoveryUrlCandidateEvidenceIndexCandidate(options: {
   candidate: Record<string, unknown>;
   label: string;
   order: unknown;
@@ -990,8 +978,7 @@ export function validateDiscoveryUrlCandidateEvidenceIndexCandidate(options: {
 
   return entry;
 }
-
-export function validateDiscoveryCandidateEvidenceIndexEvidence(
+function validateDiscoveryCandidateEvidenceIndexEvidence(
   evidence: unknown,
   label: string,
   failures: string[]
@@ -1044,8 +1031,7 @@ export function validateDiscoveryCandidateEvidenceIndexEvidence(
 
   return entry;
 }
-
-export function validateOptionalCandidateSourceResources(
+function validateOptionalCandidateSourceResources(
   value: unknown,
   label: string,
   failures: string[]
@@ -1096,8 +1082,7 @@ export function validateOptionalCandidateSourceResources(
 
   return resources;
 }
-
-export function verifyDiscoveryCandidateEvidenceIndexAgainstReport(options: {
+function verifyDiscoveryCandidateEvidenceIndexAgainstReport(options: {
   discoveryKind: DiscoveryReportKind;
   report: Record<string, unknown>;
   manifestIndex: DiscoveryCandidateEvidenceIndex;

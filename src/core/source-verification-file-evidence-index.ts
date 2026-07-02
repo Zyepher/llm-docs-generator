@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto';
 import { isObjectRecord, isNonEmptyString, isNonNegativeInteger } from '../utils/guards.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
-import { HASH_PREFIX, isSha256Hash, isUnprefixedSha256Hash } from '../utils/hash.js';
+import { isSha256Hash, isUnprefixedSha256Hash, sha256Prefixed } from '../utils/hash.js';
 
 const HASH_SEED = 'llm-docs-generator:source-verification-file-evidence-index:v1\n';
 const INDEX_KEYS = new Set([
@@ -325,18 +324,13 @@ export function sourceVerificationFileEvidenceIndexesEqual(
   left: SourceVerificationFileEvidenceIndex,
   right: SourceVerificationFileEvidenceIndex
 ): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return left.aggregateHash === right.aggregateHash;
 }
 
 export function hashSourceVerificationFileEvidenceIndex(
   index: SourceVerificationFileEvidenceIndexHashData
 ): string {
-  const hash = createHash('sha256');
-  hash.update(HASH_SEED);
-  hash.update(JSON.stringify(index));
-  hash.update('\n');
-
-  return `${HASH_PREFIX}${hash.digest('hex')}`;
+  return sha256Prefixed(`${HASH_SEED}${JSON.stringify(index)}\n`);
 }
 
 function projectSourceReportFile(

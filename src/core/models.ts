@@ -140,60 +140,6 @@ export function createContentBlock(
   return block;
 }
 
-/**
- * Type guard for DocNode
- */
-export function isDocNode(obj: unknown): obj is DocNode {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    'type' in obj &&
-    'id' in obj &&
-    'title' in obj &&
-    'children' in obj &&
-    Array.isArray((obj as DocNode).children)
-  );
-}
-
-/**
- * Traverse DocNode tree depth-first
- * Performance: O(n) where n = total nodes
- */
-export function traverseDocNode(
-  node: DocNode,
-  callback: (node: DocNode, depth: number) => void,
-  depth = 0
-): void {
-  callback(node, depth);
-  for (const child of node.children) {
-    traverseDocNode(child, callback, depth + 1);
-  }
-}
-
-/**
- * Find all nodes of a specific type
- * Performance: O(n) where n = total nodes
- */
-export function findNodesByType(root: DocNode, type: DocNodeType): DocNode[] {
-  const results: DocNode[] = [];
-  traverseDocNode(root, (node) => {
-    if (node.type === type) {
-      results.push(node);
-    }
-  });
-  return results;
-}
-
-/**
- * Count total nodes in tree
- * Performance: O(n)
- */
-export function countNodes(root: DocNode): number {
-  let count = 0;
-  traverseDocNode(root, () => count++);
-  return count;
-}
-
 // ============================================================================
 // LEGACY OPENREF MODELS (for backward compatibility)
 // ============================================================================
@@ -220,13 +166,6 @@ export const ExampleSchema = z.object({
 
 export type Example = z.infer<typeof ExampleSchema>;
 
-/**
- * Type guard for Example (O(1) check without full validation)
- */
-export function isExample(obj: unknown): obj is Example {
-  return typeof obj === 'object' && obj !== null && 'id' in obj && 'name' in obj && 'code' in obj;
-}
-
 // ============================================================================
 // OPERATION SCHEMA
 // ============================================================================
@@ -248,31 +187,10 @@ export const OperationSchema = z.object({
 export type Operation = z.infer<typeof OperationSchema>;
 
 /**
- * Type guard for Operation (O(1) check without full validation)
- */
-export function isOperation(obj: unknown): obj is Operation {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    'id' in obj &&
-    'title' in obj &&
-    'examples' in obj &&
-    Array.isArray((obj as Operation).examples)
-  );
-}
-
-/**
  * Get spotlight examples efficiently (O(n) single pass)
  */
 export function getSpotlightExamples(operation: Operation): Example[] {
   return operation.examples.filter((ex) => ex.isSpotlight);
-}
-
-/**
- * Count examples efficiently (O(1) array length access)
- */
-export function getExampleCount(operation: Operation): number {
-  return operation.examples.length;
 }
 
 // ============================================================================

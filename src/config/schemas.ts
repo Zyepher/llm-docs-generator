@@ -63,8 +63,6 @@ export const SDKsConfigSchema = z.object({
   sdks: z.record(z.string(), SDKConfigSchema),
 });
 
-export type SDKsConfig = z.infer<typeof SDKsConfigSchema>;
-
 // ============================================================================
 // CATEGORY CONFIGURATION SCHEMAS
 // ============================================================================
@@ -89,8 +87,6 @@ export const CategoriesConfigSchema = z.object({
   categories: z.record(z.string(), CategoryConfigSchema),
 });
 
-export type CategoriesConfig = z.infer<typeof CategoriesConfigSchema>;
-
 // ============================================================================
 // SOURCE GENERATION PRESET SCHEMAS
 // ============================================================================
@@ -102,8 +98,6 @@ export const PresetOutputConfigSchema = z
     formats: z.array(z.string()).optional(),
   })
   .strict();
-
-export type PresetOutputConfig = z.infer<typeof PresetOutputConfigSchema>;
 
 export const PresetConfigSchema = z
   .object({
@@ -118,47 +112,3 @@ export const PresetConfigSchema = z
   .strict();
 
 export type PresetConfig = z.infer<typeof PresetConfigSchema>;
-
-// ============================================================================
-// VALIDATION HELPERS
-// ============================================================================
-
-/**
- * Validate SDK configuration without throwing
- * Performance: O(1) for structure validation
- */
-export function validateSDKConfig(data: unknown): {
-  success: boolean;
-  data?: SDKConfig;
-  error?: string;
-} {
-  try {
-    const result = SDKConfigSchema.parse(data);
-    return { success: true, data: result };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown validation error',
-    };
-  }
-}
-
-/**
- * Validate category configuration without throwing
- * Performance: O(1) for structure validation
- */
-export function validateCategoryConfig(data: unknown): {
-  success: boolean;
-  data?: CategoryConfig;
-  error?: string;
-} {
-  try {
-    const result = CategoryConfigSchema.parse(data);
-    return { success: true, data: result };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown validation error',
-    };
-  }
-}
