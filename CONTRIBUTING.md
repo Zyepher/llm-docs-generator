@@ -31,7 +31,7 @@ The most valuable contribution is improving `config/known-sources.json`. Despite
   "id": "unique-project-id",
   "name": "Human Readable Project Name",
   "repository": "https://github.com/org/repo",
-  "format": "markdown|openref|restructuredtext",
+  "format": "openref|markdown|mdx|openapi|rst|html",
   "path": "path/to/docs",
   "pattern": "**/*.md",
   "description": "Brief description of the documentation",

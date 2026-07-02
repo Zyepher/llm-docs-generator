@@ -52,7 +52,7 @@ llm-docs discover --url https://example.com/docs --output-dir ./reports/site-doc
 
 - Local discovery inspects only the provided local file or directory.
 - Repo discovery uses an explicit repo URL or local git repo plus optional repo-relative `--scope`. It produces evidence for agent review and does not decide which docs path is authoritative.
-- URL discovery fetches only the explicit HTTP(S) URL, same-origin root `/llms.txt`, and same-origin root `/sitemap.xml`. It does not fetch extracted candidate links, render JavaScript, or crawl arbitrary paths.
+- URL discovery fetches only the explicit HTTP(S) URL, same-origin root `/llms.txt`, and same-origin root `/sitemap.xml`. It does not fetch extracted candidate links, render JavaScript, or crawl arbitrary paths. By default it refuses private, link-local, and cloud-metadata IP targets (SSRF guard); `--allow-private-hosts` opts out for intentional private-network inspection.
 - Discovery reports factual evidence, warnings, skipped items, and deterministic ordering. The agent must review the report before selecting a source.
 - Do not describe candidate order as trust, authority, source truth, freshness, or task-fit proof.
 - Do not add or infer candidate scores; if a compatibility report already contains one, treat it as non-authoritative readability metadata only.
@@ -129,11 +129,10 @@ Agent: If `./docs` is still the selected source, run:
 
 - Use `source-truth inspect` or `source-truth generate` only when the user asks for implementation-source evidence and the installed CLI reports those modes.
 - Use configured SDK generation only for supported configured SDKs.
-- Treat general `generate --source`, refresh, source-code verification of official docs, broad crawling, and `agent install codex` as unsupported unless `capabilities --json` reports them implemented.
+- The current CLI implements local/repo/URL `discover`, `generate --source` (with optional `--chunks jsonl` semantic chunk export), the `source-truth` commands, `refresh` for supported explicit local manifests, and `verify`. Treat broad source-code verification of official docs, broad crawling, and `agent install codex` as unsupported. When any capability is uncertain, trust `capabilities --json` as the authoritative contract.
 - Use `agent doctor` only as read-only diagnostics when `capabilities --json`
   reports it as implemented; it does not install skills, write user config,
-  mutate host skill directories, or prove host registration unless a future
-  explicit check reports that fact directly.
+  mutate host skill directories, or prove host registration unless a future explicit check reports that fact directly.
 
 ## Reporting Back
 

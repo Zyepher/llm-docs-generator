@@ -66,7 +66,7 @@ agent-docs/tailwind-v3/
     └── tailwind-v3-docs-full-llms.txt  # the whole v3 reference, one clean file your agent reads
 ```
 
-Your agent also drops a small `llm-docs/index.md` of its own next to it: a quick map of the pack's main sections, so next session it scans the index first instead of reloading the whole file. (That index is the agent's nav aid, not part of the verified pack.)
+Your agent also drops a small `llm-docs/index.md` of its own next to it: a quick map of the pack's main sections, so next session it scans the index first instead of reloading the whole file. (That index is the agent's nav aid, not part of the verified pack, and regenerating or refreshing the pack preserves it: the tool only deletes its own outputs.)
 
 The content is the real v3 documentation, including the exact forms v4 changed:
 
@@ -115,7 +115,7 @@ That is the general path, and it works for almost any library with real docs: yo
 
 - **A Supabase client SDK? Even simpler.** If you use one (JavaScript/TypeScript, Swift, Kotlin, Dart/Flutter, Python, C#), skip the source hunting: it's a single built-in command. *(`llm-docs generate --sdk javascript --sdk-version v2 --output-dir ./agent-docs`)* Pass `--output-dir`; without it, `--sdk` writes to its legacy monorepo default (`../../public/llms-openref`, outside your project).
 - **Turn your own docs into a pack.** Point it at a local OpenAPI/Swagger spec, a Markdown/MDX/DocC folder, reStructuredText, or HTML, and get the same clean, manifest-backed output. *(`llm-docs generate --source ./docs --output-dir ./agent-docs`)*
-- **Teach it a format it doesn't know.** Docs in a custom or proprietary shape? Write a small parser plugin and it reads your own. (See [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md) for the manifest format.)
+- **Teach it a format it doesn't know.** Docs in a custom or proprietary shape? Write a small parser plugin and it reads your own. (See [`index.md`](index.md) for the plugin manifest format and [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md) for the plugin workflow.)
 - **Document a codebase that has no docs.** The source-truth mode extracts conservative, code-derived facts (exported names, signatures, package/config) with file-level provenance: observations for your agent to build on, never invented behavior.
 - **Power a search / RAG tool.** Add `--chunks jsonl` to emit semantic chunks with stable IDs and content hashes.
 
@@ -153,7 +153,9 @@ Then build your first pack:
 # point it at a folder of docs you already have
 npx tsx src/cli.ts generate --source ./docs --output-dir ./agent-docs
 
-# …or, with no inputs at all, smoke-test on a built-in SDK
+# …or smoke-test on a built-in SDK (this one downloads its spec, so it needs
+# network; --sdk swift --sdk-version v2 uses the spec vendored in config/ and
+# works offline)
 npx tsx src/cli.ts generate --sdk javascript --sdk-version v2 --output-dir ./agent-docs/supabase-js
 ```
 

@@ -12,7 +12,7 @@ Use this skill when the task is about this repository or about calling the insta
 - Treat the AI agent as the planner and the CLI as the deterministic capability layer.
 - Read `index.md` and `AGENT_CONTEXT.md` before promising support.
 - Run `llm-docs capabilities --json` before assuming a command, mode, output file, or verification feature exists.
-- Do not claim `agent install codex`, broad crawling, source-code verification, or source-docs chunk export support unless `capabilities --json` reports it as implemented.
+- Source-docs semantic chunk export is implemented as `generate --source ... --chunks jsonl`. Do not claim `agent install codex`, broad crawling, or broad source-code verification unless `capabilities --json` reports it as implemented.
 - Treat `agent doctor` as read-only diagnostics only when `capabilities --json`
   reports it as implemented; it must not be described as installing/registering
   skills, writing user config, mutating host skill directories, or proving
@@ -56,7 +56,7 @@ llm-docs agent doctor --json
 
 After generating a source-docs pack, write a short `llm-docs/index.md` that maps the pack's contents: the generated `*-llms.txt` file(s) and the main topics or sections inside, with a one-line note for each. The goal is that in a later session you read the index first and load only what you need, instead of pulling the whole pack into context.
 
-This index is your navigation aid, not a CLI output: it is not recorded in `manifest.json` and `verify` ignores it. Keep it accurate to the files actually present; the verified pack content remains the source of truth.
+This index is your navigation aid, not a CLI output: it is not recorded in `manifest.json` and `verify` ignores it, and `generate`/`refresh` preserve it (they delete only tool-owned outputs: the `*-llms.txt` files and the chunks output). Keep it accurate to the files actually present; the verified pack content remains the source of truth.
 
 ## External Target Workflow
 

@@ -147,7 +147,10 @@ Current implementation:
 - Can run `discover --url <http-or-https-url>` for bounded explicit website
   inspection. URL mode fetches only the explicit URL, same-origin root
   `/llms.txt`, and same-origin root `/sitemap.xml`; it does not fetch extracted
-  candidate links, render JavaScript, or crawl arbitrary website paths. The
+  candidate links, render JavaScript, or crawl arbitrary website paths. By
+  default it refuses private (RFC1918), link-local, and cloud-metadata IP
+  targets as an SSRF guard, with loopback allowed for local development;
+  `--allow-private-hosts` opts out for intentional private-network inspection. The
   report records inspected resources, response status/content type/byte counts,
   explicit observed HTTP freshness evidence (`ETag`, `Last-Modified`) when
   returned, crawl policy, extracted candidate URLs, source resource provenance,
@@ -211,7 +214,9 @@ Current implementation:
   agent may additionally author an `llm-docs/index.md` navigation file after
   generation; it is agent-authored, not a CLI output, is not recorded in
   `manifest.json`, and `verify` ignores it, so it must not be treated as a
-  verified artifact.
+  verified artifact. Regeneration and refresh delete only tool-owned outputs
+  (the generated `*-llms.txt` files and the chunks output) and preserve this
+  agent-authored file.
   With `--chunks jsonl`, it also writes `chunks/semantic-chunks.jsonl` and a
   compact source-docs `semanticChunkIndexes` manifest entry. The manifest
   records source file hashes, byte sizes, line counts, deterministic estimated

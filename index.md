@@ -143,7 +143,10 @@ content-free `candidateEvidenceIndex` derived from `discovery-report.json`.
 The current `discover --url` command performs bounded static inspection for one
 explicit HTTP(S) URL. It fetches only the explicit URL, same-origin root
 `/llms.txt`, and same-origin root `/sitemap.xml`; it does not render JavaScript
-or fetch linked candidates. It writes a website discovery report with inspected
+or fetch linked candidates. By default it refuses private (RFC1918),
+link-local, and cloud-metadata IP targets as an SSRF guard (loopback stays
+allowed for local dev); `--allow-private-hosts` opts out for intentional
+private-network inspection. It writes a website discovery report with inspected
 resources, response status/content type/byte counts, explicit observed HTTP
 freshness evidence (`ETag`, `Last-Modified`) when returned, crawl policy,
 extracted candidate URLs, evidence/provenance, warnings, and a discovery-report
@@ -500,10 +503,6 @@ Tests:
   architecture plan.
 - [AGENT_CONTEXT.md](AGENT_CONTEXT.md): operational instructions for AI agents.
 - [IMPLEMENTATION.md](IMPLEMENTATION.md): current implementation notes.
-- [CODEBASE_TO_YAML_DESIGN.md](CODEBASE_TO_YAML_DESIGN.md): future
-  source-truth codebase docs idea, if present in the worktree.
-- [SWIFT-6.2-GUIDE.md](SWIFT-6.2-GUIDE.md): Swift 6.2 generation notes, if
-  present in the worktree.
 
 ## Planned Concepts
 
