@@ -199,10 +199,12 @@ export class UniversalFormatter {
       return parts.join('');
     }
 
-    // Format heading with hierarchical number
-    const numberString = numbers.join('.');
-    const heading = this.getHeading(node.type, numbers.length);
-    parts.push(`${heading} ${numberString}. ${node.title}`, DOUBLE_NEWLINE);
+    // The document or category header already names a top-level non-root node.
+    if (numbers.length > 0) {
+      const numberString = numbers.join('.');
+      const heading = this.getHeading(node.type, numbers.length);
+      parts.push(`${heading} ${numberString}. ${node.title}`, DOUBLE_NEWLINE);
+    }
 
     // Format description as prose if present
     if (node.description) {

@@ -1824,7 +1824,7 @@ describe('source-truth inspection', () => {
     expect(report.warnings).toEqual(['Traversal maxFiles reached: 1']);
   });
 
-  it('fails closed for over-wide directories instead of choosing nondeterministic entries', async () => {
+  it('keeps lexicographically-first entries when maxEntries truncates a directory', async () => {
     const dir = await makeTempDir('llm-docs-source-truth-maxentries-');
     const sourceDir = join(dir, 'source');
     await mkdir(sourceDir, { recursive: true });
@@ -1836,14 +1836,14 @@ describe('source-truth inspection', () => {
     const report = await inspectSourceTruth({ source: sourceDir, maxEntries: 2 });
     const secondReport = await inspectSourceTruth({ source: sourceDir, maxEntries: 2 });
 
-    expect(report.files).toEqual([]);
-    expect(secondReport.files).toEqual([]);
-    expect(report.facts).toEqual([]);
+    expect(report.files.map((file) => file.path)).toEqual(['alpha.ts', 'beta.ts']);
+    expect(secondReport.files.map((file) => file.path)).toEqual(['alpha.ts', 'beta.ts']);
+    expect(report.facts.map((fact) => fact.name)).toEqual(['alpha', 'beta']);
     expect(report.traversal).toMatchObject({
       maxEntries: 2,
-      visitedEntries: 0,
-      visitedFiles: 0,
-      inspectedFiles: 0,
+      visitedEntries: 2,
+      visitedFiles: 2,
+      inspectedFiles: 2,
       truncated: true,
     });
     expect(report.warnings).toEqual(['Traversal maxEntries reached: 2']);

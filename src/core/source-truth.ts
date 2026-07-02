@@ -7,6 +7,7 @@ import ts from 'typescript';
 import { isRecord } from '../utils/guards.js';
 import { sha256Hex } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
+import { isSkippedTraversalDirectory, SKIPPED_DIRECTORY_NAMES } from '../utils/traversal.js';
 
 export const SOURCE_TRUTH_REPORT_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_TRUTH_INSPECTION_MODE = 'source-truth-local-evidence';
@@ -14,22 +15,6 @@ export const DEFAULT_SOURCE_TRUTH_MAX_DEPTH = 8;
 export const DEFAULT_SOURCE_TRUTH_MAX_ENTRIES = 20000;
 export const DEFAULT_SOURCE_TRUTH_MAX_FILES = 5000;
 export const DEFAULT_SOURCE_TRUTH_MAX_FILE_BYTES = 262144;
-
-const SKIPPED_DIRECTORY_NAMES = [
-  '.cache',
-  '.git',
-  '.next',
-  '.nuxt',
-  '.output',
-  '.turbo',
-  'build',
-  'coverage',
-  'dist',
-  'node_modules',
-  'out',
-  'target',
-  'vendor',
-] as const;
 
 const URL_LIKE_SOURCE_PATTERNS = [
   /^[a-z][a-z0-9+.-]*:\/\//i,
@@ -494,6 +479,9 @@ async function traverseDirectory(options: {
     return;
   }
 
+  const entryBudgetExhausted =
+    directoryEntries.reachedLimit && state.visitedEntries >= maxEntries;
+
   for (const entry of directoryEntries.entries) {
     if (state.truncated) {
       return;
@@ -508,10 +496,12 @@ async function traverseDirectory(options: {
     }
 
     if (entry.isDirectory()) {
-      if (
-        SKIPPED_DIRECTORY_NAMES.includes(entry.name as (typeof SKIPPED_DIRECTORY_NAMES)[number])
-      ) {
+      if (isSkippedTraversalDirectory(entry.name)) {
         warnings.push(`Skipped directory by default: ${relativePath}`);
+        continue;
+      }
+
+      if (entryBudgetExhausted) {
         continue;
       }
 
@@ -519,7 +509,9 @@ async function traverseDirectory(options: {
         // Prune only this over-deep subtree; keep traversing siblings.
         state.depthLimited = true;
         if (!state.emittedMaxDepthWarning) {
-          warnings.push(`Traversal pruned subtrees at max depth ${maxDepth} (first: ${relativePath})`);
+          warnings.push(
+            `Traversal pruned subtrees at max depth ${maxDepth} (first: ${relativePath})`
+          );
           state.emittedMaxDepthWarning = true;
         }
         continue;
@@ -695,6 +687,7 @@ async function readDirectoryEntries(options: {
   const { rootPath, directoryPath, warnings, state, maxEntries } = options;
   const remainingEntries = maxEntries - state.visitedEntries;
   const entries: Dirent[] = [];
+  let reachedLimit = false;
 
   if (remainingEntries <= 0) {
     emitMaxEntryWarning(warnings, state, maxEntries);
@@ -702,17 +695,14 @@ async function readDirectoryEntries(options: {
     return { entries, reachedLimit: true };
   }
 
+  const allEntries: Dirent[] = [];
+
   try {
     const directory = await opendir(directoryPath);
 
     try {
       for await (const entry of directory) {
-        entries.push(entry);
-
-        if (entries.length > remainingEntries) {
-          emitMaxEntryWarning(warnings, state, maxEntries);
-          return { entries: [], reachedLimit: true };
-        }
+        allEntries.push(entry);
       }
     } catch {
       warnings.push(`Skipped unreadable directory: ${toRelativePath(rootPath, directoryPath)}`);
@@ -723,10 +713,19 @@ async function readDirectoryEntries(options: {
     return undefined;
   }
 
-  entries.sort((a, b) => compareStringsByCodeUnit(a.name, b.name));
+  allEntries.sort((a, b) => compareStringsByCodeUnit(a.name, b.name));
+
+  if (allEntries.length > remainingEntries) {
+    entries.push(...allEntries.slice(0, remainingEntries));
+    emitMaxEntryWarning(warnings, state, maxEntries);
+    reachedLimit = true;
+  } else {
+    entries.push(...allEntries);
+  }
+
   state.visitedEntries += entries.length;
 
-  return { entries, reachedLimit: false };
+  return { entries, reachedLimit };
 }
 
 function emitMaxEntryWarning(

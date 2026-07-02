@@ -1,15 +1,6 @@
 import type { Dirent, Stats } from 'node:fs';
 import { lstat, mkdir, opendir, readFile, realpath, rm } from 'node:fs/promises';
-import {
-  basename,
-  extname,
-  isAbsolute,
-  join,
-  parse,
-  relative,
-  resolve,
-  sep,
-} from 'node:path';
+import { basename, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 import { isObjectRecord, isFileNotFoundError } from '../utils/guards.js';
 import {
@@ -20,6 +11,7 @@ import {
 import { sha256Hex } from '../utils/hash.js';
 import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
+import { isSkippedTraversalDirectory, SKIPPED_DIRECTORY_NAMES } from '../utils/traversal.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
   buildArtifactSummaryForManifest,
@@ -29,6 +21,7 @@ import {
   type InputProvenance,
   type ManifestContract,
 } from './manifest.js';
+import type { GeneratorMetadata } from './manifest/types.js';
 import {
   buildSourceVerificationFileEvidenceIndex,
   type SourceVerificationFileEvidenceIndex,
@@ -54,23 +47,6 @@ export const DEFAULT_SOURCE_VERIFICATION_DOCS_MAX_DEPTH = 8;
 export const DEFAULT_SOURCE_VERIFICATION_DOCS_MAX_ENTRIES = 20000;
 export const DEFAULT_SOURCE_VERIFICATION_DOCS_MAX_FILES = 5000;
 export const DEFAULT_SOURCE_VERIFICATION_DOCS_MAX_FILE_BYTES = 262144;
-
-const SKIPPED_DIRECTORY_NAMES = [
-  '.cache',
-  '.docusaurus',
-  '.git',
-  '.next',
-  '.nuxt',
-  '.output',
-  '.turbo',
-  'build',
-  'coverage',
-  'dist',
-  'node_modules',
-  'out',
-  'target',
-  'vendor',
-] as const;
 
 const URL_LIKE_INPUT_PATTERNS = [
   /^[a-z][a-z0-9+.-]*:\/\//i,
@@ -100,11 +76,7 @@ export type SourceVerificationFailureReason =
   | 'no-supported-docs-files'
   | 'no-doc-reference-evidence';
 
-export interface SourceVerificationGeneratorMetadata {
-  name: string;
-  version: string;
-  cliName?: string;
-}
+export type SourceVerificationGeneratorMetadata = GeneratorMetadata;
 
 export interface SourceVerificationDocsReference {
   kind: SourceVerificationDocsReferenceKind;
@@ -349,7 +321,6 @@ interface FenceState {
 
 interface LineEntry {
   text: string;
-  startOffset: number;
   lineNumber: number;
 }
 
@@ -442,7 +413,11 @@ export async function verifyDocsAgainstSource(
   ]);
 
   await mkdir(outputDir, { recursive: true });
-  await clearGeneratedArtifacts(outputDir);
+  // Ownership-checked removal: only files that parse as this mode's own
+  // artifacts are deleted, so a foreign manifest.json/failure.json that
+  // happens to live in the output dir survives even if the guards above are
+  // ever bypassed.
+  await clearOwnedGeneratedArtifacts(outputDir);
 
   const report = buildSourceVerificationReport({
     reportPath: relativeOutputPath(outputDir, reportPath),
@@ -454,7 +429,9 @@ export async function verifyDocsAgainstSource(
 
   const failureReason = noDocsEvidenceReason(report);
   if (failureReason !== undefined) {
-    await rm(manifestPath, { force: true });
+    // Only remove a manifest this mode owns; a foreign manifest.json that
+    // clearOwnedGeneratedArtifacts preserved must not be destroyed here.
+    await removeOwnedJsonFile(manifestPath, isSourceVerificationManifestArtifact);
     const failure = buildFailure({
       report,
       reason: failureReason,
@@ -616,9 +593,7 @@ async function traverseDocsDirectory(options: {
     }
 
     if (entry.isDirectory()) {
-      if (
-        SKIPPED_DIRECTORY_NAMES.includes(entry.name as (typeof SKIPPED_DIRECTORY_NAMES)[number])
-      ) {
+      if (isSkippedTraversalDirectory(entry.name)) {
         options.warnings.push(`Skipped directory by default: ${relativePath}`);
         continue;
       }
@@ -1212,6 +1187,12 @@ async function assertOutputDirOutsideInputs(options: {
   });
 
   const effectiveOutputPath = await resolveEffectiveOutputPath(options.outputDir);
+  const outputRoots = [...new Set([resolve(options.outputDir), effectiveOutputPath])];
+  const ownedArtifactNames = [
+    SOURCE_VERIFICATION_REPORT_FILE,
+    SOURCE_VERIFICATION_MANIFEST_FILE,
+    SOURCE_VERIFICATION_FAILURE_FILE,
+  ];
 
   for (const inputPath of [options.sourcePath, options.docsPath]) {
     const canonicalInputPath = await realpath(inputPath);
@@ -1223,6 +1204,21 @@ async function assertOutputDirOutsideInputs(options: {
       throw new Error(
         'source-truth verify-docs --output-dir must not be the same as, or inside, the explicit --source or --docs path'
       );
+    }
+
+    // The run deletes and rewrites these owned artifact paths, so an input
+    // pointing at one of them (under any spelling of the output dir) would be
+    // destroyed before it is ever read.
+    for (const outputRoot of outputRoots) {
+      for (const artifactName of ownedArtifactNames) {
+        const ownedArtifactPath = join(outputRoot, artifactName);
+
+        if (inputPath === ownedArtifactPath || canonicalInputPath === ownedArtifactPath) {
+          throw new Error(
+            `source-truth verify-docs --source and --docs must not be the generated ${artifactName} inside --output-dir`
+          );
+        }
+      }
     }
   }
 }
@@ -1389,7 +1385,6 @@ function linesWithOffsets(content: string): LineEntry[] {
 
     lines.push({
       text,
-      startOffset: offset,
       lineNumber,
     });
 
@@ -1404,7 +1399,6 @@ function linesWithOffsets(content: string): LineEntry[] {
   if (content.length === 0) {
     lines.push({
       text: '',
-      startOffset: 0,
       lineNumber: 1,
     });
   }
@@ -1458,16 +1452,6 @@ function findBacktickRun(line: string, start: number, runLength: number): number
   }
 
   return -1;
-}
-
-async function clearGeneratedArtifacts(outputDir: string): Promise<void> {
-  await Promise.all(
-    [
-      SOURCE_VERIFICATION_REPORT_FILE,
-      SOURCE_VERIFICATION_MANIFEST_FILE,
-      SOURCE_VERIFICATION_FAILURE_FILE,
-    ].map((path) => rm(join(outputDir, path), { force: true }))
-  );
 }
 
 async function clearGeneratedArtifactsAfterInputFailure(options: {
@@ -1605,7 +1589,6 @@ function shouldPreserveOutputDirForInputSafety(outputDir: string, input: string)
 
   return isSameOrDescendant(resolve(trimmedInput), outputDir);
 }
-
 
 function isSupportedDocsFile(path: string): boolean {
   return SUPPORTED_DOCS_EXTENSIONS.has(extname(path).toLowerCase());

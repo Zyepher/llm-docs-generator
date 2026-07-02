@@ -199,8 +199,7 @@ export async function verifySourceVerificationManifest(
     failures,
   };
 }
-
-export function validateSourceVerificationEndpoint(
+function validateSourceVerificationEndpoint(
   value: unknown,
   label: string,
   failures: string[]
@@ -224,8 +223,7 @@ export function validateSourceVerificationEndpoint(
     failures.push(`malformed manifest: ${label}.type must be file or directory`);
   }
 }
-
-export function validateSourceVerificationSummary(
+function validateSourceVerificationSummary(
   value: unknown,
   label: string,
   failures: string[]
@@ -241,8 +239,7 @@ export function validateSourceVerificationSummary(
     }
   }
 }
-
-export async function verifySourceVerificationReportFile(options: {
+async function verifySourceVerificationReportFile(options: {
   manifestDir: string;
   reportPath: string;
   expected: {
@@ -359,8 +356,7 @@ export async function verifySourceVerificationReportFile(options: {
     failures.push('source-verification report: report path mismatch');
   }
 }
-
-export function compareSourceVerificationReportEndpoint(options: {
+function compareSourceVerificationReportEndpoint(options: {
   actual: unknown;
   expected: Record<string, unknown>;
   label: string;
@@ -383,8 +379,7 @@ export function compareSourceVerificationReportEndpoint(options: {
     }
   }
 }
-
-export function validateSourceVerificationReportSummaryConsistency(
+function validateSourceVerificationReportSummaryConsistency(
   report: Record<string, unknown>,
   summary: Record<string, unknown>,
   failures: string[]
@@ -405,8 +400,7 @@ export function validateSourceVerificationReportSummaryConsistency(
     }
   }
 }
-
-export function summarizeSourceVerificationReportBody(
+function summarizeSourceVerificationReportBody(
   report: Record<string, unknown>,
   failures: string[]
 ): Record<(typeof SOURCE_VERIFICATION_SUMMARY_FIELDS)[number], number> | undefined {

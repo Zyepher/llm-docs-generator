@@ -1,4 +1,5 @@
-import { lstat, mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { lstat, mkdir, readdir, realpath, rm, rmdir, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -15,6 +16,7 @@ import {
   buildSemanticChunkJsonlManifestIndex,
   type SemanticChunkManifestIndex,
 } from './semantic-chunk-index.js';
+import type { GeneratorMetadata } from './manifest/types.js';
 import {
   buildArtifactSummaryForManifest,
   buildInputProvenanceForManifest,
@@ -37,6 +39,7 @@ import {
 import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { sha256File } from '../utils/hash.js';
+import { isSkippedTraversalDirectory } from '../utils/traversal.js';
 
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
 const SOURCE_DOCS_OUTPUT_DIR = 'llm-docs';
@@ -76,11 +79,7 @@ type BuiltInSourceDocsResolvedFormat =
   | FormatType.HTML;
 type SourceDocsResolvedFormat = BuiltInSourceDocsResolvedFormat | string;
 
-export interface SourceDocsGeneratorMetadata {
-  name: string;
-  version: string;
-  cliName?: string;
-}
+export type SourceDocsGeneratorMetadata = GeneratorMetadata;
 
 export interface SourceDocsPresetMetadata {
   name: string;
@@ -263,7 +262,7 @@ export async function generateSourceDocs(
     const chunksFormat = parseSourceDocsChunksFormat(options.chunks);
     const source = await resolveSourceInput(options.source);
 
-    assertFileSourceOutsideSourceDocsArtifacts(source, outputDir);
+    await assertSourceOutsideSourceDocsArtifacts(source, outputDir);
     await assertOutputDirOutsideSource(source, outputDir);
     await assertNotDiscoveryReport(source);
 
@@ -464,7 +463,11 @@ async function prepareParserPluginSourceDocsInput(
             requestedFormat
           ),
         ]
-      : await describeParserPluginDirectorySourceFiles(source, requestedFormat);
+      : await describeParserPluginDirectorySourceFiles(
+          source,
+          requestedFormat,
+          plugin.provenance.format.extensions
+        );
 
   return {
     formatHint: requestedFormat,
@@ -938,7 +941,8 @@ async function describeDirectorySourceFiles(
 
 async function describeParserPluginDirectorySourceFiles(
   source: ResolvedSourceDocsInput,
-  format: string
+  format: string,
+  extensions: readonly string[]
 ): Promise<BoundedSourceFile[]> {
   const state = {
     entries: 0,
@@ -949,8 +953,16 @@ async function describeParserPluginDirectorySourceFiles(
     currentPath: source.resolvedPath,
     depth: 0,
     format,
+    // Manifest validation guarantees lowercase extensions without leading dots.
+    extensionSuffixes: extensions.map((extension) => `.${extension}`),
     state,
   });
+
+  if (files.length === 0) {
+    throw new Error(
+      `No source files matching the plugin's declared extensions (${extensions.join(', ')}) found under local directory: ${source.resolvedPath}`
+    );
+  }
 
   return files.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
 }
@@ -960,9 +972,10 @@ async function collectParserPluginDirectorySourceFiles(options: {
   currentPath: string;
   depth: number;
   format: string;
+  extensionSuffixes: readonly string[];
   state: { entries: number; files: number };
 }): Promise<BoundedSourceFile[]> {
-  const { rootPath, currentPath, depth, format, state } = options;
+  const { rootPath, currentPath, depth, format, extensionSuffixes, state } = options;
 
   if (depth > DEFAULT_SOURCE_DOCS_MAX_DEPTH) {
     throw new Error(
@@ -991,12 +1004,17 @@ async function collectParserPluginDirectorySourceFiles(options: {
     }
 
     if (entry.isDirectory()) {
+      if (isSkippedTraversalDirectory(entry.name)) {
+        continue;
+      }
+
       files.push(
         ...(await collectParserPluginDirectorySourceFiles({
           rootPath,
           currentPath: entryPath,
           depth: depth + 1,
           format,
+          extensionSuffixes,
           state,
         }))
       );
@@ -1004,6 +1022,12 @@ async function collectParserPluginDirectorySourceFiles(options: {
     }
 
     if (!entry.isFile()) {
+      continue;
+    }
+
+    const lowerCaseName = entry.name.toLowerCase();
+
+    if (!extensionSuffixes.some((suffix) => lowerCaseName.endsWith(suffix))) {
       continue;
     }
 
@@ -1061,6 +1085,13 @@ async function collectDirectorySourceFiles(options: {
     }
 
     if (entry.isDirectory()) {
+      if (isSkippedTraversalDirectory(entry.name)) {
+        state.warnings.push(
+          `Skipped vendored or build directory: ${relativeSourcePath(rootPath, entryPath)}`
+        );
+        continue;
+      }
+
       files.push(
         ...(await collectDirectorySourceFiles({
           rootPath,
@@ -1514,43 +1545,99 @@ function sanitizeFileSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'source';
 }
 
+/**
+ * Remove only the artifacts this mode owns: the manifest, generated
+ * `*-llms.txt` outputs, and the semantic-chunks JSONL. Anything else in the
+ * output tree (for example an agent-authored llm-docs/index.md navigation
+ * file, which the documented workflow encourages) is deliberately preserved.
+ */
 async function clearSourceDocsArtifacts(outputDir: string): Promise<void> {
+  const llmDocsDir = join(outputDir, SOURCE_DOCS_OUTPUT_DIR);
+  const chunksDir = join(outputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
+
   await Promise.all([
     rm(join(outputDir, SOURCE_DOCS_MANIFEST), { force: true }),
-    rm(join(outputDir, SOURCE_DOCS_OUTPUT_DIR), { recursive: true, force: true }),
-    rm(join(outputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR), { recursive: true, force: true }),
+    rm(join(chunksDir, SOURCE_DOCS_CHUNKS_JSONL), { force: true }),
+    removeOwnedLlmDocsOutputs(llmDocsDir),
   ]);
+  await removeDirectoryIfEmpty(chunksDir);
+  await removeDirectoryIfEmpty(llmDocsDir);
 }
 
-function assertFileSourceOutsideSourceDocsArtifacts(
+async function removeOwnedLlmDocsOutputs(llmDocsDir: string): Promise<void> {
+  let entries: Dirent[];
+
+  try {
+    entries = await readdir(llmDocsDir, { withFileTypes: true });
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('-llms.txt'))
+      .map((entry) => rm(join(llmDocsDir, entry.name), { force: true }))
+  );
+}
+
+async function removeDirectoryIfEmpty(directoryPath: string): Promise<void> {
+  try {
+    await rmdir(directoryPath);
+  } catch (error) {
+    if (isFileNotFoundError(error) || (error as NodeJS.ErrnoException).code === 'ENOTEMPTY') {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Refuse source inputs that overlap the artifacts this mode deletes and
+ * rewrites. Both the literal and canonical (realpath) spellings of the source
+ * and output roots are compared, so a symlink alias of either side (for
+ * example macOS's /tmp -> /private/tmp) cannot slip a source inside the
+ * cleared llm-docs/ or chunks/ directories.
+ */
+async function assertSourceOutsideSourceDocsArtifacts(
   source: ResolvedSourceDocsInput,
   outputDir: string
-): void {
-  if (source.type !== 'file') {
-    return;
-  }
+): Promise<void> {
+  const outputRoots = uniquePaths([
+    resolve(outputDir),
+    await resolveEffectiveOutputPath(outputDir),
+  ]);
+  const sourcePaths = uniquePaths([source.resolvedPath, await realpath(source.resolvedPath)]);
+  const label = source.type === 'file' ? 'file input' : 'directory input';
 
-  const resolvedOutputDir = resolve(outputDir);
-  const manifestPath = join(resolvedOutputDir, SOURCE_DOCS_MANIFEST);
-  const llmDocsDir = join(resolvedOutputDir, SOURCE_DOCS_OUTPUT_DIR);
-  const chunksDir = join(resolvedOutputDir, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
+  for (const outputRoot of outputRoots) {
+    const manifestPath = join(outputRoot, SOURCE_DOCS_MANIFEST);
+    const llmDocsDir = join(outputRoot, SOURCE_DOCS_OUTPUT_DIR);
+    const chunksDir = join(outputRoot, SOURCE_DOCS_CHUNKS_OUTPUT_DIR);
 
-  if (source.resolvedPath === manifestPath) {
-    throw new Error(
-      'generate --source file input must not be the source-mode manifest path for --output-dir'
-    );
-  }
+    for (const sourcePath of sourcePaths) {
+      if (sourcePath === manifestPath) {
+        throw new Error(
+          `generate --source ${label} must not be the source-mode manifest path for --output-dir`
+        );
+      }
 
-  if (isSameOrDescendant(llmDocsDir, source.resolvedPath)) {
-    throw new Error(
-      'generate --source file input must not be inside the source-mode generated docs directory for --output-dir'
-    );
-  }
+      if (isSameOrDescendant(llmDocsDir, sourcePath)) {
+        throw new Error(
+          `generate --source ${label} must not be inside the source-mode generated docs directory for --output-dir`
+        );
+      }
 
-  if (isSameOrDescendant(chunksDir, source.resolvedPath)) {
-    throw new Error(
-      'generate --source file input must not be inside the source-mode generated chunks directory for --output-dir'
-    );
+      if (isSameOrDescendant(chunksDir, sourcePath)) {
+        throw new Error(
+          `generate --source ${label} must not be inside the source-mode generated chunks directory for --output-dir`
+        );
+      }
+    }
   }
 }
 
@@ -1620,7 +1707,6 @@ function isSourceDocsArtifactPath(
     isSameOrDescendant(chunksDir, resolvedSourcePath)
   );
 }
-
 
 async function assertOutputDirOutsideSource(
   source: ResolvedSourceDocsInput,

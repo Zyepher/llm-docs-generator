@@ -3,8 +3,8 @@
  * path traversal, and path-type checks used by the manifest verifiers.
  */
 
-import { lstat, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
+import { lstat, realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { describeGeneratedTextOutput } from '../generated-output-metadata.js';
 import { errorMessage, isFileNotFoundError } from '../../utils/guards.js';
@@ -52,18 +52,6 @@ export function resolveManifestSourcePath(sourcePath: string, manifestDir: strin
   }
 
   return resolve(manifestDir, sourcePath);
-}
-
-export function sameStringArray(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-export function sameOptionalStringArray(left: string[] | undefined, right: string[] | undefined): boolean {
-  if (left === undefined || right === undefined) {
-    return left === right;
-  }
-
-  return sameStringArray(left, right);
 }
 
 export function isUrlLikePath(value: string): boolean {
@@ -174,8 +162,7 @@ export async function verifyFile(check: FileCheck, failures: string[]): Promise<
     );
   }
 }
-
-export async function verifyNoSymlinkPathComponents(
+async function verifyNoSymlinkPathComponents(
   check: { label: string; path: string; trustedRoot: string },
   failures: string[]
 ): Promise<boolean> {
@@ -219,8 +206,7 @@ export async function verifyNoSymlinkPathComponents(
 
   return true;
 }
-
-export async function verifyNoSymlinkAbsolutePath(options: {
+async function verifyNoSymlinkAbsolutePath(options: {
   label: string;
   path: string;
   trustedRoot: string;
@@ -235,14 +221,32 @@ export async function verifyNoSymlinkAbsolutePath(options: {
     return false;
   }
 
-  const parsedPath = parse(targetPath);
-  const pathParts = targetPath.slice(parsedPath.root.length).split(sep).filter(Boolean);
-  let currentPath = parsedPath.root;
+  // Canonicalize the trusted root and verify only the components below it.
+  // Symlinks in the root's ancestry (for example macOS's /tmp -> private/tmp)
+  // are the caller's environment, not pack contents; walking from the
+  // filesystem root would spuriously fail every pack addressed through such
+  // an alias, and refresh would then quarantine a healthy manifest.
+  let canonicalRoot: string;
+
+  try {
+    canonicalRoot = await realpath(trustedRoot);
+  } catch (error) {
+    options.failures.push(
+      isFileNotFoundError(error)
+        ? `${options.label}: missing path component at ${trustedRoot}`
+        : `${options.label}: cannot inspect ${trustedRoot}: ${errorMessage(error)}`
+    );
+    return false;
+  }
+
+  const relativePath = relative(trustedRoot, targetPath);
+  const pathParts = relativePath === '' ? [] : relativePath.split(sep).filter(Boolean);
+  let currentPath = canonicalRoot;
 
   if (pathParts.length === 0) {
     return verifyNoSymlinkPathComponent({
       label: options.label,
-      path: currentPath,
+      path: trustedRoot,
       targetPath,
       isLeaf: true,
       leafType: options.expectedType,
@@ -269,8 +273,7 @@ export async function verifyNoSymlinkAbsolutePath(options: {
 
   return true;
 }
-
-export async function verifyNoSymlinkPathComponent(options: {
+async function verifyNoSymlinkPathComponent(options: {
   label: string;
   path: string;
   targetPath: string;

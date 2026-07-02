@@ -21,6 +21,7 @@ import {
   SourceTruthDocsNoFactsError,
   formatSourceTruthMarkdown,
   generateSourceTruthDocs,
+  writeManifestBuildFailure,
   type SourceTruthDocsFailure,
   type SourceTruthDocsManifest,
 } from '../../src/core/source-truth-docs.js';
@@ -28,6 +29,7 @@ import {
   inspectSourceTruth,
   type SourceTruthInspectionReport,
 } from '../../src/core/source-truth.js';
+import { verifySourceTruthDocsManifest } from '../../src/core/manifest/verify/source-truth-docs.js';
 
 const tempDirs: string[] = [];
 
@@ -69,6 +71,10 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 afterEach(async () => {
@@ -702,6 +708,114 @@ describe('source-truth docs generation', () => {
     expect(report.configFacts).toEqual([]);
     expect(report.contextFacts).toEqual([]);
     expect(report.warnings).toEqual(['Skipped unsupported file: notes.md']);
+  });
+
+  it('writes a failure record for source drift during manifest generation', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-manifest-failure-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    const failurePath = join(outputDir, 'failure.json');
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export const value = true;\n', 'utf-8');
+
+    const report = await inspectSourceTruth({ source: sourceDir });
+    const failure = await writeManifestBuildFailure({
+      failurePath,
+      report,
+      evidenceReportPath: 'source-truth-report.json',
+      error: new Error('Source file changed during source-truth manifest generation: index.ts'),
+    });
+    const writtenFailure = await readJson<SourceTruthDocsFailure>(failurePath);
+
+    expect(writtenFailure).toEqual(failure);
+    expect(writtenFailure).toMatchObject({
+      schemaVersion: '0.1.0',
+      mode: 'source-truth-local-docs-failure',
+      reason: 'source-changed-during-manifest-generation',
+      source: {
+        input: sourceDir,
+        resolvedPath: sourceDir,
+        type: 'directory',
+      },
+      evidenceReport: {
+        path: 'source-truth-report.json',
+      },
+    });
+    expect(writtenFailure.message).toContain(
+      'Source files changed during source-truth manifest generation'
+    );
+    expect(writtenFailure.message).toContain('index.ts');
+  });
+
+  it('requires signatureFactCount in source-truth manifest source files', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-signature-required-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export function value(): boolean { return true; }\n', 'utf-8');
+
+    await generateSourceTruthDocs({ source: sourceDir, outputDir });
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifest = await readJson<Record<string, unknown>>(manifestPath);
+    const sourceFiles = manifest.sourceFiles;
+
+    if (!Array.isArray(sourceFiles) || !isRecord(sourceFiles[0])) {
+      throw new Error('expected source-truth manifest source file');
+    }
+
+    delete sourceFiles[0].signatureFactCount;
+
+    const result = await verifySourceTruthDocsManifest(manifestPath, manifest);
+
+    expect(result.checkedFiles).toBe(0);
+    expect(result.failures).toContain(
+      'malformed manifest: sourceFiles[0].signatureFactCount must be a non-negative integer'
+    );
+  });
+
+  it('compares source-truth report signatureFactCount unconditionally', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-signature-compare-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export function value(): boolean { return true; }\n', 'utf-8');
+
+    await generateSourceTruthDocs({ source: sourceDir, outputDir });
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifest = await readJson<Record<string, unknown>>(manifestPath);
+    const sourceFiles = manifest.sourceFiles;
+
+    if (!Array.isArray(sourceFiles) || !isRecord(sourceFiles[0])) {
+      throw new Error('expected source-truth manifest source file');
+    }
+
+    sourceFiles[0].signatureFactCount = 0;
+
+    const result = await verifySourceTruthDocsManifest(manifestPath, manifest);
+
+    expect(result.failures).toContain(
+      'source-truth report: sourceFiles[0].signatureFactCount mismatch (expected 0, actual 1)'
+    );
+  });
+
+  it('verifies source-truth packs through a symlinked output path alias', async () => {
+    const dir = await makeTempDir('llm-docs-source-truth-docs-alias-');
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    const outputAlias = join(dir, 'out-alias');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'index.ts'), 'export const value = true;\n', 'utf-8');
+
+    await generateSourceTruthDocs({ source: sourceDir, outputDir });
+    await symlink(outputDir, outputAlias, 'dir');
+
+    const aliasManifestPath = join(outputAlias, 'manifest.json');
+    const aliasManifest = await readJson<Record<string, unknown>>(aliasManifestPath);
+    const result = await verifySourceTruthDocsManifest(aliasManifestPath, aliasManifest);
+
+    expect(result.failures).toEqual([]);
+    expect(result.checkedFiles).toBe(3);
   });
 
   it('rejects an output directory inside the source before writing artifacts', async () => {

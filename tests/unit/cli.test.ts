@@ -28,7 +28,11 @@ import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { discoverLocalSource, discoverLocalSources } from '../../src/core/discovery.js';
+import {
+  DEFAULT_DISCOVERY_MAX_FILE_BYTES,
+  discoverLocalSource,
+  discoverLocalSources,
+} from '../../src/core/discovery.js';
 import { discoverRepo } from '../../src/core/repo-discovery.js';
 import type { SourceTruthInspectionReport } from '../../src/core/source-truth.js';
 import type {
@@ -3050,10 +3054,28 @@ describe('CLI compatibility behavior', () => {
     }
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('Agent doctor failed: packaged agent artifact unavailable');
-    expect(result.stderr).toContain('skills/repo-docs-discovery/SKILL.md');
-    expect(result.stderr).toContain('ENOENT');
+    expect(result.stderr).not.toContain('Agent doctor failed');
+
+    const doctor = JSON.parse(result.stdout) as AgentDoctorContract;
+    const artifactCheck = doctor.checks.find((check) => check.id === 'packaged-agent-artifacts');
+
+    expect(doctor.summary).toMatchObject({
+      overallStatus: 'fail',
+      failed: 1,
+      hardFailureCount: 1,
+      packagedArtifactCount: 4,
+    });
+    expect(artifactCheck).toMatchObject({
+      status: 'fail',
+      facts: {
+        expectedContextArtifactCount: 2,
+        expectedSkillArtifactCount: 2,
+        readableContextArtifactCount: 2,
+        readableSkillArtifactCount: 1,
+      },
+    });
+    expect(JSON.stringify(artifactCheck?.facts)).toContain('skills/repo-docs-discovery/SKILL.md');
+    expect(JSON.stringify(artifactCheck?.facts)).toContain('ENOENT');
   }, 30000);
 
   it('exits nonzero when agent doctor package binary metadata is malformed', async () => {
@@ -3075,9 +3097,26 @@ describe('CLI compatibility behavior', () => {
     }
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe('');
-    expect(result.stderr).toContain(
-      'Agent doctor failed: malformed package metadata: expected llm-docs bin entry'
+    expect(result.stderr).not.toContain('Agent doctor failed');
+
+    const doctor = JSON.parse(result.stdout) as AgentDoctorContract;
+    const binaryCheck = doctor.checks.find((check) => check.id === 'expected-binary-name');
+
+    expect(doctor.summary).toMatchObject({
+      overallStatus: 'fail',
+      failed: 1,
+      hardFailureCount: 1,
+    });
+    expect(binaryCheck).toMatchObject({
+      status: 'fail',
+      facts: {
+        expectedBinary: 'llm-docs',
+        packageBinEntry: null,
+        matchesExpectedBinary: false,
+      },
+    });
+    expect(String(binaryCheck?.facts.error)).toContain(
+      'malformed package metadata: expected llm-docs bin entry'
     );
   }, 30000);
 
@@ -4598,6 +4637,156 @@ describe('CLI compatibility behavior', () => {
     expect(dirname(report.output.reportPath)).not.toBe(dirname(sourcePath));
   });
 
+  it('skips oversized discovery candidates without hashing them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-byte-cap-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'source');
+    const oversizedPath = join(sourceDir, 'big.md');
+    const smallPath = join(sourceDir, 'guide.md');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(oversizedPath, Buffer.alloc(DEFAULT_DISCOVERY_MAX_FILE_BYTES + 1, 0x61));
+    await writeFile(smallPath, '# Guide\n', 'utf-8');
+
+    const report = await discoverLocalSource({ source: sourceDir, outputDir: join(dir, 'reports') });
+
+    expect(report.candidates.map((candidate) => candidate.path)).toEqual(['guide.md']);
+    expect(report.warnings).toContain(
+      `Skipped oversized file: big.md (${DEFAULT_DISCOVERY_MAX_FILE_BYTES + 1} bytes, max ${DEFAULT_DISCOVERY_MAX_FILE_BYTES} bytes)`
+    );
+    expect(report.traversal).toMatchObject({
+      visitedFiles: 2,
+      candidateCount: 1,
+      truncated: true,
+    });
+
+    const singleFileReport = await discoverLocalSource({
+      source: oversizedPath,
+      outputDir: join(dir, 'single-report'),
+    });
+
+    expect(singleFileReport.candidates).toEqual([]);
+    expect(singleFileReport.warnings).toContain(
+      `Skipped oversized file: big.md (${DEFAULT_DISCOVERY_MAX_FILE_BYTES + 1} bytes, max ${DEFAULT_DISCOVERY_MAX_FILE_BYTES} bytes)`
+    );
+    expect(singleFileReport.traversal).toMatchObject({
+      visitedFiles: 1,
+      candidateCount: 0,
+      truncated: true,
+    });
+  });
+
+  it('refuses discover output inside a directory source before cleanup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-output-contained-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(sourceDir, 'reports');
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(join(sourceDir, 'guide.md'), '# Guide\n', 'utf-8');
+    await writeFile(
+      reportPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.2.0',
+          mode: 'local-bounded-inspection',
+          candidates: [],
+          warnings: [],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'discovery-report',
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+
+    const result = await runCliWithExit([
+      'discover',
+      '--source',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'discover --output-dir must not be the same as, or inside, the explicit --source directory'
+    );
+    expect(await pathExists(reportPath)).toBe(true);
+    expect(await pathExists(manifestPath)).toBe(true);
+  });
+
+  it('clears default-output discovery artifacts before a failed rerun', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-default-clean-'));
+    tempDirs.push(dir);
+    const missingPath = join(dir, 'missing-docs');
+    const outputDir = join(dir, 'missing-docs-discovery');
+    const reportPath = join(outputDir, 'discovery-report.json');
+    const manifestPath = join(outputDir, 'manifest.json');
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      reportPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.2.0',
+          mode: 'local-bounded-inspection',
+          source: {
+            resolvedPath: missingPath,
+          },
+          candidates: [],
+          warnings: [],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: '0.1.0',
+          mode: 'discovery-report',
+          discovery: {
+            kind: 'source',
+            reportPath: 'discovery-report.json',
+            reportSchemaVersion: '0.2.0',
+            reportMode: 'local-bounded-inspection',
+            candidateCount: 0,
+            warningCount: 0,
+          },
+          generatedOutputs: [
+            {
+              path: 'discovery-report.json',
+              kind: 'discovery-report',
+            },
+          ],
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    );
+
+    const result = await runCliWithExit(['discover', '--source', missingPath]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Discovery failed: source path not found');
+    expect(await pathExists(reportPath)).toBe(false);
+    expect(await pathExists(manifestPath)).toBe(false);
+  });
+
   it('clears stale local discovery artifacts before a failed rerun', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-discover-missing-'));
     tempDirs.push(dir);
@@ -5394,6 +5583,48 @@ describe('CLI compatibility behavior', () => {
     );
     expect(combinedOutput).not.toMatch(/\bverified\b/i);
     expect(combinedOutput).not.toMatch(/\bbehavior\b/i);
+  });
+
+  it('rejects source-verification docs input at an owned manifest artifact without deleting it', async () => {
+    const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-source-verify-manifest-'));
+    tempDirs.push(dir);
+    const sourceDir = join(dir, 'source');
+    const outputDir = join(dir, 'out');
+    const manifestPath = join(outputDir, 'manifest.json');
+    const manifestText = `${JSON.stringify(
+      {
+        schemaVersion: '0.1.0',
+        mode: 'source-verification-local-evidence',
+      },
+      null,
+      2
+    )}\n`;
+
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      ['export function makeClient(): Client {', '  return {} as Client;', '}', ''].join('\n'),
+      'utf-8'
+    );
+    await writeFile(manifestPath, manifestText, 'utf-8');
+
+    const result = await runCliWithExit([
+      'source-truth',
+      'verify-docs',
+      '--source',
+      sourceDir,
+      '--docs',
+      manifestPath,
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'source-truth verify-docs --source and --docs must not be the generated manifest.json inside --output-dir'
+    );
+    expect(await readFile(manifestPath, 'utf-8')).toBe(manifestText);
   });
 
   it('rejects URL-like and git-like source/docs inputs for local source/docs evidence', async () => {
@@ -6657,6 +6888,9 @@ describe('CLI compatibility behavior', () => {
     expect(second.report.candidates.map((candidate) => candidate.path)).not.toContain(
       'docs/new.md'
     );
+    expect(second.report.warnings).toContain(
+      'Cached repo refs updated; current checkout inspected without advancing HEAD.'
+    );
     expect(fetchedRemoteCommit).toBe(upstreamCommit);
     expect(second.report.repo.git.commit).not.toBe(upstreamCommit);
   });
@@ -7441,6 +7675,10 @@ describe('CLI compatibility behavior', () => {
       'utf-8'
     );
     await writeFile(join(sourceDir, 'ignored.txt'), '# Not parsed\n', 'utf-8');
+    await mkdir(join(sourceDir, 'node_modules/pkg'), { recursive: true });
+    await mkdir(join(sourceDir, '.git/info'), { recursive: true });
+    await writeFile(join(sourceDir, 'node_modules/pkg/ignored.md'), '# Ignored Package\n', 'utf-8');
+    await writeFile(join(sourceDir, '.git/info/ignored.md'), '# Ignored Git\n', 'utf-8');
     await writeFile(outsideLinkedDoc, '# Linked Secret\n\nThis must not be parsed.\n', 'utf-8');
     await symlink(outsideLinkedDoc, join(sourceDir, 'linked.md'), 'file');
 
@@ -7485,6 +7723,8 @@ describe('CLI compatibility behavior', () => {
     expect(manifest.source.aggregateHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(manifest.sourceFiles.map((file) => file.path)).toEqual(['guides/usage.mdx', 'index.md']);
     expect(manifest.sourceFiles.map((file) => file.format)).toEqual(['markdown', 'markdown']);
+    expect(manifest.warnings).toContain('Skipped vendored or build directory: .git');
+    expect(manifest.warnings).toContain('Skipped vendored or build directory: node_modules');
     expect(manifest.warnings).toContain('Skipped symlinked source entry: linked.md');
     expect(manifest.sourceFiles.map((file) => file.hash)).toEqual([
       await sha256File(join(sourceDir, 'guides', 'usage.mdx')),
@@ -7806,7 +8046,7 @@ describe('CLI compatibility behavior', () => {
     const manifest = JSON.parse(manifestText) as SourceDocsManifest;
     const fullDocPath = join(outputDir, 'llm-docs', 'custom-source-full-llms.txt');
     const fullDoc = await readFile(fullDocPath, 'utf-8');
-    const expectedSourceFilePaths = ['README.fixture', 'nested/data.json', 'nested/notes.txt'];
+    const expectedSourceFilePaths = ['README.fixture'];
 
     expect(stdout).toContain('Local source docs generated');
     expect(stdout).toContain('Type: directory');
@@ -7858,7 +8098,7 @@ describe('CLI compatibility behavior', () => {
       },
     });
     expect(manifest.sourceFiles.map((file) => file.path)).toEqual(expectedSourceFilePaths);
-    expect(manifest.sourceFiles.map((file) => file.format)).toEqual([formatId, formatId, formatId]);
+    expect(manifest.sourceFiles.map((file) => file.format)).toEqual([formatId]);
     expect(manifest.source.aggregateHash).toBe(
       aggregateSourceFilesHashForTest(manifest.sourceFiles)
     );
@@ -9351,6 +9591,27 @@ describe('CLI compatibility behavior', () => {
     expect(await pathExists(configDir)).toBe(false);
   });
 
+  it('prints source-mode generate stack traces when verbose is enabled', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-verbose-'));
+    tempDirs.push(dir);
+    const missingSource = join(dir, 'missing-docs');
+    const outputDir = join(dir, 'output');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      missingSource,
+      '--output-dir',
+      outputDir,
+      '--verbose',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Generate failed: generate --source path not found');
+    expect(result.stderr).toContain('Error: generate --source path not found');
+    expect(result.stderr).toContain('at ');
+  });
+
   it('rejects whitespace-only generate --sdk before config or output work', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-blank-sdk-'));
     tempDirs.push(dir);
@@ -10119,6 +10380,65 @@ describe('CLI compatibility behavior', () => {
     expect(await readFile(generatedSourcePath, 'utf-8')).toBe(generatedSourceText);
   });
 
+  it('rejects generated docs directories as generate --source input without deleting them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-protected-dir-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const generatedSourceDir = join(outputDir, 'llm-docs');
+    const generatedSourcePath = join(generatedSourceDir, 'source.md');
+    const generatedSourceText = '# Generated Source\n\nDo not delete.\n';
+
+    await mkdir(generatedSourceDir, { recursive: true });
+    await writeFile(generatedSourcePath, generatedSourceText, 'utf-8');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      generatedSourceDir,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'generate --source directory input must not be inside the source-mode generated docs directory for --output-dir'
+    );
+    expect(await readFile(generatedSourcePath, 'utf-8')).toBe(generatedSourceText);
+  });
+
+  it('rejects generated docs directories through an output symlink alias without deleting them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-protected-alias-'));
+    tempDirs.push(dir);
+    const outputDir = join(dir, 'output');
+    const outputAlias = join(dir, 'output-alias');
+    const generatedSourceDir = join(outputDir, 'llm-docs');
+    const generatedSourcePath = join(generatedSourceDir, 'source.md');
+    const aliasSourceDir = join(outputAlias, 'llm-docs');
+    const generatedSourceText = '# Generated Source Alias\n\nDo not delete.\n';
+
+    await mkdir(generatedSourceDir, { recursive: true });
+    await writeFile(generatedSourcePath, generatedSourceText, 'utf-8');
+    await symlink(outputDir, outputAlias, 'dir');
+
+    const result = await runCliWithExit([
+      'generate',
+      '--source',
+      aliasSourceDir,
+      '--format',
+      'markdown',
+      '--output-dir',
+      outputDir,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'generate --source directory input must not be inside the source-mode generated docs directory for --output-dir'
+    );
+    expect(await readFile(generatedSourcePath, 'utf-8')).toBe(generatedSourceText);
+  });
+
   it('rejects source output directories inside source before output work', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'llm-docs-generate-source-inside-'));
     tempDirs.push(dir);
@@ -10269,8 +10589,12 @@ describe('CLI compatibility behavior', () => {
         };
       };
     };
+    const v1SpecPath = join(configDir, 'supabase_swift_v1.yml');
+    await writeFile(v1SpecPath, testSpecYaml, 'utf-8');
+    config.sdks.swift.versions.v1.spec.localPath = v1SpecPath;
     config.sdks.swift.versions.v2.spec.localPath = join(configDir, 'missing-spec.yml');
     await writeFile(sdksPath, JSON.stringify(config, null, 2), 'utf-8');
+    await rm(join(configDir, 'supabase_swift_v2.yml'), { force: true });
 
     const result = await runCliWithExit(
       [
@@ -10337,6 +10661,7 @@ describe('CLI compatibility behavior', () => {
     };
     config.sdks.swift.versions.v2.spec.localPath = join(configDir, 'missing-spec.yml');
     await writeFile(sdksPath, JSON.stringify(config, null, 2), 'utf-8');
+    await rm(join(configDir, 'supabase_swift_v2.yml'), { force: true });
 
     const secondResult = await runCliWithExit(
       ['generate', '--sdk', 'swift', '--config-dir', configDir, '--output-dir', outputDir],
@@ -10352,8 +10677,7 @@ describe('CLI compatibility behavior', () => {
 
   it('uses the resolved cache spec path in full-doc source comments when localPath is null', async () => {
     const configDir = await createTestConfig();
-    const cacheSpecPath = join(configDir, 'config/supabase_swift_v2.yml');
-    await mkdir(dirname(cacheSpecPath), { recursive: true });
+    const cacheSpecPath = join(configDir, 'supabase_swift_v2.yml');
     await writeFile(cacheSpecPath, testSpecYaml, 'utf-8');
 
     const sdksPath = join(configDir, 'sdks.json');
@@ -10400,7 +10724,7 @@ describe('CLI compatibility behavior', () => {
     expect(manifest.source.configuredLocalPath).toBeNull();
     expect(manifest.source.resolvedSpecPath).toBe(cacheSpecPath);
     expect(isAbsolute(manifest.source.resolvedSpecPath)).toBe(true);
-    expect(fullDoc).toContain('<!-- Generated from: config/supabase_swift_v2.yml -->');
+    expect(fullDoc).toContain(`<!-- Generated from: ${cacheSpecPath} -->`);
     expect(fullDoc).not.toContain('<!-- Generated from:  -->');
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
@@ -10415,11 +10739,14 @@ describe('CLI compatibility behavior', () => {
     } = await generateSourceDocsFixture();
     const sourceFile = firstManifest.sourceFiles.find((file) => file.path === 'index.md');
     const outputFile = firstManifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
+    const agentIndexPath = join(outputDir, 'llm-docs', 'index.md');
+    const agentIndexText = '# Agent Index\n\nUser-authored navigation.\n';
 
     if (sourceFile === undefined || outputFile === undefined) {
       throw new Error('expected generated source docs fixture files');
     }
 
+    await writeFile(agentIndexPath, agentIndexText, 'utf-8');
     await writeFile(
       join(sourceDir, sourceFile.path),
       '# Local Docs\n\nWelcome to the refreshed local docs.\n',
@@ -10467,6 +10794,7 @@ describe('CLI compatibility behavior', () => {
     expectArtifactSummary(refreshedManifest);
     expect(refreshedText).toContain('refreshed local docs');
     expect(refreshedText).not.toContain('tampered output');
+    expect(await readFile(agentIndexPath, 'utf-8')).toBe(agentIndexText);
     expect(verifyResult.stdout).toContain('Failures: 0');
     expect(verifyResult.stdout).toContain('Verification passed');
   });
@@ -11880,6 +12208,22 @@ describe('CLI compatibility behavior', () => {
       `${JSON.stringify(insideOutputReport, null, 2)}\n`
     );
 
+    const outputInsideSourceFixture = await createSourceDiscoveryVerifyFixture(
+      'llm-docs-refresh-discovery-output-in-source-'
+    );
+    const outputInsideSourceDir = join(outputInsideSourceFixture.sourceDir, 'reports');
+    await mkdir(outputInsideSourceDir, { recursive: true });
+    await writeFile(
+      join(outputInsideSourceDir, 'discovery-report.json'),
+      await readFile(outputInsideSourceFixture.reportPath, 'utf-8'),
+      'utf-8'
+    );
+    await writeFile(
+      join(outputInsideSourceDir, 'manifest.json'),
+      await readFile(outputInsideSourceFixture.manifestPath, 'utf-8'),
+      'utf-8'
+    );
+
     const badBoundsFixture = await createSourceDiscoveryVerifyFixture(
       'llm-docs-refresh-discovery-bad-bounds-'
     );
@@ -11914,6 +12258,11 @@ describe('CLI compatibility behavior', () => {
       '--output-dir',
       insideOutputFixture.outputDir,
     ]);
+    const outputInsideSourceResult = await runCliWithExit([
+      'refresh',
+      '--output-dir',
+      outputInsideSourceDir,
+    ]);
     const badBoundsResult = await runCliWithExit([
       'refresh',
       '--manifest',
@@ -11931,6 +12280,10 @@ describe('CLI compatibility behavior', () => {
     expect(insideOutputResult.exitCode).toBe(1);
     expect(insideOutputResult.stderr).toContain(
       'manifest source path must not be the same as, or inside, the manifest output directory'
+    );
+    expect(outputInsideSourceResult.exitCode).toBe(1);
+    expect(outputInsideSourceResult.stderr).toContain(
+      'manifest output directory must not be the same as, or inside, the explicit --source directory'
     );
     expect(badBoundsResult.exitCode).toBe(1);
     expect(badBoundsResult.stderr).toContain('traversal.maxFiles must be a positive safe integer');
@@ -12674,6 +13027,25 @@ describe('CLI compatibility behavior', () => {
     expect(outputDirResult.stdout).toContain('Failures: 0');
     expect(outputDirResult.stdout).toContain('Verification passed');
     expect(manifestResult.stdout).toContain('Manifest verification');
+    expect(manifestResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
+    expect(manifestResult.stdout).toContain('Failures: 0');
+    expect(manifestResult.stdout).toContain('Verification passed');
+  });
+
+  it('verifies a source-truth docs pack through a symlinked output directory alias', async () => {
+    const { outputDir, manifest } = await generateSourceTruthDocsFixture(
+      'llm-docs-source-truth-verify-alias-'
+    );
+    const outputAlias = join(dirname(outputDir), 'output-alias');
+    await symlink(outputDir, outputAlias, 'dir');
+
+    const outputDirResult = await runCli(['verify', '--output-dir', outputAlias]);
+    const manifestResult = await runCli(['verify', '--manifest', join(outputAlias, 'manifest.json')]);
+    const expectedCheckedFiles = manifest.sourceFiles.length + manifest.generatedOutputs.length;
+
+    expect(outputDirResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
+    expect(outputDirResult.stdout).toContain('Failures: 0');
+    expect(outputDirResult.stdout).toContain('Verification passed');
     expect(manifestResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);
     expect(manifestResult.stdout).toContain('Failures: 0');
     expect(manifestResult.stdout).toContain('Verification passed');
@@ -14392,7 +14764,7 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('inspection.traversal.truncated must be a boolean');
   });
 
-  it('rejects source-truth source and output symlinked ancestor directories', async () => {
+  it('rejects source-truth source symlinked ancestors while allowing output aliases', async () => {
     const sourceAncestorFixture = await generateSourceTruthDocsFixture(
       'llm-docs-source-truth-source-ancestor-'
     );
@@ -14463,17 +14835,15 @@ describe('CLI compatibility behavior', () => {
 
     const outputResult = await runCliWithExit(['verify', '--manifest', linkedManifestPath]);
 
-    expect(outputResult.exitCode).toBe(1);
+    expect(outputResult.exitCode).toBe(0);
     expect(outputResult.stdout).toContain(
       `Checked files: ${
         outputAncestorFixture.manifest.sourceFiles.length +
         outputAncestorFixture.manifest.generatedOutputs.length
       }`
     );
-    expect(outputResult.stderr).toContain(
-      'output source-truth-report.json: symbolic links are not allowed in path'
-    );
-    expect(outputResult.stderr).toContain(outputParentLink);
+    expect(outputResult.stdout).toContain('Failures: 0');
+    expect(outputResult.stdout).toContain('Verification passed');
     expect(outputResult.stderr).not.toContain('hash mismatch');
   });
 

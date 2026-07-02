@@ -2,6 +2,7 @@
  * Verifier for source-truth-docs manifests and its report consistency checks.
  */
 
+import { realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 import {
@@ -153,6 +154,10 @@ export async function verifySourceTruthDocsManifest(
     }
   }
 
+  if (failures.length === 0 && isNonEmptyString(sourcePath) && isAbsolute(sourcePath)) {
+    await verifyCanonicalSourcePath(sourcePath, failures);
+  }
+
   const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
 
   if (failures.length === 0) {
@@ -188,7 +193,19 @@ export async function verifySourceTruthDocsManifest(
   };
 }
 
-export interface SourceTruthSourceFileEntry {
+async function verifyCanonicalSourcePath(sourcePath: string, failures: string[]): Promise<void> {
+  try {
+    const canonicalSourcePath = await realpath(sourcePath);
+
+    if (canonicalSourcePath !== sourcePath) {
+      failures.push(`source: symbolic links are not allowed in path at ${sourcePath}`);
+    }
+  } catch (error) {
+    failures.push(`source: cannot inspect ${sourcePath}: ${errorMessage(error)}`);
+  }
+}
+
+interface SourceTruthSourceFileEntry {
   path: string;
   resolvedPath: string;
   byteSize: number;
@@ -197,13 +214,12 @@ export interface SourceTruthSourceFileEntry {
   estimatedTokenCount?: number;
   factCount: number;
   exportFactCount: number;
-  signatureFactCount?: number;
+  signatureFactCount: number;
   configFactCount: number;
   contextFactCount: number;
   parseDiagnosticCount: number;
 }
-
-export function validateSourceTruthInspection(
+function validateSourceTruthInspection(
   inspection: Record<string, unknown>,
   failures: string[]
 ): void {
@@ -229,8 +245,7 @@ export function validateSourceTruthInspection(
     failures.push('malformed manifest: inspection.warnings must be an array of strings');
   }
 }
-
-export function validateSourceTruthTraversal(
+function validateSourceTruthTraversal(
   traversal: Record<string, unknown>,
   label: string,
   failures: string[]
@@ -265,8 +280,7 @@ export function validateSourceTruthTraversal(
     failures.push(`${label}.truncated must be a boolean`);
   }
 }
-
-export function validateSourceTruthSourceFiles(options: {
+function validateSourceTruthSourceFiles(options: {
   sourceFiles: unknown[];
   sourcePath: unknown;
   sourceType: unknown;
@@ -385,9 +399,9 @@ export function validateSourceTruthSourceFiles(options: {
       failures.push(`malformed manifest: ${label}.exportFactCount must be a non-negative integer`);
     }
 
-    if (signatureFactCount !== undefined && !isNonNegativeInteger(signatureFactCount)) {
+    if (!isNonNegativeInteger(signatureFactCount)) {
       failures.push(
-        `malformed manifest: ${label}.signatureFactCount must be a non-negative integer when present`
+        `malformed manifest: ${label}.signatureFactCount must be a non-negative integer`
       );
     }
 
@@ -438,7 +452,7 @@ export function validateSourceTruthSourceFiles(options: {
       hasValidEstimatedTokenCount &&
       isNonNegativeInteger(factCount) &&
       isNonNegativeInteger(exportFactCount) &&
-      (signatureFactCount === undefined || isNonNegativeInteger(signatureFactCount)) &&
+      isNonNegativeInteger(signatureFactCount) &&
       isNonNegativeInteger(configFactCount) &&
       isNonNegativeInteger(contextFactCount) &&
       isNonNegativeInteger(parseDiagnosticCount)
@@ -452,7 +466,7 @@ export function validateSourceTruthSourceFiles(options: {
         estimatedTokenCount: sourceFileEstimatedTokenCount,
         factCount,
         exportFactCount,
-        ...(signatureFactCount === undefined ? {} : { signatureFactCount }),
+        signatureFactCount,
         configFactCount,
         contextFactCount,
         parseDiagnosticCount,
@@ -479,8 +493,7 @@ export function validateSourceTruthSourceFiles(options: {
 
   return sourceFileEntries;
 }
-
-export function validateSourceTruthGeneratedOutputSet(
+function validateSourceTruthGeneratedOutputSet(
   generatedOutputs: unknown[],
   failures: string[]
 ): void {
@@ -507,8 +520,7 @@ export function validateSourceTruthGeneratedOutputSet(
     );
   }
 }
-
-export function sourceTruthReportOutputPath(generatedOutputs: unknown[]): string | undefined {
+function sourceTruthReportOutputPath(generatedOutputs: unknown[]): string | undefined {
   for (const output of generatedOutputs) {
     if (
       isObjectRecord(output) &&
@@ -522,8 +534,7 @@ export function sourceTruthReportOutputPath(generatedOutputs: unknown[]): string
 
   return undefined;
 }
-
-export async function verifySourceTruthReportFile(options: {
+async function verifySourceTruthReportFile(options: {
   reportPath: string;
   expected: {
     source: Record<string, unknown>;
@@ -567,8 +578,7 @@ export async function verifySourceTruthReportFile(options: {
   validateSourceTruthReportInspection(report, expected.inspection, failures);
   validateSourceTruthReportCounts(report, expected.sourceFiles, failures);
 }
-
-export function validateSourceTruthReportSource(
+function validateSourceTruthReportSource(
   reportSource: unknown,
   expectedSource: Record<string, unknown>,
   failures: string[]
@@ -588,8 +598,7 @@ export function validateSourceTruthReportSource(
     }
   }
 }
-
-export function validateSourceTruthReportInspection(
+function validateSourceTruthReportInspection(
   report: Record<string, unknown>,
   expectedInspection: Record<string, unknown>,
   failures: string[]
@@ -618,8 +627,7 @@ export function validateSourceTruthReportInspection(
     );
   }
 }
-
-export function compareSourceTruthTraversal(
+function compareSourceTruthTraversal(
   reportTraversal: Record<string, unknown>,
   expectedTraversal: Record<string, unknown>,
   failures: string[]
@@ -656,8 +664,7 @@ export function compareSourceTruthTraversal(
     }
   }
 }
-
-export function validateSourceTruthReportCounts(
+function validateSourceTruthReportCounts(
   report: Record<string, unknown>,
   expectedSourceFiles: SourceTruthSourceFileEntry[],
   failures: string[]
@@ -736,8 +743,7 @@ export function validateSourceTruthReportCounts(
     compareSourceTruthReportFile(expectedFile, reportFile, label, failures);
   }
 }
-
-export function summarizeSourceTruthReportFiles(
+function summarizeSourceTruthReportFiles(
   reportFiles: unknown[],
   failures: string[]
 ): SourceTruthSourceFileEntry[] {
@@ -816,8 +822,7 @@ export function summarizeSourceTruthReportFiles(
 
   return sourceFiles;
 }
-
-export function compareSourceTruthReportFile(
+function compareSourceTruthReportFile(
   expectedFile: SourceTruthSourceFileEntry,
   reportFile: SourceTruthSourceFileEntry,
   label: string,
@@ -829,6 +834,7 @@ export function compareSourceTruthReportFile(
     'hash',
     'factCount',
     'exportFactCount',
+    'signatureFactCount',
     'configFactCount',
     'contextFactCount',
     'parseDiagnosticCount',
@@ -843,26 +849,13 @@ export function compareSourceTruthReportFile(
       );
     }
   }
-
-  if (
-    expectedFile.signatureFactCount !== undefined &&
-    reportFile.signatureFactCount !== expectedFile.signatureFactCount
-  ) {
-    failures.push(
-      `${label}.signatureFactCount mismatch (expected ${expectedFile.signatureFactCount}, actual ${String(
-        reportFile.signatureFactCount
-      )})`
-    );
-  }
 }
-
-export function sumSourceTruthCount(
+function sumSourceTruthCount(
   files: SourceTruthSourceFileEntry[],
   select: (file: SourceTruthSourceFileEntry) => number
 ): number {
   return files.reduce((total, file) => total + select(file), 0);
 }
-
-export function hasSourceTruthSignature(value: unknown): boolean {
+function hasSourceTruthSignature(value: unknown): boolean {
   return isObjectRecord(value) && value.signature !== undefined;
 }

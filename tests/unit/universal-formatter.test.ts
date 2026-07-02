@@ -19,6 +19,64 @@ afterEach(async () => {
 });
 
 describe('UniversalFormatter', () => {
+  it('does not print an empty-number heading for top-level section documents', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'llm-docs-formatter-root-section-'));
+    tempDirs.push(outputDir);
+
+    const root = createDocNode(DocNodeType.SECTION, 'single-file', 'Single File Docs', {
+      content: [createContentBlock(ContentBlockType.PROSE, 'Document-level overview.')],
+      children: [
+        createDocNode(DocNodeType.SECTION, 'child', 'Child Section', {
+          content: [createContentBlock(ContentBlockType.PROSE, 'Child content.')],
+        }),
+      ],
+    });
+
+    await formatDocNode(root, {
+      outputDir,
+      filenamePrefix: 'single',
+      includeMetadata: false,
+    });
+    const output = await readFile(join(outputDir, 'single-full-llms.txt'), 'utf-8');
+
+    expect(output).not.toContain('# . ');
+    expect(output).toContain('# Single File Docs');
+    expect(output).toContain('Document-level overview.');
+    expect(output).toContain('## 1. Child Section');
+    expect(output).toContain('Child content.');
+  });
+
+  it('does not print an empty-number heading for modular category files', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'llm-docs-formatter-category-heading-'));
+    tempDirs.push(outputDir);
+
+    const root = createDocNode(DocNodeType.ROOT, 'root', 'Category Docs', {
+      children: [
+        createDocNode(DocNodeType.CATEGORY, 'guide', 'Guide', {
+          content: [createContentBlock(ContentBlockType.PROSE, 'Category overview.')],
+          children: [
+            createDocNode(DocNodeType.SECTION, 'details', 'Details', {
+              content: [createContentBlock(ContentBlockType.PROSE, 'Detailed content.')],
+            }),
+          ],
+        }),
+      ],
+    });
+
+    await formatDocNode(root, {
+      outputDir,
+      filenamePrefix: 'docs',
+      includeMetadata: false,
+    });
+    const categoryOutput = await readFile(join(outputDir, 'docs-guide-llms.txt'), 'utf-8');
+
+    expect(categoryOutput).not.toContain('# . ');
+    expect(categoryOutput).toContain('# Category Docs Guide Documentation');
+    expect(categoryOutput).toContain('Category overview.');
+    expect(categoryOutput).toContain('## 1. Details');
+    expect(categoryOutput).toContain('Detailed content.');
+  });
+
   it('generates deterministic unique modular filenames after sanitization collisions', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'llm-docs-formatter-collision-'));
     tempDirs.push(outputDir);

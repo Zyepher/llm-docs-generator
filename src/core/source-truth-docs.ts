@@ -25,6 +25,7 @@ import { HASH_PREFIX } from '../utils/hash.js';
 import { writeJsonFileSafely } from '../utils/json.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
+import { errorMessage } from '../utils/guards.js';
 import {
   isParentRelativePath,
   isSameOrDescendant,
@@ -60,7 +61,7 @@ export interface SourceTruthManifestSourceFile {
   estimatedTokenCount: number;
   factCount: number;
   exportFactCount: number;
-  signatureFactCount?: number;
+  signatureFactCount: number;
   configFactCount: number;
   contextFactCount: number;
   parseDiagnosticCount: number;
@@ -99,7 +100,7 @@ export interface SourceTruthDocsGenerationResult {
 export interface SourceTruthDocsFailure {
   schemaVersion: typeof SOURCE_TRUTH_DOCS_SCHEMA_VERSION;
   mode: typeof SOURCE_TRUTH_DOCS_FAILURE_MODE;
-  reason: 'no-extractable-source-truth-facts';
+  reason: 'no-extractable-source-truth-facts' | 'source-changed-during-manifest-generation';
   message: string;
   source: {
     input: string;
@@ -180,12 +181,24 @@ export async function generateSourceTruthDocs(
   const markdown = formatSourceTruthMarkdown(report);
   await writeTextFileSafely(markdownPath, markdown);
 
-  const generatedOutputs = await describeGeneratedOutputs(outputDir, [
-    { path: reportPath, kind: 'source-truth-report-json' },
-    { path: markdownPath, kind: 'source-truth-markdown' },
-  ]);
-  const manifest = await buildManifest(report, generatedOutputs);
-  await writeJsonFileSafely(manifestPath, manifest);
+  let manifest: SourceTruthDocsManifest;
+  try {
+    const generatedOutputs = await describeGeneratedOutputs(outputDir, [
+      { path: reportPath, kind: 'source-truth-report-json' },
+      { path: markdownPath, kind: 'source-truth-markdown' },
+    ]);
+    manifest = await buildManifest(report, generatedOutputs);
+    await writeJsonFileSafely(manifestPath, manifest);
+  } catch (error) {
+    await rm(manifestPath, { force: true });
+    await writeManifestBuildFailure({
+      failurePath,
+      report,
+      evidenceReportPath: relativeOutputPath(outputDir, reportPath),
+      error,
+    });
+    throw error;
+  }
 
   return {
     outputDir,
@@ -557,6 +570,49 @@ function buildFailure(
     reason: 'no-extractable-source-truth-facts',
     message:
       'No extractable source-truth export, package/config, or context facts were found for the explicit local source path.',
+    source: {
+      input: report.source.input,
+      resolvedPath: report.source.resolvedPath,
+      type: report.source.type,
+    },
+    inspection: {
+      schemaVersion: report.schemaVersion,
+      mode: report.mode,
+      traversal: report.traversal,
+      warnings: report.warnings,
+    },
+    evidenceReport: {
+      path: evidenceReportPath,
+    },
+  };
+}
+
+export async function writeManifestBuildFailure(options: {
+  failurePath: string;
+  report: SourceTruthInspectionReport;
+  evidenceReportPath: string;
+  error: unknown;
+}): Promise<SourceTruthDocsFailure> {
+  const failure = buildManifestBuildFailure(
+    options.report,
+    options.evidenceReportPath,
+    options.error
+  );
+  await writeJsonFileSafely(options.failurePath, failure);
+
+  return failure;
+}
+
+function buildManifestBuildFailure(
+  report: SourceTruthInspectionReport,
+  evidenceReportPath: string,
+  error: unknown
+): SourceTruthDocsFailure {
+  return {
+    schemaVersion: SOURCE_TRUTH_DOCS_SCHEMA_VERSION,
+    mode: SOURCE_TRUTH_DOCS_FAILURE_MODE,
+    reason: 'source-changed-during-manifest-generation',
+    message: `Source files changed during source-truth manifest generation: ${errorMessage(error)}`,
     source: {
       input: report.source.input,
       resolvedPath: report.source.resolvedPath,
