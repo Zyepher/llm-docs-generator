@@ -33,6 +33,7 @@ output/
 
 # Local review notes (not part of the published package)
 OPUS_REVIEW.md
+FABLE_REVIEW.md
 HANDOFF.md
 GPT_PROMPT.md
 IMPLEMENTATION.md

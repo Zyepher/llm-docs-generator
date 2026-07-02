@@ -1,6 +1,6 @@
 {
   "name": "llm-docs-generator",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Multi-format LLM documentation generator supporting OpenRef YAML, Markdown/DocC, and more",
   "type": "module",
   "keywords": [
