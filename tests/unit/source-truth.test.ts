@@ -284,6 +284,21 @@ describe('source-truth inspection', () => {
       heritage: {
         extends: ['BaseOptions'],
       },
+      members: [
+        {
+          kind: 'property',
+          name: 'enabled',
+          text: 'enabled: boolean',
+          type: 'boolean',
+        },
+        {
+          kind: 'property',
+          name: 'label',
+          text: 'label?: string',
+          optional: true,
+          type: 'string',
+        },
+      ],
     });
 
     const result = report.facts.find((fact) => fact.name === 'Result');
@@ -293,6 +308,21 @@ describe('source-truth inspection', () => {
       name: 'Result',
       type: '{ input: string; count?: number; }',
       memberCount: 2,
+      members: [
+        {
+          kind: 'property',
+          name: 'input',
+          text: 'input: string',
+          type: 'string',
+        },
+        {
+          kind: 'property',
+          name: 'count',
+          text: 'count?: number',
+          optional: true,
+          type: 'number',
+        },
+      ],
     });
 
     const mode = report.facts.find((fact) => fact.name === 'Mode');
@@ -301,6 +331,18 @@ describe('source-truth inspection', () => {
       text: 'export enum Mode',
       name: 'Mode',
       memberCount: 2,
+      members: [
+        {
+          kind: 'enum-member',
+          name: 'Fast',
+          text: 'Fast',
+        },
+        {
+          kind: 'enum-member',
+          name: 'Slow',
+          text: 'Slow',
+        },
+      ],
     });
 
     const service = report.facts.find((fact) => fact.name === 'Service');
@@ -313,6 +355,22 @@ describe('source-truth inspection', () => {
         extends: ['BaseService'],
         implements: ['Runnable', 'Disposable'],
       },
+      members: [
+        {
+          kind: 'method',
+          name: 'start',
+          text: 'start(): void',
+          parameters: [],
+          returnType: 'void',
+        },
+        {
+          kind: 'method',
+          name: 'stop',
+          text: 'stop(): void',
+          parameters: [],
+          returnType: 'void',
+        },
+      ],
     });
     expect(service?.signature?.text).not.toContain('start');
 
@@ -346,6 +404,15 @@ describe('source-truth inspection', () => {
       declarationKind: 'class',
       text: 'export default class',
       memberCount: 1,
+      members: [
+        {
+          kind: 'method',
+          name: 'run',
+          text: 'run(): void',
+          parameters: [],
+          returnType: 'void',
+        },
+      ],
     });
 
     expect(
@@ -1775,8 +1842,16 @@ describe('source-truth inspection', () => {
     // drop 'b-shallow/found.ts' the moment 'a-deep/nested' exceeded maxDepth.
     await mkdir(join(sourceDir, 'a-deep/nested'), { recursive: true });
     await mkdir(join(sourceDir, 'b-shallow'), { recursive: true });
-    await writeFile(join(sourceDir, 'a-deep/shallow.ts'), 'export const shallow = true;\n', 'utf-8');
-    await writeFile(join(sourceDir, 'a-deep/nested/deep.ts'), 'export const deep = true;\n', 'utf-8');
+    await writeFile(
+      join(sourceDir, 'a-deep/shallow.ts'),
+      'export const shallow = true;\n',
+      'utf-8'
+    );
+    await writeFile(
+      join(sourceDir, 'a-deep/nested/deep.ts'),
+      'export const deep = true;\n',
+      'utf-8'
+    );
     await writeFile(join(sourceDir, 'b-shallow/found.ts'), 'export const found = true;\n', 'utf-8');
 
     const report = await inspectSourceTruth({ source: sourceDir, maxDepth: 1 });

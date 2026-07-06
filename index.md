@@ -245,7 +245,8 @@ tests by that existing path/filename logic, it also reports AST-observed
 `describe`, `it`, and `test` label facts for direct calls and `.only` / `.skip`
 forms when the first argument is a string literal or no-substitution template
 literal. Directly exported top-level declarations may include compact AST
-signature evidence with bodies and initializer values omitted. Re-exports,
+signature evidence and member rosters with bodies and initializer values
+omitted. Re-exports,
 export-all declarations, and export assignments remain unresolved. It does not
 parse assertions, serialize test bodies, execute tests, prove claims, infer
 runtime behavior, infer framework identity, decide task fit, summarize
@@ -554,7 +555,7 @@ agent intent/source/scope resolution
   Bounded explicit URL inspection reports are available through `discover
 --url`; the implemented command surface is available through deterministic
   `capabilities --json`; bounded local TypeScript/JavaScript export, optional
-  AST signature, package/config, path-based test/example context evidence, and
+  AST signature/member-roster, package/config, path-based test/example context evidence, and
   observed test-case label reports are available through `source-truth inspect --source`, and
   evidence-bound Markdown is available through `source-truth generate --source
 --output-dir`. Narrow explicit-local source/docs reference evidence is

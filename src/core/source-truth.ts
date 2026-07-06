@@ -82,6 +82,18 @@ export type SourceTruthSignatureDeclarationKind =
   | 'type'
   | 'variable';
 export type SourceTruthVariableDeclarationKind = 'const' | 'let' | 'var';
+export type SourceTruthSignatureMemberKind =
+  | 'property'
+  | 'method'
+  | 'constructor'
+  | 'get'
+  | 'set'
+  | 'index'
+  | 'call'
+  | 'construct'
+  | 'enum-member'
+  | 'unknown';
+export type SourceTruthSignatureMemberAccessibility = 'private' | 'protected' | 'public';
 export type SourceTruthConfigFileKind = 'package-json' | 'tsconfig-json';
 export type SourceTruthConfigLineRangeGranularity = 'field' | 'file';
 export type SourceTruthContextFactKind = 'test-file' | 'example-file' | 'test-case';
@@ -130,6 +142,19 @@ export interface SourceTruthSignatureHeritage {
   implements?: string[];
 }
 
+export interface SourceTruthSignatureMember {
+  kind: SourceTruthSignatureMemberKind;
+  name: string;
+  text: string;
+  optional?: true;
+  static?: true;
+  readonly?: true;
+  accessibility?: SourceTruthSignatureMemberAccessibility;
+  type?: string;
+  parameters?: SourceTruthSignatureParameter[];
+  returnType?: string;
+}
+
 export interface SourceTruthSignatureEvidence {
   declarationKind: SourceTruthSignatureDeclarationKind;
   text: string;
@@ -141,6 +166,7 @@ export interface SourceTruthSignatureEvidence {
   heritage?: SourceTruthSignatureHeritage;
   type?: string;
   memberCount?: number;
+  members?: SourceTruthSignatureMember[];
 }
 
 export interface SourceTruthFact {
@@ -479,8 +505,7 @@ async function traverseDirectory(options: {
     return;
   }
 
-  const entryBudgetExhausted =
-    directoryEntries.reachedLimit && state.visitedEntries >= maxEntries;
+  const entryBudgetExhausted = directoryEntries.reachedLimit && state.visitedEntries >= maxEntries;
 
   for (const entry of directoryEntries.entries) {
     if (state.truncated) {
@@ -879,7 +904,7 @@ function extractTypeScriptJavaScriptFacts(
           exportedName: statement.name.text,
           sourceFile,
           node: statement,
-          signature: buildEnumSignature(statement),
+          signature: buildEnumSignature(statement, sourceFile),
         })
       );
       continue;
@@ -2032,6 +2057,7 @@ function buildClassSignature(
 ): SourceTruthSignatureEvidence {
   const name = node.name?.text;
   const heritage = buildHeritageEvidence(node.heritageClauses, sourceFile);
+  const members = node.members.map((member) => buildClassSignatureMember(member, sourceFile));
   const signature: SourceTruthSignatureEvidence = {
     declarationKind: 'class',
     text: compactSignatureText(
@@ -2050,6 +2076,10 @@ function buildClassSignature(
     signature.heritage = heritage;
   }
 
+  if (members.length > 0) {
+    signature.members = members;
+  }
+
   return signature;
 }
 
@@ -2058,6 +2088,7 @@ function buildInterfaceSignature(
   sourceFile: ts.SourceFile
 ): SourceTruthSignatureEvidence {
   const heritage = buildHeritageEvidence(node.heritageClauses, sourceFile);
+  const members = node.members.map((member) => buildTypeElementSignatureMember(member, sourceFile));
   const signature: SourceTruthSignatureEvidence = {
     declarationKind: 'interface',
     text: compactSignatureText(
@@ -2071,6 +2102,10 @@ function buildInterfaceSignature(
 
   if (heritage !== undefined) {
     signature.heritage = heritage;
+  }
+
+  if (members.length > 0) {
+    signature.members = members;
   }
 
   return signature;
@@ -2094,12 +2129,22 @@ function buildTypeAliasSignature(
 
   if (ts.isTypeLiteralNode(node.type)) {
     signature.memberCount = node.type.members.length;
+    if (node.type.members.length > 0) {
+      signature.members = node.type.members.map((member) =>
+        buildTypeElementSignatureMember(member, sourceFile)
+      );
+    }
   }
 
   return signature;
 }
 
-function buildEnumSignature(node: ts.EnumDeclaration): SourceTruthSignatureEvidence {
+function buildEnumSignature(
+  node: ts.EnumDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureEvidence {
+  const members = node.members.map((member) => buildEnumSignatureMember(member, sourceFile));
+
   return {
     declarationKind: 'enum',
     text: compactSignatureText(
@@ -2107,7 +2152,388 @@ function buildEnumSignature(node: ts.EnumDeclaration): SourceTruthSignatureEvide
     ),
     name: node.name.text,
     memberCount: node.members.length,
+    ...(members.length > 0 ? { members } : {}),
   };
+}
+
+function buildClassSignatureMember(
+  member: ts.ClassElement,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureMember {
+  if (ts.isConstructorDeclaration(member)) {
+    const parameters = member.parameters.map((parameter) =>
+      buildParameterSignature(parameter, sourceFile)
+    );
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'constructor',
+      name: 'constructor',
+      text: compactSignatureText(
+        `${modifierPrefix(member, ['public', 'protected', 'private'])}constructor(${member.parameters
+          .map((parameter) => parameterText(parameter, sourceFile))
+          .join(', ')})`
+      ),
+      parameters,
+    };
+    applyClassMemberFlags(signatureMember, member);
+
+    return signatureMember;
+  }
+
+  if (ts.isMethodDeclaration(member)) {
+    const parameters = member.parameters.map((parameter) =>
+      buildParameterSignature(parameter, sourceFile)
+    );
+    const returnType = member.type
+      ? compactNodeText(member.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+      : undefined;
+    const name = classElementNameToText(member.name, sourceFile);
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'method',
+      name,
+      text: compactSignatureText(
+        `${modifierPrefix(member, [
+          'public',
+          'protected',
+          'private',
+          'static',
+          'abstract',
+          'override',
+          'declare',
+          'async',
+        ])}${member.asteriskToken ? '*' : ''}${name}${typeParametersText(
+          member.typeParameters,
+          sourceFile
+        )}(${member.parameters.map((parameter) => parameterText(parameter, sourceFile)).join(', ')})${
+          returnType ? `: ${returnType}` : ''
+        }`
+      ),
+      parameters,
+    };
+
+    if (returnType !== undefined) {
+      signatureMember.returnType = returnType;
+    }
+
+    if (member.questionToken !== undefined) {
+      signatureMember.optional = true;
+    }
+
+    applyClassMemberFlags(signatureMember, member);
+
+    return signatureMember;
+  }
+
+  if (ts.isPropertyDeclaration(member)) {
+    const type = member.type
+      ? compactNodeText(member.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+      : undefined;
+    const name = classElementNameToText(member.name, sourceFile);
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'property',
+      name,
+      text: compactSignatureText(
+        `${modifierPrefix(member, [
+          'public',
+          'protected',
+          'private',
+          'static',
+          'readonly',
+          'abstract',
+          'override',
+          'declare',
+        ])}${name}${member.questionToken ? '?' : ''}${type ? `: ${type}` : ''}`
+      ),
+    };
+
+    if (type !== undefined) {
+      signatureMember.type = type;
+    }
+
+    if (member.questionToken !== undefined) {
+      signatureMember.optional = true;
+    }
+
+    applyClassMemberFlags(signatureMember, member);
+
+    return signatureMember;
+  }
+
+  if (ts.isGetAccessorDeclaration(member)) {
+    const returnType = member.type
+      ? compactNodeText(member.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+      : undefined;
+    const name = classElementNameToText(member.name, sourceFile);
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'get',
+      name,
+      text: compactSignatureText(
+        `${modifierPrefix(member, [
+          'public',
+          'protected',
+          'private',
+          'static',
+          'abstract',
+          'override',
+        ])}get ${name}()${returnType ? `: ${returnType}` : ''}`
+      ),
+    };
+
+    if (returnType !== undefined) {
+      signatureMember.returnType = returnType;
+    }
+
+    applyClassMemberFlags(signatureMember, member);
+
+    return signatureMember;
+  }
+
+  if (ts.isSetAccessorDeclaration(member)) {
+    const parameters = member.parameters.map((parameter) =>
+      buildParameterSignature(parameter, sourceFile)
+    );
+    const name = classElementNameToText(member.name, sourceFile);
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'set',
+      name,
+      text: compactSignatureText(
+        `${modifierPrefix(member, [
+          'public',
+          'protected',
+          'private',
+          'static',
+          'abstract',
+          'override',
+        ])}set ${name}(${member.parameters
+          .map((parameter) => parameterText(parameter, sourceFile))
+          .join(', ')})`
+      ),
+      parameters,
+    };
+    applyClassMemberFlags(signatureMember, member);
+
+    return signatureMember;
+  }
+
+  if (ts.isIndexSignatureDeclaration(member)) {
+    return buildIndexSignatureMember(member, sourceFile);
+  }
+
+  return buildUnknownSignatureMember(member);
+}
+
+function buildTypeElementSignatureMember(
+  member: ts.TypeElement,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureMember {
+  if (ts.isPropertySignature(member)) {
+    const type = member.type
+      ? compactNodeText(member.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+      : undefined;
+    const name = propertyNameToText(member.name, sourceFile);
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'property',
+      name,
+      text: compactSignatureText(
+        `${modifierPrefix(member, ['readonly'])}${name}${member.questionToken ? '?' : ''}${
+          type ? `: ${type}` : ''
+        }`
+      ),
+    };
+
+    if (type !== undefined) {
+      signatureMember.type = type;
+    }
+
+    if (member.questionToken !== undefined) {
+      signatureMember.optional = true;
+    }
+
+    if (hasModifier(member, ts.SyntaxKind.ReadonlyKeyword)) {
+      signatureMember.readonly = true;
+    }
+
+    return signatureMember;
+  }
+
+  if (ts.isMethodSignature(member)) {
+    const parameters = member.parameters.map((parameter) =>
+      buildParameterSignature(parameter, sourceFile)
+    );
+    const returnType = member.type
+      ? compactNodeText(member.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+      : undefined;
+    const name = propertyNameToText(member.name, sourceFile);
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'method',
+      name,
+      text: compactSignatureText(
+        `${name}${member.questionToken ? '?' : ''}${typeParametersText(
+          member.typeParameters,
+          sourceFile
+        )}(${member.parameters.map((parameter) => parameterText(parameter, sourceFile)).join(', ')})${
+          returnType ? `: ${returnType}` : ''
+        }`
+      ),
+      parameters,
+    };
+
+    if (returnType !== undefined) {
+      signatureMember.returnType = returnType;
+    }
+
+    if (member.questionToken !== undefined) {
+      signatureMember.optional = true;
+    }
+
+    return signatureMember;
+  }
+
+  if (ts.isCallSignatureDeclaration(member)) {
+    const parameters = member.parameters.map((parameter) =>
+      buildParameterSignature(parameter, sourceFile)
+    );
+    const returnType = member.type
+      ? compactNodeText(member.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+      : undefined;
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'call',
+      name: '[call]',
+      text: compactSignatureText(
+        `${typeParametersText(member.typeParameters, sourceFile)}(${member.parameters
+          .map((parameter) => parameterText(parameter, sourceFile))
+          .join(', ')})${returnType ? `: ${returnType}` : ''}`
+      ),
+      parameters,
+    };
+
+    if (returnType !== undefined) {
+      signatureMember.returnType = returnType;
+    }
+
+    return signatureMember;
+  }
+
+  if (ts.isConstructSignatureDeclaration(member)) {
+    const parameters = member.parameters.map((parameter) =>
+      buildParameterSignature(parameter, sourceFile)
+    );
+    const returnType = member.type
+      ? compactNodeText(member.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+      : undefined;
+    const signatureMember: SourceTruthSignatureMember = {
+      kind: 'construct',
+      name: '[construct]',
+      text: compactSignatureText(
+        `new ${typeParametersText(member.typeParameters, sourceFile)}(${member.parameters
+          .map((parameter) => parameterText(parameter, sourceFile))
+          .join(', ')})${returnType ? `: ${returnType}` : ''}`
+      ),
+      parameters,
+    };
+
+    if (returnType !== undefined) {
+      signatureMember.returnType = returnType;
+    }
+
+    return signatureMember;
+  }
+
+  if (ts.isIndexSignatureDeclaration(member)) {
+    return buildIndexSignatureMember(member, sourceFile);
+  }
+
+  return buildUnknownSignatureMember(member);
+}
+
+function buildIndexSignatureMember(
+  member: ts.IndexSignatureDeclaration,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureMember {
+  const parameters = member.parameters.map((parameter) =>
+    buildParameterSignature(parameter, sourceFile)
+  );
+  const returnType = member.type
+    ? compactNodeText(member.type, sourceFile, MAX_SIGNATURE_DETAIL_TEXT_LENGTH)
+    : undefined;
+  const parameterTextValue = member.parameters
+    .map((parameter) => parameterText(parameter, sourceFile))
+    .join(', ');
+  const signatureMember: SourceTruthSignatureMember = {
+    kind: 'index',
+    name: `[${parameterTextValue}]`,
+    text: compactSignatureText(
+      `${modifierPrefix(member, ['readonly'])}[${parameterTextValue}]${
+        returnType ? `: ${returnType}` : ''
+      }`
+    ),
+    parameters,
+  };
+
+  if (returnType !== undefined) {
+    signatureMember.returnType = returnType;
+  }
+
+  if (hasModifier(member, ts.SyntaxKind.ReadonlyKeyword)) {
+    signatureMember.readonly = true;
+  }
+
+  return signatureMember;
+}
+
+function buildEnumSignatureMember(
+  member: ts.EnumMember,
+  sourceFile: ts.SourceFile
+): SourceTruthSignatureMember {
+  const name = propertyNameToText(member.name, sourceFile);
+
+  return {
+    kind: 'enum-member',
+    name,
+    text: name,
+  };
+}
+
+function buildUnknownSignatureMember(member: ts.Node): SourceTruthSignatureMember {
+  return {
+    kind: 'unknown',
+    name: '[unknown]',
+    text: `unhandled ${ts.SyntaxKind[member.kind]} member`,
+  };
+}
+
+function applyClassMemberFlags(
+  signatureMember: SourceTruthSignatureMember,
+  member: ts.ClassElement | ts.ConstructorDeclaration
+): void {
+  const accessibility = memberAccessibility(member);
+
+  if (accessibility !== undefined) {
+    signatureMember.accessibility = accessibility;
+  }
+
+  if (hasModifier(member, ts.SyntaxKind.StaticKeyword)) {
+    signatureMember.static = true;
+  }
+
+  if (hasModifier(member, ts.SyntaxKind.ReadonlyKeyword)) {
+    signatureMember.readonly = true;
+  }
+}
+
+function memberAccessibility(member: ts.Node): SourceTruthSignatureMemberAccessibility | undefined {
+  if (hasModifier(member, ts.SyntaxKind.PrivateKeyword)) {
+    return 'private';
+  }
+
+  if (hasModifier(member, ts.SyntaxKind.ProtectedKeyword)) {
+    return 'protected';
+  }
+
+  if (hasModifier(member, ts.SyntaxKind.PublicKeyword)) {
+    return 'public';
+  }
+
+  return undefined;
 }
 
 function buildParameterSignature(
@@ -2247,18 +2673,27 @@ function variableDeclarationKind(
   return 'var';
 }
 
-function modifierPrefix(
-  node: ts.Node,
-  modifiers: readonly ('abstract' | 'async' | 'const' | 'declare' | 'default' | 'export')[]
-): string {
+type SourceTruthModifier =
+  | 'abstract'
+  | 'async'
+  | 'const'
+  | 'declare'
+  | 'default'
+  | 'export'
+  | 'override'
+  | 'private'
+  | 'protected'
+  | 'public'
+  | 'readonly'
+  | 'static';
+
+function modifierPrefix(node: ts.Node, modifiers: readonly SourceTruthModifier[]): string {
   const words = modifiers.filter((modifier) => hasModifier(node, modifierSyntaxKind(modifier)));
 
   return words.length > 0 ? `${words.join(' ')} ` : '';
 }
 
-function modifierSyntaxKind(
-  modifier: 'abstract' | 'async' | 'const' | 'declare' | 'default' | 'export'
-): ts.SyntaxKind {
+function modifierSyntaxKind(modifier: SourceTruthModifier): ts.SyntaxKind {
   switch (modifier) {
     case 'abstract':
       return ts.SyntaxKind.AbstractKeyword;
@@ -2272,6 +2707,18 @@ function modifierSyntaxKind(
       return ts.SyntaxKind.DefaultKeyword;
     case 'export':
       return ts.SyntaxKind.ExportKeyword;
+    case 'override':
+      return ts.SyntaxKind.OverrideKeyword;
+    case 'private':
+      return ts.SyntaxKind.PrivateKeyword;
+    case 'protected':
+      return ts.SyntaxKind.ProtectedKeyword;
+    case 'public':
+      return ts.SyntaxKind.PublicKeyword;
+    case 'readonly':
+      return ts.SyntaxKind.ReadonlyKeyword;
+    case 'static':
+      return ts.SyntaxKind.StaticKeyword;
   }
 }
 
@@ -2477,6 +2924,17 @@ function propertyNameToText(name: ts.PropertyName, sourceFile: ts.SourceFile): s
   }
 
   return compactNodeText(name, sourceFile, MAX_SIGNATURE_NAME_LENGTH);
+}
+
+function classElementNameToText(
+  name: ts.PropertyName | ts.PrivateIdentifier,
+  sourceFile: ts.SourceFile
+): string {
+  if (ts.isPrivateIdentifier(name)) {
+    return `#${name.text}`;
+  }
+
+  return propertyNameToText(name, sourceFile);
 }
 
 function bindingNameHasDefault(name: ts.BindingName): boolean {

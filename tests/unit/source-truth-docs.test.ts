@@ -261,6 +261,13 @@ describe('source-truth docs generation', () => {
     expect(markdown).toContain('    - Return type: `number`');
     expect(markdown).toContain('    - Variables: `typedValue: number`');
     expect(markdown).toContain('    - Member count: `1`');
+    expect(markdown).toContain('    - Members:');
+    expect(markdown).toContain(
+      '      - `label: string` (kind: `property`, name: `label`, type: `string`)'
+    );
+    expect(markdown).toContain(
+      '- Direct declaration member rosters are observed AST facts only; class member bodies and initializer values are omitted.'
+    );
     expect(markdown).not.toContain('return typedValue');
     expect(markdown).not.toContain('123');
     expect(markdown).not.toContain('fallback');
@@ -753,7 +760,11 @@ describe('source-truth docs generation', () => {
     const sourceDir = join(dir, 'source');
     const outputDir = join(dir, 'out');
     await mkdir(sourceDir, { recursive: true });
-    await writeFile(join(sourceDir, 'index.ts'), 'export function value(): boolean { return true; }\n', 'utf-8');
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      'export function value(): boolean { return true; }\n',
+      'utf-8'
+    );
 
     await generateSourceTruthDocs({ source: sourceDir, outputDir });
     const manifestPath = join(outputDir, 'manifest.json');
@@ -779,7 +790,11 @@ describe('source-truth docs generation', () => {
     const sourceDir = join(dir, 'source');
     const outputDir = join(dir, 'out');
     await mkdir(sourceDir, { recursive: true });
-    await writeFile(join(sourceDir, 'index.ts'), 'export function value(): boolean { return true; }\n', 'utf-8');
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      'export function value(): boolean { return true; }\n',
+      'utf-8'
+    );
 
     await generateSourceTruthDocs({ source: sourceDir, outputDir });
     const manifestPath = join(outputDir, 'manifest.json');

@@ -16,6 +16,7 @@ import {
   type SourceTruthFileEvidence,
   type SourceTruthInspectionReport,
   type SourceTruthSignatureEvidence,
+  type SourceTruthSignatureMember,
   type SourceTruthSignatureParameter,
   type SourceTruthSignatureVariable,
   type SourceTruthSourceType,
@@ -239,6 +240,7 @@ export function formatSourceTruthMarkdown(report: SourceTruthInspectionReport): 
     '- No runtime behavior is inferred.',
     '- No framework identity, routes, task fit, or source selection is inferred.',
     '- Re-export targets and export-all targets are not resolved.',
+    '- Direct declaration member rosters are observed AST facts only; class member bodies and initializer values are omitted.',
     '- Package/config facts are reported only from explicit `package.json` and `tsconfig*.json` files within the inspection limits.',
     '- Config line ranges are field-level when the inspector can locate a JSON property or array item; otherwise they use the file line range and say so.',
     '- Test/example context facts are path/filename-level evidence only; context line ranges cover the whole file.',
@@ -424,6 +426,16 @@ function appendSignatureEvidence(lines: string[], signature: SourceTruthSignatur
   if (signature.memberCount !== undefined) {
     lines.push(`    - Member count: ${formatMarkdownCodeSpan(String(signature.memberCount))}`);
   }
+
+  if (signature.members !== undefined) {
+    lines.push('    - Members:');
+
+    for (const member of signature.members) {
+      lines.push(
+        `      - ${formatMarkdownCodeSpan(member.text)} (${formatSignatureMemberDetails(member)})`
+      );
+    }
+  }
 }
 
 function formatSignatureParameters(parameters: SourceTruthSignatureParameter[]): string {
@@ -458,6 +470,39 @@ function formatSignatureVariables(variables: SourceTruthSignatureVariable[]): st
         : formatMarkdownCodeSpan(variable.name)
     )
     .join('; ');
+}
+
+function formatSignatureMemberDetails(member: SourceTruthSignatureMember): string {
+  const details = [
+    `kind: ${formatMarkdownCodeSpan(member.kind)}`,
+    `name: ${formatMarkdownCodeSpan(member.name)}`,
+  ];
+
+  if (member.optional !== undefined) {
+    details.push(`optional: ${formatMarkdownCodeSpan(String(member.optional))}`);
+  }
+
+  if (member.static !== undefined) {
+    details.push(`static: ${formatMarkdownCodeSpan(String(member.static))}`);
+  }
+
+  if (member.readonly !== undefined) {
+    details.push(`readonly: ${formatMarkdownCodeSpan(String(member.readonly))}`);
+  }
+
+  if (member.accessibility !== undefined) {
+    details.push(`accessibility: ${formatMarkdownCodeSpan(member.accessibility)}`);
+  }
+
+  if (member.type !== undefined) {
+    details.push(`type: ${formatMarkdownCodeSpan(member.type)}`);
+  }
+
+  if (member.returnType !== undefined) {
+    details.push(`return: ${formatMarkdownCodeSpan(member.returnType)}`);
+  }
+
+  return details.join(', ');
 }
 
 function formatEvidenceSignals(evidenceSignals: string[]): string {
@@ -710,7 +755,6 @@ async function describeGeneratedOutputs(
 
   return describedOutputs.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
 }
-
 
 function formatHash(hash: string): string {
   return `${HASH_PREFIX}${hash}`;

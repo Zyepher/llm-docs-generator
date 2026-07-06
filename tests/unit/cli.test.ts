@@ -2619,12 +2619,9 @@ describe('CLI compatibility behavior', () => {
   it('documents explicit parser plugin generation without broad workflow or sandbox claims', async () => {
     const docs = new Map(
       await Promise.all(
-        [
-          'README.md',
-          'AGENT_CONTEXT.md',
-          'index.md',
-          'skills/llm-docs-generator/SKILL.md',
-        ].map(async (path) => [path, await readFile(join(repoRoot, path), 'utf-8')] as const)
+        ['README.md', 'AGENT_CONTEXT.md', 'index.md', 'skills/llm-docs-generator/SKILL.md'].map(
+          async (path) => [path, await readFile(join(repoRoot, path), 'utf-8')] as const
+        )
       )
     );
     const combined = [...docs.values()].join('\n');
@@ -3720,13 +3717,14 @@ describe('CLI compatibility behavior', () => {
     );
     const expectedFactFamilies = [
       'export facts',
-      'optional direct-declaration AST signatures',
+      'optional direct-declaration AST signatures and member rosters',
       'package/config facts',
       'path/filename test/example context facts',
       'AST-observed test-case label context facts',
     ];
     const expectedLimitations = [
       'no behavior inference',
+      'member rosters omit bodies and initializer values',
       'no assertion parsing',
       'no test body serialization',
       'test-case labels are not behavior or correctness proof',
@@ -4645,7 +4643,10 @@ describe('CLI compatibility behavior', () => {
     await writeFile(oversizedPath, Buffer.alloc(DEFAULT_DISCOVERY_MAX_FILE_BYTES + 1, 0x61));
     await writeFile(smallPath, '# Guide\n', 'utf-8');
 
-    const report = await discoverLocalSource({ source: sourceDir, outputDir: join(dir, 'reports') });
+    const report = await discoverLocalSource({
+      source: sourceDir,
+      outputDir: join(dir, 'reports'),
+    });
 
     expect(report.candidates.map((candidate) => candidate.path)).toEqual(['guide.md']);
     expect(report.warnings).toContain(
@@ -5407,7 +5408,11 @@ describe('CLI compatibility behavior', () => {
     const sourceDir = join(dir, 'source');
     const outputDir = join(dir, 'out');
     await mkdir(sourceDir, { recursive: true });
-    await writeFile(join(sourceDir, 'index.ts'), 'export function realExport() {\n  return 1;\n}\n', 'utf-8');
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      'export function realExport() {\n  return 1;\n}\n',
+      'utf-8'
+    );
 
     await runCli(['source-truth', 'generate', '--source', sourceDir, '--output-dir', outputDir]);
     expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(true);
@@ -6124,7 +6129,9 @@ describe('CLI compatibility behavior', () => {
     ]) {
       const blocked = await runCliWithExit(['discover', '--url', ipv6Url]);
       expect(blocked.exitCode).toBe(1);
-      expect(blocked.stderr).toContain('Refusing to fetch a private, link-local, or cloud-metadata');
+      expect(blocked.stderr).toContain(
+        'Refusing to fetch a private, link-local, or cloud-metadata'
+      );
     }
   }, 30000);
 
@@ -7352,7 +7359,9 @@ describe('CLI compatibility behavior', () => {
     expect(report.candidates.map((candidate) => candidate.path)).toEqual(['a.md']);
     expect(report.warnings).toContain('Traversal pruned subtrees at max depth 0 (first: z-nested)');
     expect(reportFromDisk.traversal.truncated).toBe(true);
-    expect(reportFromDisk.warnings).toContain('Traversal pruned subtrees at max depth 0 (first: z-nested)');
+    expect(reportFromDisk.warnings).toContain(
+      'Traversal pruned subtrees at max depth 0 (first: z-nested)'
+    );
   });
 
   it('reports truncated local discovery when maxEntries bounds directory fanout', async () => {
@@ -13038,7 +13047,11 @@ describe('CLI compatibility behavior', () => {
     await symlink(outputDir, outputAlias, 'dir');
 
     const outputDirResult = await runCli(['verify', '--output-dir', outputAlias]);
-    const manifestResult = await runCli(['verify', '--manifest', join(outputAlias, 'manifest.json')]);
+    const manifestResult = await runCli([
+      'verify',
+      '--manifest',
+      join(outputAlias, 'manifest.json'),
+    ]);
     const expectedCheckedFiles = manifest.sourceFiles.length + manifest.generatedOutputs.length;
 
     expect(outputDirResult.stdout).toContain(`Checked files: ${expectedCheckedFiles}`);

@@ -170,11 +170,12 @@ Current implementation:
   `describe`, `it`, and `test` label facts for direct calls and `.only` /
   `.skip` forms when the first argument is a string literal or
   no-substitution template literal. Directly exported top-level
-  declarations may include compact AST signature evidence with bodies and
-  initializer values omitted. Re-exports, export-all declarations, and export
-  assignments remain unresolved. It does not parse assertions, serialize test
-  bodies, execute tests, prove claims, infer behavior, infer framework
-  identity, decide source selection, or choose task fit.
+  declarations may include compact AST signature evidence and member rosters
+  with bodies and initializer values omitted. Re-exports, export-all
+  declarations, and export assignments remain unresolved. It does not parse
+  assertions, serialize test bodies, execute tests, prove claims, infer
+  behavior, infer framework identity, decide source selection, or choose task
+  fit.
 - Can run `source-truth generate --source <local-file-or-directory>
 --output-dir <dir>` to write an evidence-bound Markdown file, the raw
   evidence report, and a manifest with generated output hashes, byte sizes, line
@@ -506,8 +507,9 @@ Important current-state rule:
 
 Do not claim this project can generate accurate or behavior-complete docs from
 code. `source-truth inspect` extracts conservative TypeScript/JavaScript export
-facts, optional direct-declaration AST signature evidence, and `package.json` /
-`tsconfig*.json` package/config facts from an explicit local source path. It
+facts, optional direct-declaration AST signature evidence and member rosters,
+and `package.json` / `tsconfig*.json` package/config facts from an explicit
+local source path. It
 also extracts file-level test/example context facts from explicit path and
 filename signals plus AST-observed test-case label facts from files already
 identified as tests. Test-case names are labels only, not proof of behavior or

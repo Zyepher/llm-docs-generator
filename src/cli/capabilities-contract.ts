@@ -95,7 +95,7 @@ export const CAPABILITIES_CONTRACT = {
       outputFiles: ['stdout JSON evidence report'],
       factFamilies: [
         'export facts',
-        'optional direct-declaration AST signatures',
+        'optional direct-declaration AST signatures and member rosters',
         'package/config facts',
         'path/filename test/example context facts',
         'AST-observed test-case label context facts',
@@ -103,6 +103,7 @@ export const CAPABILITIES_CONTRACT = {
       summary: 'deterministic local evidence extraction for conservative observed facts',
       limitations: [
         'no behavior inference',
+        'member rosters omit bodies and initializer values',
         'no assertion parsing',
         'no test body serialization',
         'test-case labels are not behavior or correctness proof',
@@ -122,7 +123,7 @@ export const CAPABILITIES_CONTRACT = {
       outputFiles: ['source-truth-report.json', 'source-truth.md', 'manifest.json', 'failure.json'],
       factFamilies: [
         'export facts',
-        'optional direct-declaration AST signatures',
+        'optional direct-declaration AST signatures and member rosters',
         'package/config facts',
         'path/filename test/example context facts',
         'AST-observed test-case label context facts',
@@ -134,6 +135,7 @@ export const CAPABILITIES_CONTRACT = {
         'manifest source-file line/token metadata is content-free text metadata, not behavior verification',
         'artifact summaries are content-free manifest metadata only',
         'no behavior inference',
+        'member rosters omit bodies and initializer values',
         'no assertion parsing',
         'no test body serialization',
         'test-case labels are not behavior or correctness proof',
@@ -620,13 +622,14 @@ export const CAPABILITIES_CONTRACT = {
     status: 'implemented-conservative-local-evidence',
     supportedFactFamilies: [
       'export facts',
-      'optional direct-declaration AST signatures',
+      'optional direct-declaration AST signatures and member rosters',
       'package/config facts',
       'path/filename test/example context facts',
       'AST-observed test-case label context facts',
     ],
     limitations: [
       'no behavior inference',
+      'member rosters omit bodies and initializer values',
       'no assertion parsing',
       'no test body serialization',
       'test-case labels are not behavior or correctness proof',
@@ -684,7 +687,7 @@ export const CAPABILITIES_CONTRACT = {
       command: 'behavior-level generation from source code',
       status: 'planned-unsupported',
       reason:
-        'source-truth generation is limited to observed export, signature, package/config, and path context facts',
+        'source-truth generation is limited to observed export, signature, member-roster, package/config, and path context facts',
     },
     {
       id: 'parser-plugin-broader-workflows',
