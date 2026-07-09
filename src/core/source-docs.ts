@@ -25,7 +25,8 @@ import {
   type InputProvenance,
   type ManifestContract,
 } from './manifest.js';
-import { formatDocNode } from './universal-formatter.js';
+import { formatDocNode, type FormatterSourcePack } from './universal-formatter.js';
+import { matchesAnyGlob } from './category-globs.js';
 import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
 import { aggregateSourceFilesHash } from '../utils/source-files-hash.js';
@@ -103,6 +104,27 @@ export interface SourceDocsOutputDefaults {
   systemPrompt?: string;
 }
 
+export interface GenerateSourceGitContext {
+  remoteUrl: string | null;
+  commit: string;
+  tags: string[];
+  dirty: boolean;
+  sourceRootFromRepo: string;
+}
+
+export type SourceDocsSplitBy = 'dirs';
+
+export interface SourceDocsCategoryDefinition {
+  id: string;
+  title: string;
+  include: string[];
+}
+
+export interface SourceDocsCategoriesConfig {
+  categories: SourceDocsCategoryDefinition[];
+  fallback: string;
+}
+
 export interface GenerateSourceDocsOptions {
   source: string;
   outputDir: string;
@@ -112,6 +134,10 @@ export interface GenerateSourceDocsOptions {
   output?: SourceDocsOutputDefaults;
   preset?: SourceDocsPresetMetadata;
   generator: SourceDocsGeneratorMetadata;
+  gitContext?: GenerateSourceGitContext;
+  label?: string;
+  splitBy?: SourceDocsSplitBy;
+  categories?: SourceDocsCategoriesConfig;
 }
 
 interface SourceDocsBaseFileManifestEntry {
@@ -283,6 +309,24 @@ export async function generateSourceDocs(
 
     const root = await parsePreparedSource(source, preparedSource);
     const warnings = [...preparedSource.warnings, ...collectDocNodeWarnings(root)];
+
+    // Optional category grouping. Restructures the file sections under CATEGORY
+    // nodes so the formatter emits per-category files; the combined -full-llms.txt
+    // is always produced regardless.
+    if (options.splitBy !== undefined || options.categories !== undefined) {
+      applySourceDocsCategories(root, source, options, warnings);
+    }
+
+    const packRelpaths = new Set(preparedSource.sourceFiles.map((file) => file.path));
+    const sourcePack: FormatterSourcePack = {
+      resolvedPath: source.resolvedPath,
+      packRelpaths,
+      emitToc: true,
+      onWarning: (warning) => warnings.push(warning),
+      ...(options.label === undefined ? {} : { label: options.label }),
+      ...(options.gitContext === undefined ? {} : { gitContext: options.gitContext }),
+    };
+
     const outputPaths = await formatDocNode(root, {
       outputDir: llmDocsDir,
       filenamePrefix:
@@ -292,6 +336,7 @@ export async function generateSourceDocs(
         options.output?.systemPrompt ??
         `This is a local source documentation pack generated from ${source.resolvedPath}.`,
       includeMetadata: false,
+      sourcePack,
     });
     const generatedOutputs = await describeGeneratedOutputs(outputDir, outputPaths);
     const chunkOutput =
@@ -1200,13 +1245,20 @@ async function parsePreparedSource(
   preparedSource: PreparedSourceDocsInput
 ): Promise<DocNode> {
   if (source.type === 'file' || preparedSource.parserPlugin !== undefined) {
-    return await preparedSource.parser.parse(source.resolvedPath);
+    const root = await preparedSource.parser.parse(source.resolvedPath);
+    // Tag the single-file section with its source relpath so the formatter emits
+    // a [source:] marker and can resolve pack: links against it.
+    const relpath = preparedSource.sourceFiles[0]?.path ?? basename(source.resolvedPath);
+    root.metadata.set('sourceRelPath', relpath);
+    return root;
   }
 
   const children: DocNode[] = [];
 
   for (const file of preparedSource.sourceFiles) {
-    children.push(await preparedSource.parser.parse(file.resolvedPath));
+    const child = await preparedSource.parser.parse(file.resolvedPath);
+    child.metadata.set('sourceRelPath', file.path);
+    children.push(child);
   }
 
   const title = basename(source.resolvedPath) || 'Documentation';
@@ -1221,6 +1273,90 @@ async function parsePreparedSource(
   root.children = children;
 
   return root;
+}
+
+/**
+ * Group the parsed file sections under CATEGORY nodes so the formatter emits
+ * per-category output files. `dirs` uses the first path segment of each file's
+ * relpath (files at the root become category "root"). Explicit `categories`
+ * assign by first-matching include glob in listed order; unmatched files fall to
+ * the fallback category and are reported as a warning.
+ */
+function applySourceDocsCategories(
+  root: DocNode,
+  source: ResolvedSourceDocsInput,
+  options: GenerateSourceDocsOptions,
+  warnings: string[]
+): void {
+  if (options.splitBy !== undefined && options.categories !== undefined) {
+    throw new Error('generate --source --split-by and --categories are mutually exclusive');
+  }
+
+  if (root.type !== DocNodeType.ROOT || source.type !== 'directory') {
+    throw new Error(
+      'generate --source --split-by/--categories require a directory source with multiple files'
+    );
+  }
+
+  const files = root.children;
+  const groups = new Map<string, { title: string; nodes: DocNode[] }>();
+  const orderedIds: string[] = [];
+
+  const pushInto = (id: string, title: string, node: DocNode): void => {
+    let group = groups.get(id);
+    if (group === undefined) {
+      group = { title, nodes: [] };
+      groups.set(id, group);
+      orderedIds.push(id);
+    }
+    group.nodes.push(node);
+  };
+
+  const unmatched: string[] = [];
+
+  for (const node of files) {
+    const relpath = sourceRelPathOfNode(node);
+
+    if (options.splitBy === 'dirs') {
+      const segment = relpath.includes('/') ? (relpath.split('/')[0] as string) : 'root';
+      pushInto(segment, segment, node);
+      continue;
+    }
+
+    const config = options.categories;
+    if (config === undefined) {
+      continue;
+    }
+    const matched = config.categories.find((category) =>
+      matchesAnyGlob(relpath, category.include)
+    );
+    if (matched !== undefined) {
+      pushInto(matched.id, matched.title, node);
+    } else {
+      unmatched.push(relpath);
+      pushInto(config.fallback, config.fallback, node);
+    }
+  }
+
+  if (unmatched.length > 0) {
+    warnings.push(
+      `${unmatched.length} source file(s) matched no category and used the fallback: ${[...unmatched].sort(compareStringsByCodeUnit).join(', ')}`
+    );
+  }
+
+  root.children = orderedIds.map((id) => {
+    const group = groups.get(id) as { title: string; nodes: DocNode[] };
+    const metadata = new Map<string, unknown>([['category', id]]);
+    return createDocNode(DocNodeType.CATEGORY, sanitizeFileSegment(id), group.title, {
+      children: group.nodes,
+      metadata,
+    });
+  });
+}
+
+function sourceRelPathOfNode(node: DocNode): string {
+  const relpath = node.metadata.get('sourceRelPath');
+  return typeof relpath === 'string' ? relpath : '';
 }
 
 async function describeGeneratedOutputs(
@@ -1547,9 +1683,11 @@ function sanitizeFileSegment(value: string): string {
 
 /**
  * Remove only the artifacts this mode owns: the manifest, generated
- * `*-llms.txt` outputs, and the semantic-chunks JSONL. Anything else in the
- * output tree (for example an agent-authored llm-docs/index.md navigation
- * file, which the documented workflow encourages) is deliberately preserved.
+ * `*-llms.txt` outputs (the combined `-full-llms.txt`, any per-category
+ * `-<categoryId>-llms.txt`, and the `-toc-llms.txt` table of contents), and the
+ * semantic-chunks JSONL. Anything else in the output tree (for example an
+ * agent-authored llm-docs/index.md navigation file, which the documented
+ * workflow encourages) is deliberately preserved.
  */
 async function clearSourceDocsArtifacts(outputDir: string): Promise<void> {
   const llmDocsDir = join(outputDir, SOURCE_DOCS_OUTPUT_DIR);

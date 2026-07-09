@@ -16,6 +16,7 @@ import { writeTextFileSafely } from '../utils/safe-write.js';
 
 import type { DocNode, ContentBlock } from './models.js';
 import { DocNodeType, ContentBlockType } from './models.js';
+import { rewriteProseLinks, type MarkdownLinkGitContext } from './markdown-links.js';
 
 // ============================================================================
 // CONSTANTS
@@ -23,10 +24,40 @@ import { DocNodeType, ContentBlockType } from './models.js';
 
 const NEWLINE = '\n';
 const DOUBLE_NEWLINE = '\n\n';
+const MAX_HEADING_LEVEL = 6;
 
 // ============================================================================
 // UNIVERSAL FORMATTER
 // ============================================================================
+
+/**
+ * Git provenance passed to the formatter for the header stamp and for pinning
+ * out-of-pack relative links. Structurally compatible with
+ * `GenerateSourceGitContext` in source-docs.ts (kept local to avoid a circular
+ * import).
+ */
+export interface FormatterGitContext {
+  remoteUrl: string | null;
+  commit: string;
+  tags: string[];
+  dirty: boolean;
+  sourceRootFromRepo: string;
+}
+
+/**
+ * Source-pack rendering context. Its presence switches on the local-source-pack
+ * behaviors (header provenance stamp, per-section `[source:]` markers, link
+ * rewriting, and the optional table-of-contents output). Absent for the
+ * configured-SDK/OpenRef path, which keeps its existing output verbatim.
+ */
+export interface FormatterSourcePack {
+  resolvedPath: string;
+  label?: string;
+  gitContext?: FormatterGitContext;
+  packRelpaths: ReadonlySet<string>;
+  emitToc: boolean;
+  onWarning: (warning: string) => void;
+}
 
 export interface FormatterOptions {
   outputDir: string;
@@ -34,6 +65,17 @@ export interface FormatterOptions {
   title?: string;
   systemPrompt?: string;
   includeMetadata?: boolean;
+  sourcePack?: FormatterSourcePack;
+}
+
+interface FileRenderContext {
+  relpath: string;
+  linkDefinitions: Map<string, string>;
+}
+
+interface RenderContext {
+  file: FileRenderContext | undefined;
+  collectWarnings: boolean;
 }
 
 /**
@@ -52,17 +94,51 @@ export class UniversalFormatter {
    *
    * Performance: O(n) where n = total nodes in tree
    */
+  // Link-rewrite warning accumulators. Populated only on the canonical full-doc
+  // render (category/TOC renders reuse the same nodes and must not double-count).
+  private readonly unresolvedReferenceLabels = new Set<string>();
+  private unrewrittenRelativeLinkCount = 0;
+  private nonGithubRemoteCount = 0;
+
   async generateAll(): Promise<string[]> {
     const outputDir = this.options.outputDir;
     await mkdir(outputDir, { recursive: true });
 
-    // Generate full combined document
+    // Generate full combined document (canonical pass: collects link warnings).
     const outputPaths = [await this.generateFullDoc()];
 
-    // Generate modular documents by category (if applicable)
+    // Generate modular documents by category (if applicable). Warning collection
+    // is suppressed so the same nodes are not counted twice.
     outputPaths.push(...(await this.generateModularDocs()));
 
+    if (this.options.sourcePack?.emitToc === true) {
+      outputPaths.push(await this.generateTableOfContents());
+    }
+
+    this.flushLinkWarnings();
+
     return outputPaths;
+  }
+
+  private flushLinkWarnings(): void {
+    const sourcePack = this.options.sourcePack;
+    if (sourcePack === undefined) {
+      return;
+    }
+
+    for (const label of [...this.unresolvedReferenceLabels].sort()) {
+      sourcePack.onWarning(`Unresolved reference-link label with no definition: [${label}]`);
+    }
+    if (this.unrewrittenRelativeLinkCount > 0) {
+      sourcePack.onWarning(
+        `Left ${this.unrewrittenRelativeLinkCount} relative markdown link(s) unrewritten (no git context to pin out-of-pack targets)`
+      );
+    }
+    if (this.nonGithubRemoteCount > 0) {
+      sourcePack.onWarning(
+        `Left ${this.nonGithubRemoteCount} relative markdown link(s) unrewritten (non-github remote)`
+      );
+    }
   }
 
   /**
@@ -78,7 +154,7 @@ export class UniversalFormatter {
     parts.push(this.generateHeader());
 
     // Content
-    parts.push(this.formatNode(this.root, []));
+    parts.push(this.formatNode(this.root, [], { file: undefined, collectWarnings: true }));
 
     const content = parts.join('');
 
@@ -118,8 +194,8 @@ export class UniversalFormatter {
       // System prompt for category
       parts.push(this.generateCategoryHeader(category));
 
-      // Format category content
-      parts.push(this.formatNode(category, []));
+      // Format category content (warnings already collected on the full pass)
+      parts.push(this.formatNode(category, [], { file: undefined, collectWarnings: false }));
 
       await writeTextFileSafely(filepath, parts.join(''));
       outputPaths.push(filepath);
@@ -134,11 +210,8 @@ export class UniversalFormatter {
   private generateHeader(): string {
     const parts: string[] = [];
 
-    // System prompt
-    const systemPrompt =
-      this.options.systemPrompt ||
-      `This is the complete developer documentation for ${this.options.title || this.root.title}.`;
-    parts.push(`<SYSTEM>${systemPrompt}</SYSTEM>`, DOUBLE_NEWLINE);
+    // System prompt (stamped with provenance for local source packs)
+    parts.push(`<SYSTEM>${this.buildSystemPrompt()}</SYSTEM>`, DOUBLE_NEWLINE);
 
     // Metadata
     if (this.options.includeMetadata !== false) {
@@ -158,6 +231,50 @@ export class UniversalFormatter {
     parts.push(`# ${title}`, DOUBLE_NEWLINE);
 
     return parts.join('');
+  }
+
+  /**
+   * Build the SYSTEM prompt. For local source packs the first line carries the
+   * source path and, when provided, the operator label and pinned git
+   * provenance (remote, commit, tags), so the pack is self-describing.
+   */
+  private buildSystemPrompt(): string {
+    const sourcePack = this.options.sourcePack;
+    const base =
+      this.options.systemPrompt ||
+      (sourcePack !== undefined
+        ? `This is a local source documentation pack generated from ${sourcePack.resolvedPath}.`
+        : `This is the complete developer documentation for ${this.options.title || this.root.title}.`);
+
+    if (sourcePack === undefined) {
+      return base;
+    }
+
+    // Append provenance segments to whatever base prompt was chosen (a preset may
+    // supply its own). Segments are omitted when not provided.
+    const segments: string[] = [];
+    if (sourcePack.label !== undefined && sourcePack.label.length > 0) {
+      segments.push(`label: ${sourcePack.label}`);
+    }
+    const git = sourcePack.gitContext;
+    if (git !== undefined) {
+      let gitSegment =
+        git.remoteUrl !== null && git.remoteUrl.length > 0
+          ? `source: ${git.remoteUrl}@${git.commit}`
+          : `commit: ${git.commit}`;
+      if (git.tags.length > 0) {
+        gitSegment += ` (tags: ${git.tags.join(', ')})`;
+      }
+      if (git.dirty) {
+        gitSegment += ' (dirty)';
+      }
+      segments.push(gitSegment);
+    }
+
+    if (segments.length === 0) {
+      return base;
+    }
+    return `${base.replace(/\.\s*$/, '')} | ${segments.join(' | ')}`;
   }
 
   /**
@@ -186,14 +303,20 @@ export class UniversalFormatter {
    * @param numbers - Hierarchical number path (e.g., [1, 2, 3] for 1.2.3)
    * @returns Formatted string
    */
-  private formatNode(node: DocNode, numbers: number[]): string {
+  private formatNode(node: DocNode, numbers: number[], ctx: RenderContext): string {
     const parts: string[] = [];
+
+    // A node with a source relpath opens a new file context: its `[source:]`
+    // marker anchors links, and its captured reference definitions and relpath
+    // apply to itself and all descendants until a deeper file context replaces
+    // them.
+    const nodeCtx = this.enterFileContext(node, ctx);
 
     // For ROOT nodes, don't format the node itself, just children
     if (node.type === DocNodeType.ROOT) {
       let childNum = 1;
       for (const child of node.children) {
-        parts.push(this.formatNode(child, [childNum]));
+        parts.push(this.formatNode(child, [childNum], nodeCtx));
         childNum++;
       }
       return parts.join('');
@@ -203,60 +326,125 @@ export class UniversalFormatter {
     if (numbers.length > 0) {
       const numberString = numbers.join('.');
       const heading = this.getHeading(node.type, numbers.length);
-      parts.push(`${heading} ${numberString}. ${node.title}`, DOUBLE_NEWLINE);
+      const sourceRelpath = this.sourceRelpathOf(node);
+      if (sourceRelpath !== undefined) {
+        // Marker immediately follows the section heading, greppable via ^\[source:
+        parts.push(
+          `${heading} ${numberString}. ${node.title}`,
+          NEWLINE,
+          `[source: ${sourceRelpath}]`,
+          DOUBLE_NEWLINE
+        );
+      } else {
+        parts.push(`${heading} ${numberString}. ${node.title}`, DOUBLE_NEWLINE);
+      }
     }
 
     // Format description as prose if present
     if (node.description) {
-      parts.push(node.description, DOUBLE_NEWLINE);
+      parts.push(this.rewriteProse(node.description, nodeCtx), DOUBLE_NEWLINE);
     }
 
     // Format content blocks
     for (const content of node.content) {
-      parts.push(this.formatContent(content));
+      parts.push(this.formatContent(content, nodeCtx));
     }
 
     // Format children recursively
     let childNum = 1;
     for (const child of node.children) {
       const childNumbers = [...numbers, childNum];
-      parts.push(this.formatNode(child, childNumbers));
+      parts.push(this.formatNode(child, childNumbers, nodeCtx));
       childNum++;
     }
 
     return parts.join('');
   }
 
+  private sourceRelpathOf(node: DocNode): string | undefined {
+    const relpath = node.metadata.get('sourceRelPath');
+    return typeof relpath === 'string' && relpath.length > 0 ? relpath : undefined;
+  }
+
+  private enterFileContext(node: DocNode, ctx: RenderContext): RenderContext {
+    const relpath = this.sourceRelpathOf(node);
+    if (relpath === undefined) {
+      return ctx;
+    }
+    return {
+      collectWarnings: ctx.collectWarnings,
+      file: {
+        relpath,
+        linkDefinitions: readLinkDefinitions(node),
+      },
+    };
+  }
+
+  private rewriteProse(text: string, ctx: RenderContext): string {
+    const sourcePack = this.options.sourcePack;
+    if (sourcePack === undefined || ctx.file === undefined) {
+      return text;
+    }
+    const collect = ctx.collectWarnings;
+    return rewriteProseLinks(text, {
+      currentRelpath: ctx.file.relpath,
+      packRelpaths: sourcePack.packRelpaths,
+      linkDefinitions: ctx.file.linkDefinitions,
+      ...(sourcePack.gitContext === undefined
+        ? {}
+        : { gitContext: toLinkGitContext(sourcePack.gitContext) }),
+      onUnresolvedReference: (label) => {
+        if (collect) {
+          this.unresolvedReferenceLabels.add(label);
+        }
+      },
+      onUnrewrittenRelativeLink: () => {
+        if (collect) {
+          this.unrewrittenRelativeLinkCount += 1;
+        }
+      },
+      onNonGithubRemote: () => {
+        if (collect) {
+          this.nonGithubRemoteCount += 1;
+        }
+      },
+    });
+  }
+
   /**
-   * Get markdown heading prefix based on node type and depth
+   * Get markdown heading prefix based on node type and depth. The relative
+   * heading structure of each source file is preserved by tree depth; the `#`
+   * run is clamped at H6 while the hierarchical numbering keeps going.
    */
   private getHeading(_type: DocNodeType, depth: number): string {
-    // Map depth to heading level (H2-H4)
-    const level = Math.min(depth + 1, 4); // Cap at H4
+    const level = Math.min(depth + 1, MAX_HEADING_LEVEL);
     return '#'.repeat(level);
   }
 
   /**
    * Format a content block
    */
-  private formatContent(content: ContentBlock): string {
+  private formatContent(content: ContentBlock, ctx: RenderContext): string {
     const parts: string[] = [];
 
     switch (content.type) {
       case ContentBlockType.PROSE:
-        parts.push(content.content, DOUBLE_NEWLINE);
+        parts.push(this.rewriteProse(content.content, ctx), DOUBLE_NEWLINE);
         break;
 
       case ContentBlockType.CODE: {
-        // Code block with language. Use a fence longer than any backtick run in
-        // the content so embedded ``` fences cannot terminate it prematurely.
-        const lang = content.language || 'text';
+        // Reproduce the source fence info string byte-verbatim: undefined means a
+        // legacy block with no recorded info string (rendered as `text`), an
+        // empty string means a genuinely bare fence, anything else is emitted
+        // exactly. Use a fence longer than any backtick run in the content so
+        // embedded ``` fences cannot terminate it prematurely.
+        const info = content.language === undefined ? 'text' : content.language;
         const longestBacktickRun = (content.content.match(/`+/g) ?? []).reduce(
           (max, run) => Math.max(max, run.length),
           0
         );
         const fence = '`'.repeat(Math.max(3, longestBacktickRun + 1));
-        parts.push(fence, lang, NEWLINE);
+        parts.push(fence, info, NEWLINE);
         parts.push(content.content, NEWLINE);
         parts.push(fence, DOUBLE_NEWLINE);
         break;
@@ -275,6 +463,71 @@ export class UniversalFormatter {
 
     return parts.join('');
   }
+
+  /**
+   * Generate the table-of-contents output: the hierarchical heading tree with
+   * numbering and, for each file section, its `[source: relpath]` marker. This
+   * is a distinct `<prefix>-toc-llms.txt` file and never replaces an
+   * agent-authored `index.md`.
+   */
+  private async generateTableOfContents(): Promise<string> {
+    const prefix = sanitizeFileSegment(this.options.filenamePrefix || 'documentation');
+    const filepath = join(this.options.outputDir, `${prefix}-toc-llms.txt`);
+
+    const title = this.options.title || this.root.title;
+    const lines: string[] = [
+      `<SYSTEM>Table of contents for ${title}. Each entry lists the heading number, title, and, for file sections, the [source: path] to grep in the full pack.</SYSTEM>`,
+      '',
+      `# ${title} Table of Contents`,
+      '',
+    ];
+    this.collectTocLines(this.root, [], lines);
+
+    const content = `${lines.join(NEWLINE)}${NEWLINE}`;
+    await writeTextFileSafely(filepath, content);
+    return filepath;
+  }
+
+  private collectTocLines(node: DocNode, numbers: number[], lines: string[]): void {
+    if (node.type !== DocNodeType.ROOT && numbers.length > 0) {
+      const indent = '  '.repeat(numbers.length - 1);
+      const numberString = numbers.join('.');
+      const sourceRelpath = this.sourceRelpathOf(node);
+      const suffix = sourceRelpath === undefined ? '' : ` [source: ${sourceRelpath}]`;
+      lines.push(`${indent}${numberString}. ${node.title}${suffix}`);
+    }
+
+    let childNum = 1;
+    for (const child of node.children) {
+      this.collectTocLines(child, [...numbers, childNum], lines);
+      childNum += 1;
+    }
+  }
+}
+
+function readLinkDefinitions(node: DocNode): Map<string, string> {
+  const definitions = new Map<string, string>();
+  const raw = node.metadata.get('linkDefinitions');
+  if (raw === null || typeof raw !== 'object') {
+    return definitions;
+  }
+  for (const [label, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (value !== null && typeof value === 'object' && 'href' in value) {
+      const href = (value as { href?: unknown }).href;
+      if (typeof href === 'string' && href.length > 0) {
+        definitions.set(label, href);
+      }
+    }
+  }
+  return definitions;
+}
+
+function toLinkGitContext(git: FormatterGitContext): MarkdownLinkGitContext {
+  return {
+    remoteUrl: git.remoteUrl,
+    commit: git.commit,
+    sourceRootFromRepo: git.sourceRootFromRepo,
+  };
 }
 
 /**
