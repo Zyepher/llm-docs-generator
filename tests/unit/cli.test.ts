@@ -3300,6 +3300,8 @@ describe('CLI compatibility behavior', () => {
       '--parser-plugin-manifest <path> with explicit custom --format <plugin-format-id>; directory sources require directorySupport: true',
       '--chunks jsonl',
       '--preset swift-book',
+      '--label <label> recorded verbatim into the manifest',
+      '--exclude <glob> (repeatable)',
     ]);
     expect(implemented.get('generate-source')?.limitations).toEqual(
       expect.arrayContaining([
@@ -3530,15 +3532,15 @@ describe('CLI compatibility behavior', () => {
       status: 'implemented',
       inputBoundary:
         'existing built-in-parser local-source-docs manifest.json with recorded local source path',
-      options: ['--manifest <path>', '--output-dir <dir>'],
+      options: ['--manifest <path>', '--output-dir <dir>', '--accept-drift'],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary: expect.stringContaining('manifest integrity verification'),
       limitations: expect.arrayContaining([
         'built-in-parser local-source-docs manifests only',
         'parser-plugin local-source-docs manifests are not refreshed; rerun explicit generate --source --parser-plugin-manifest --format',
-        'uses only source.resolvedPath, source.formatHint, preset metadata, and prior chunk-output presence from the existing manifest',
+        'uses only source.resolvedPath, source.formatHint, source.git, source.label, source.excluded, preset metadata, and prior chunk-output presence from the existing manifest',
         'no URLs',
-        'no repo freshness check',
+        'git-drift detection compares the recorded source.git commit to the current source HEAD and never fetches or clones; re-obtaining the recorded commit is the agent job',
         'no crawling',
         'no source selection',
         'does not consume discovery reports',

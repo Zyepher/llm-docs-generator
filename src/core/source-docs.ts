@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs';
-import { lstat, mkdir, readdir, realpath, rm, rmdir, stat } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, rm, rmdir, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -49,6 +49,10 @@ const SOURCE_DOCS_MANIFEST = 'manifest.json';
 const DEFAULT_SOURCE_DOCS_MAX_DEPTH = 16;
 const DEFAULT_SOURCE_DOCS_MAX_ENTRIES = 20000;
 const DEFAULT_SOURCE_DOCS_MAX_FILES = 5000;
+// Cap the recorded skipped-file roster so a source tree with a large vendored
+// asset set cannot balloon the manifest; a truncation warning records the fact.
+const SOURCE_DOCS_MAX_SKIPPED_FILES = 500;
+const DRAFT_HEADING_PREFIX = 'DRAFT';
 
 export const SOURCE_DOCS_SCHEMA_VERSION = '0.1.0';
 export const SOURCE_DOCS_MODE = 'local-source-docs';
@@ -103,6 +107,14 @@ export interface SourceDocsOutputDefaults {
   systemPrompt?: string;
 }
 
+export interface GenerateSourceGitContext {
+  remoteUrl: string | null;
+  commit: string;
+  tags: string[];
+  dirty: boolean;
+  sourceRootFromRepo: string;
+}
+
 export interface GenerateSourceDocsOptions {
   source: string;
   outputDir: string;
@@ -112,6 +124,19 @@ export interface GenerateSourceDocsOptions {
   output?: SourceDocsOutputDefaults;
   preset?: SourceDocsPresetMetadata;
   generator: SourceDocsGeneratorMetadata;
+  gitContext?: GenerateSourceGitContext;
+  label?: string;
+  exclude?: string[];
+}
+
+export interface SourceDocsExcludedFile {
+  path: string;
+  glob: string;
+}
+
+export interface SourceDocsSkippedFile {
+  path: string;
+  reason: string;
 }
 
 interface SourceDocsBaseFileManifestEntry {
@@ -175,6 +200,10 @@ export interface SourceDocsManifest {
     hash?: string;
     fileCount?: number;
     aggregateHash?: string;
+    label?: string;
+    git?: GenerateSourceGitContext;
+    excluded?: SourceDocsExcludedFile[];
+    skippedFiles?: SourceDocsSkippedFile[];
   };
   sourceFiles: SourceDocsFileManifestEntry[];
   parser: {
@@ -219,6 +248,22 @@ interface ParsedFormatHint {
 interface SourceFileCollection {
   files: BoundedSourceFile[];
   warnings: string[];
+  excluded: SourceDocsExcludedFile[];
+  skippedFiles: SourceDocsSkippedFile[];
+}
+
+interface CompiledExcludeGlob {
+  glob: string;
+  regex: RegExp;
+}
+
+interface DirectoryTraversalState {
+  entries: number;
+  files: number;
+  warnings: string[];
+  excludeGlobs: CompiledExcludeGlob[];
+  excluded: SourceDocsExcludedFile[];
+  skipped: SourceDocsSkippedFile[];
 }
 
 interface BoundedSourceFile extends SourceDocsBaseFileManifestEntry {
@@ -232,6 +277,8 @@ interface PreparedSourceDocsInput {
   parserPlugin?: SourceDocsParserPluginProvenance;
   sourceFiles: BoundedSourceFile[];
   warnings: string[];
+  excluded?: SourceDocsExcludedFile[];
+  skippedFiles?: SourceDocsSkippedFile[];
 }
 
 type SourceFileFormat = SourceDocsResolvedFormat | 'structured-spec';
@@ -268,7 +315,7 @@ export async function generateSourceDocs(
 
     const { formatHint, preparedSource } =
       options.parserPluginManifest === undefined
-        ? await prepareBuiltInSourceDocsInput(source, options.format)
+        ? await prepareBuiltInSourceDocsInput(source, options.format, options.exclude)
         : await prepareParserPluginSourceDocsInput(source, {
             format: options.format,
             chunks: options.chunks,
@@ -318,6 +365,14 @@ export async function generateSourceDocs(
       generatedOutputs,
       ...(semanticChunkIndexes.length === 0 ? {} : { semanticChunkIndexes }),
       ...(options.preset === undefined ? {} : { preset: options.preset }),
+      ...(options.gitContext === undefined ? {} : { gitContext: options.gitContext }),
+      ...(options.label === undefined ? {} : { label: options.label }),
+      ...(preparedSource.excluded === undefined || preparedSource.excluded.length === 0
+        ? {}
+        : { excluded: preparedSource.excluded }),
+      ...(preparedSource.skippedFiles === undefined || preparedSource.skippedFiles.length === 0
+        ? {}
+        : { skippedFiles: preparedSource.skippedFiles }),
       warnings,
     });
 
@@ -413,13 +468,14 @@ function parseSourceDocsChunksFormat(
 
 async function prepareBuiltInSourceDocsInput(
   source: ResolvedSourceDocsInput,
-  format: string | undefined
+  format: string | undefined,
+  exclude: string[] | undefined
 ): Promise<{ formatHint: string; preparedSource: PreparedSourceDocsInput }> {
   const formatHint = parseSourceDocsFormatHint(format);
 
   return {
     formatHint: formatHint.manifestValue,
-    preparedSource: await prepareSourceDocsInput(source, formatHint),
+    preparedSource: await prepareSourceDocsInput(source, formatHint, exclude),
   };
 }
 
@@ -831,7 +887,8 @@ async function assertNotDiscoveryReport(source: ResolvedSourceDocsInput): Promis
 
 async function prepareSourceDocsInput(
   source: ResolvedSourceDocsInput,
-  formatHint: ParsedFormatHint
+  formatHint: ParsedFormatHint,
+  exclude: string[] | undefined
 ): Promise<PreparedSourceDocsInput> {
   if (source.type === 'file') {
     const resolvedFormat = await resolveSourceDocsFormat(
@@ -849,7 +906,7 @@ async function prepareSourceDocsInput(
       resolvedFormat,
       parser,
       sourceFiles: [sourceFile],
-      warnings: [],
+      warnings: await collectDraftWarnings([sourceFile]),
     };
   }
 
@@ -862,7 +919,8 @@ async function prepareSourceDocsInput(
     );
   }
 
-  const sourceFiles = await describeDirectorySourceFiles(source);
+  const excludeGlobs = compileExcludeGlobs(exclude);
+  const sourceFiles = await describeDirectorySourceFiles(source, excludeGlobs);
   const resolvedFormat =
     formatHint.parserHint === FormatType.AUTO
       ? resolveDirectoryAutoFormat(sourceFiles.files, source.resolvedPath)
@@ -875,11 +933,35 @@ async function prepareSourceDocsInput(
     );
   }
 
+  // Files collected during traversal whose format is not the resolved directory
+  // format are dropped from the pack; record them as skipped so their omission
+  // is a recorded fact rather than a silent gap (for example a config.json in a
+  // Markdown docs tree).
+  const formatNotSelected: SourceDocsSkippedFile[] = sourceFiles.files
+    .filter((file) => file.format !== resolvedFormat)
+    .map((file) => ({
+      path: file.path,
+      reason: `format '${String(file.format)}' not selected (resolved format '${String(resolvedFormat)}')`,
+    }));
+  const { skippedFiles, truncationWarning } = capSkippedFiles([
+    ...sourceFiles.skippedFiles,
+    ...formatNotSelected,
+  ]);
+
+  const warnings = [
+    ...sourceFiles.warnings,
+    ...excludeSummaryWarnings(sourceFiles.excluded, excludeGlobs),
+    ...skippedSummaryWarnings(skippedFiles, truncationWarning),
+    ...(await collectDraftWarnings(selectedFiles)),
+  ];
+
   return {
     resolvedFormat,
     parser: getSourceDocsParser(resolvedFormat),
     sourceFiles: selectedFiles,
-    warnings: sourceFiles.warnings,
+    warnings,
+    excluded: sourceFiles.excluded,
+    skippedFiles,
   };
 }
 
@@ -913,12 +995,16 @@ function formatSupportsDirectory(
 }
 
 async function describeDirectorySourceFiles(
-  source: ResolvedSourceDocsInput
+  source: ResolvedSourceDocsInput,
+  excludeGlobs: CompiledExcludeGlob[]
 ): Promise<SourceFileCollection> {
-  const state = {
+  const state: DirectoryTraversalState = {
     entries: 0,
     files: 0,
-    warnings: [] as string[],
+    warnings: [],
+    excludeGlobs,
+    excluded: [],
+    skipped: [],
   };
   const files = await collectDirectorySourceFiles({
     rootPath: source.resolvedPath,
@@ -936,6 +1022,8 @@ async function describeDirectorySourceFiles(
   return {
     files: files.sort((a, b) => compareStringsByCodeUnit(a.path, b.path)),
     warnings: state.warnings,
+    excluded: state.excluded.sort((a, b) => compareStringsByCodeUnit(a.path, b.path)),
+    skippedFiles: state.skipped,
   };
 }
 
@@ -1051,7 +1139,7 @@ async function collectDirectorySourceFiles(options: {
   rootPath: string;
   currentPath: string;
   depth: number;
-  state: { entries: number; files: number; warnings: string[] };
+  state: DirectoryTraversalState;
 }): Promise<BoundedSourceFile[]> {
   const { rootPath, currentPath, depth, state } = options;
 
@@ -1103,9 +1191,24 @@ async function collectDirectorySourceFiles(options: {
       continue;
     }
 
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const relativePath = relativeSourcePath(rootPath, entryPath);
+    const matchedGlob = matchExcludeGlob(relativePath, state.excludeGlobs);
+
+    if (matchedGlob !== undefined) {
+      state.excluded.push({ path: relativePath, glob: matchedGlob });
+      continue;
+    }
+
     const fileFormat = formatForDirectorySourceFile(entry.name);
 
-    if (!entry.isFile() || fileFormat === undefined) {
+    if (fileFormat === undefined) {
+      // A regular file with no built-in documentation format is not part of the
+      // pack; record the omission rather than dropping it silently.
+      state.skipped.push({ path: relativePath, reason: 'unsupported-file-type' });
       continue;
     }
 
@@ -1117,9 +1220,7 @@ async function collectDirectorySourceFiles(options: {
       );
     }
 
-    files.push(
-      await describeSourceFile(entryPath, relativeSourcePath(rootPath, entryPath), fileFormat)
-    );
+    files.push(await describeSourceFile(entryPath, relativePath, fileFormat));
   }
 
   return files;
@@ -1396,6 +1497,10 @@ function buildSourceDocsManifest(options: {
   generatedOutputs: SourceDocsGeneratedOutput[];
   semanticChunkIndexes?: SemanticChunkManifestIndex[];
   preset?: SourceDocsPresetMetadata;
+  gitContext?: GenerateSourceGitContext;
+  label?: string;
+  excluded?: SourceDocsExcludedFile[];
+  skippedFiles?: SourceDocsSkippedFile[];
   warnings: string[];
 }): SourceDocsManifest {
   const sourceFiles: SourceDocsFileManifestEntry[] = options.sourceFiles.map((file) => ({
@@ -1430,6 +1535,14 @@ function buildSourceDocsManifest(options: {
             byteSize: sourceFile.byteSize,
             hash: sourceFile.hash,
           }),
+      ...(options.label === undefined ? {} : { label: options.label }),
+      ...(options.gitContext === undefined ? {} : { git: options.gitContext }),
+      ...(options.excluded === undefined || options.excluded.length === 0
+        ? {}
+        : { excluded: options.excluded }),
+      ...(options.skippedFiles === undefined || options.skippedFiles.length === 0
+        ? {}
+        : { skippedFiles: options.skippedFiles }),
     },
     sourceFiles,
     parser: {
@@ -1735,6 +1848,183 @@ async function assertOutputDirOutsideSource(
 
 function relativeSourcePath(rootPath: string, filePath: string): string {
   return normalizeManifestPath(relative(rootPath, filePath));
+}
+
+/**
+ * Compile a --exclude glob subset (**, *, ?) into an anchored RegExp matched
+ * against POSIX source-root-relative file paths. `**` spans path separators,
+ * `*` matches within a single segment, `?` matches one non-separator character.
+ * A leading `**\/` is optional so `**\/x` matches both `x` and `a/x`.
+ */
+function compileExcludeGlobs(exclude: string[] | undefined): CompiledExcludeGlob[] {
+  if (exclude === undefined) {
+    return [];
+  }
+
+  const compiled: CompiledExcludeGlob[] = [];
+  const seen = new Set<string>();
+
+  for (const rawGlob of exclude) {
+    const glob = rawGlob.trim();
+
+    if (glob.length === 0) {
+      throw new Error('generate --source --exclude requires a non-empty glob pattern');
+    }
+
+    if (seen.has(glob)) {
+      continue;
+    }
+
+    seen.add(glob);
+    compiled.push({ glob, regex: new RegExp(`^${globToRegExpSource(glob)}$`) });
+  }
+
+  return compiled;
+}
+
+function globToRegExpSource(glob: string): string {
+  let source = '';
+
+  for (let index = 0; index < glob.length; index++) {
+    const character = glob[index];
+
+    if (character === '*') {
+      if (glob[index + 1] === '*') {
+        index++;
+
+        if (glob[index + 1] === '/') {
+          index++;
+          source += '(?:.*/)?';
+        } else {
+          source += '.*';
+        }
+      } else {
+        source += '[^/]*';
+      }
+    } else if (character === '?') {
+      source += '[^/]';
+    } else {
+      source += (character ?? '').replace(/[.+^${}()|[\]\\/]/g, '\\$&');
+    }
+  }
+
+  return source;
+}
+
+function matchExcludeGlob(
+  relativePath: string,
+  excludeGlobs: CompiledExcludeGlob[]
+): string | undefined {
+  for (const { glob, regex } of excludeGlobs) {
+    if (regex.test(relativePath)) {
+      return glob;
+    }
+  }
+
+  return undefined;
+}
+
+function capSkippedFiles(skippedFiles: SourceDocsSkippedFile[]): {
+  skippedFiles: SourceDocsSkippedFile[];
+  truncationWarning?: string;
+} {
+  const sorted = [...skippedFiles].sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+
+  if (sorted.length <= SOURCE_DOCS_MAX_SKIPPED_FILES) {
+    return { skippedFiles: sorted };
+  }
+
+  return {
+    skippedFiles: sorted.slice(0, SOURCE_DOCS_MAX_SKIPPED_FILES),
+    truncationWarning: `Skipped-file roster truncated to the first ${SOURCE_DOCS_MAX_SKIPPED_FILES} of ${sorted.length} entries in source.skippedFiles.`,
+  };
+}
+
+function excludeSummaryWarnings(
+  excluded: SourceDocsExcludedFile[],
+  excludeGlobs: CompiledExcludeGlob[]
+): string[] {
+  if (excluded.length === 0) {
+    return [];
+  }
+
+  const globs = excludeGlobs.map((entry) => entry.glob).join(', ');
+
+  return [
+    `Excluded ${excluded.length} file(s) from generation via --exclude pattern(s): ${globs} (see source.excluded).`,
+  ];
+}
+
+function skippedSummaryWarnings(
+  skippedFiles: SourceDocsSkippedFile[],
+  truncationWarning: string | undefined
+): string[] {
+  const warnings: string[] = [];
+
+  if (skippedFiles.length > 0) {
+    warnings.push(
+      `Skipped ${skippedFiles.length} file(s) not included as source in this pack (see source.skippedFiles).`
+    );
+  }
+
+  if (truncationWarning !== undefined) {
+    warnings.push(truncationWarning);
+  }
+
+  return warnings;
+}
+
+/**
+ * Report, without excluding, source files that look like drafts: a `.draft.md`
+ * name, a `drafts/` path segment, or a first heading beginning with "DRAFT".
+ * The operating agent decides whether draft content belongs in the pack; the
+ * engine only surfaces the fact.
+ */
+async function collectDraftWarnings(files: BoundedSourceFile[]): Promise<string[]> {
+  const draftPaths: string[] = [];
+
+  for (const file of files) {
+    if (draftPathSignals(file.path) || (await firstHeadingBeginsWithDraft(file.resolvedPath))) {
+      draftPaths.push(file.path);
+    }
+  }
+
+  if (draftPaths.length === 0) {
+    return [];
+  }
+
+  draftPaths.sort(compareStringsByCodeUnit);
+
+  return [
+    `Draft-like source file(s) included as authoritative content (not excluded): ${draftPaths.join(', ')}.`,
+  ];
+}
+
+function draftPathSignals(manifestPath: string): boolean {
+  const segments = manifestPath.split('/');
+  const fileName = segments.at(-1) ?? manifestPath;
+
+  return /\.draft\.md$/i.test(fileName) || segments.slice(0, -1).includes('drafts');
+}
+
+async function firstHeadingBeginsWithDraft(resolvedPath: string): Promise<boolean> {
+  let text: string;
+
+  try {
+    text = await readFile(resolvedPath, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  for (const line of text.split('\n')) {
+    const heading = /^\s{0,3}#{1,6}\s+(\S.*)$/.exec(line);
+
+    if (heading !== null) {
+      return (heading[1] ?? '').startsWith(DRAFT_HEADING_PREFIX);
+    }
+  }
+
+  return false;
 }
 
 function relativeOutputPath(outputDir: string, outputPath: string): string {
