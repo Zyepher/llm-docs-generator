@@ -1201,6 +1201,16 @@ program
     '--categories <file>',
     'Source-only: explicit category JSON {"categories":[{"id","title","include":["glob"]}],"fallback":"misc"}. Mutually exclusive with --split-by.'
   )
+  .option(
+    '--label <label>',
+    'Source-only operator-provided human version label recorded verbatim into the manifest'
+  )
+  .option(
+    '--exclude <glob>',
+    'Source-only exclude glob (**, *, ?) matched against source-root-relative paths; repeatable',
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[]
+  )
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
   .option('--config-dir <dir>', 'Configuration directory', 'config')
   .option(
@@ -1219,6 +1229,8 @@ program
       preset?: string;
       splitBy?: string;
       categories?: string;
+      label?: string;
+      exclude: string[];
       sdkVersion: string;
       configDir: string;
       outputDir?: string;
@@ -1281,6 +1293,20 @@ program
           if (options.categories !== undefined) {
             sourceDocsOptions.categories = await loadSourceCategoriesConfig(options.categories);
           }
+          if (options.label !== undefined) {
+            sourceDocsOptions.label = options.label;
+          }
+          if (options.exclude.length > 0) {
+            sourceDocsOptions.exclude = options.exclude;
+          }
+
+          // Record the enclosing git repo's identity (best effort). A non-git
+          // source yields undefined and is not an error.
+          const { captureGitState } = await import('./core/git-state.js');
+          const gitContext = await captureGitState(resolve((options.source ?? '').trim()));
+          if (gitContext !== undefined) {
+            sourceDocsOptions.gitContext = gitContext;
+          }
 
           const result = await generateSourceDocs(sourceDocsOptions);
           const chunkOutput = result.manifest.generatedOutputs.find(
@@ -1292,6 +1318,23 @@ program
           console.log(`  Source: ${result.manifest.source.resolvedPath}`);
           console.log(`  Type: ${result.manifest.source.type}`);
           console.log(`  Format: ${result.manifest.source.resolvedFormat}`);
+          if (result.manifest.source.label !== undefined) {
+            console.log(`  Label: ${result.manifest.source.label}`);
+          }
+          if (result.manifest.source.git !== undefined) {
+            const git = result.manifest.source.git;
+            console.log(
+              `  Git: ${git.commit}${git.dirty ? ' (dirty)' : ''}${
+                git.tags.length > 0 ? ` tags: ${git.tags.join(', ')}` : ''
+              }`
+            );
+          }
+          if (result.manifest.source.excluded !== undefined) {
+            console.log(`  Excluded files: ${result.manifest.source.excluded.length}`);
+          }
+          if (result.manifest.source.skippedFiles !== undefined) {
+            console.log(`  Skipped files: ${result.manifest.source.skippedFiles.length}`);
+          }
           if (parserPlugin !== undefined) {
             console.log(`  Parser plugin: ${parserPlugin.name} ${parserPlugin.version}`);
           }
@@ -1489,90 +1532,103 @@ program
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')
+  .option(
+    '--accept-drift',
+    'For local-source-docs manifests with recorded git provenance, proceed when the source HEAD differs from the recorded commit and record the new git state',
+    false
+  )
   .option('-v, --verbose', 'Enable verbose logging', false)
-  .action(async (options: { manifest?: string; outputDir?: string; verbose: boolean }) => {
-    const manifestOptionCount =
-      (options.manifest === undefined ? 0 : 1) + (options.outputDir === undefined ? 0 : 1);
+  .action(
+    async (options: {
+      manifest?: string;
+      outputDir?: string;
+      acceptDrift: boolean;
+      verbose: boolean;
+    }) => {
+      const manifestOptionCount =
+        (options.manifest === undefined ? 0 : 1) + (options.outputDir === undefined ? 0 : 1);
 
-    if (manifestOptionCount !== 1) {
-      console.error(chalk.red('Error: provide exactly one of --manifest or --output-dir'));
-      process.exit(1);
+      if (manifestOptionCount !== 1) {
+        console.error(chalk.red('Error: provide exactly one of --manifest or --output-dir'));
+        process.exit(1);
+      }
+
+      const manifestPath =
+        options.manifest === undefined ? `${options.outputDir}/manifest.json` : options.manifest;
+
+      try {
+        const { refreshGenerationManifest } = await import('./core/refresh.js');
+        const result = await refreshGenerationManifest({
+          manifestPath,
+          acceptDrift: options.acceptDrift,
+          generator: {
+            name: GENERATOR_NAME,
+            version: GENERATOR_VERSION,
+            cliName: CLI_NAME,
+          },
+        });
+
+        console.log(chalk.bold('Manifest refresh'));
+        console.log(`  Mode: ${result.mode}`);
+        console.log(`  Source: ${result.sourcePath}`);
+        if (result.presetName !== undefined) {
+          console.log(`  Preset: ${result.presetName}`);
+        }
+        if (result.mode === DISCOVERY_REPORT_MODE) {
+          console.log('  Candidate evidence report: refreshed');
+          console.log(`  Candidate files: ${result.candidateCount ?? 0}`);
+          if (result.reportPath !== undefined) {
+            console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
+          }
+          console.log('  Scope: candidate evidence only; no source selection or generation');
+        } else if (result.mode === SOURCE_VERIFICATION_MODE) {
+          if (result.docsPath !== undefined) {
+            console.log(`  Docs: ${result.docsPath}`);
+          }
+          console.log('  Local source/docs evidence: refreshed');
+          console.log(`  Source files: ${result.sourceFiles}`);
+          console.log(`  Evidence files: ${result.generatedOutputs}`);
+          console.log(`  Docs references: ${result.docsReferences ?? 0}`);
+          console.log(`  Exact export matches: ${result.exactMatches ?? 0}`);
+          console.log(`  Unmatched references: ${result.unmatchedReferences ?? 0}`);
+          if (result.reportPath !== undefined) {
+            console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
+          }
+          console.log(
+            '  Scope: explicit local lexical evidence only; no broad claim verification or source-truth proof'
+          );
+        } else {
+          console.log(`  Source files: ${result.sourceFiles}`);
+          console.log(`  Generated files: ${result.generatedOutputs}`);
+        }
+        if (result.chunkOutputPath !== undefined) {
+          console.log(`  Chunk export: ${chalk.cyan(result.chunkOutputPath)}`);
+        }
+        console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
+        console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
+        console.log('  Refresh provenance: recorded');
+        console.log(`  Post-refresh verification: ${result.postRefreshVerification.status}`);
+        console.log(`  Checked files: ${result.postRefreshVerification.checkedFiles}`);
+        console.log(chalk.green('Refresh complete'));
+      } catch (error) {
+        const errorMsg = errorMessage(error);
+        console.error(chalk.red(`Refresh failed: ${errorMsg}`));
+
+        if (isRefreshManifestVerificationError(error)) {
+          console.error(chalk.red(`  Checked files: ${error.checkedFiles}`));
+          for (const failure of error.failures) {
+            console.error(chalk.red(`  - ${failure}`));
+          }
+        }
+
+        if (options.verbose && error instanceof Error && error.stack !== undefined) {
+          console.error(chalk.gray(error.stack));
+        }
+
+        process.exit(1);
+      }
     }
-
-    const manifestPath =
-      options.manifest === undefined ? `${options.outputDir}/manifest.json` : options.manifest;
-
-    try {
-      const { refreshGenerationManifest } = await import('./core/refresh.js');
-      const result = await refreshGenerationManifest({
-        manifestPath,
-        generator: {
-          name: GENERATOR_NAME,
-          version: GENERATOR_VERSION,
-          cliName: CLI_NAME,
-        },
-      });
-
-      console.log(chalk.bold('Manifest refresh'));
-      console.log(`  Mode: ${result.mode}`);
-      console.log(`  Source: ${result.sourcePath}`);
-      if (result.presetName !== undefined) {
-        console.log(`  Preset: ${result.presetName}`);
-      }
-      if (result.mode === DISCOVERY_REPORT_MODE) {
-        console.log('  Candidate evidence report: refreshed');
-        console.log(`  Candidate files: ${result.candidateCount ?? 0}`);
-        if (result.reportPath !== undefined) {
-          console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
-        }
-        console.log('  Scope: candidate evidence only; no source selection or generation');
-      } else if (result.mode === SOURCE_VERIFICATION_MODE) {
-        if (result.docsPath !== undefined) {
-          console.log(`  Docs: ${result.docsPath}`);
-        }
-        console.log('  Local source/docs evidence: refreshed');
-        console.log(`  Source files: ${result.sourceFiles}`);
-        console.log(`  Evidence files: ${result.generatedOutputs}`);
-        console.log(`  Docs references: ${result.docsReferences ?? 0}`);
-        console.log(`  Exact export matches: ${result.exactMatches ?? 0}`);
-        console.log(`  Unmatched references: ${result.unmatchedReferences ?? 0}`);
-        if (result.reportPath !== undefined) {
-          console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
-        }
-        console.log(
-          '  Scope: explicit local lexical evidence only; no broad claim verification or source-truth proof'
-        );
-      } else {
-        console.log(`  Source files: ${result.sourceFiles}`);
-        console.log(`  Generated files: ${result.generatedOutputs}`);
-      }
-      if (result.chunkOutputPath !== undefined) {
-        console.log(`  Chunk export: ${chalk.cyan(result.chunkOutputPath)}`);
-      }
-      console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
-      console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
-      console.log('  Refresh provenance: recorded');
-      console.log(`  Post-refresh verification: ${result.postRefreshVerification.status}`);
-      console.log(`  Checked files: ${result.postRefreshVerification.checkedFiles}`);
-      console.log(chalk.green('Refresh complete'));
-    } catch (error) {
-      const errorMsg = errorMessage(error);
-      console.error(chalk.red(`Refresh failed: ${errorMsg}`));
-
-      if (isRefreshManifestVerificationError(error)) {
-        console.error(chalk.red(`  Checked files: ${error.checkedFiles}`));
-        for (const failure of error.failures) {
-          console.error(chalk.red(`  - ${failure}`));
-        }
-      }
-
-      if (options.verbose && error instanceof Error && error.stack !== undefined) {
-        console.error(chalk.gray(error.stack));
-      }
-
-      process.exit(1);
-    }
-  });
+  );
 
 // ============================================================================
 // VERIFY COMMAND
@@ -1585,47 +1641,110 @@ program
   )
   .option('--manifest <path>', 'Path to manifest.json')
   .option('--output-dir <dir>', 'Output directory containing manifest.json')
+  .option(
+    '--outputs-only',
+    'Exit zero when the self-contained generated outputs pass, even if the recorded source is unavailable (for relocated packs)',
+    false
+  )
   .option('-v, --verbose', 'Enable verbose logging', false)
-  .action(async (options: { manifest?: string; outputDir?: string; verbose: boolean }) => {
-    const manifestOptionCount =
-      (options.manifest === undefined ? 0 : 1) + (options.outputDir === undefined ? 0 : 1);
+  .action(
+    async (options: {
+      manifest?: string;
+      outputDir?: string;
+      outputsOnly: boolean;
+      verbose: boolean;
+    }) => {
+      const manifestOptionCount =
+        (options.manifest === undefined ? 0 : 1) + (options.outputDir === undefined ? 0 : 1);
 
-    if (manifestOptionCount !== 1) {
-      console.error(chalk.red('Error: provide exactly one of --manifest or --output-dir'));
-      process.exit(1);
-    }
+      if (manifestOptionCount !== 1) {
+        console.error(chalk.red('Error: provide exactly one of --manifest or --output-dir'));
+        process.exit(1);
+      }
 
-    const manifestPath =
-      options.manifest === undefined ? `${options.outputDir}/manifest.json` : options.manifest;
+      const manifestPath =
+        options.manifest === undefined ? `${options.outputDir}/manifest.json` : options.manifest;
 
-    try {
-      const result = await verifyGenerationManifest({ manifestPath });
+      try {
+        const result = await verifyGenerationManifest({ manifestPath });
 
-      console.log(chalk.bold('Manifest verification'));
-      console.log(`  Manifest: ${result.manifestPath}`);
-      console.log(`  Checked files: ${result.checkedFiles}`);
-      console.log(`  Failures: ${result.failures.length}`);
+        console.log(chalk.bold('Manifest verification'));
+        console.log(`  Manifest: ${result.manifestPath}`);
 
-      if (result.failures.length > 0) {
-        for (const failure of result.failures) {
-          console.error(chalk.red(`  - ${failure}`));
+        // Two-tier reporting for local-source-docs manifests: the generated
+        // outputs are always hash-checked, the recorded source may be
+        // unavailable for a relocated pack.
+        if (result.outputs !== undefined && result.source !== undefined) {
+          const { outputs, source } = result;
+          console.log(
+            `  Outputs: ${outputs.status} (${outputs.checkedFiles} file(s) hash-checked)`
+          );
+          console.log(`  Source: ${source.status} (${source.checkedFiles} file(s) hash-checked)`);
+          console.log(`  Checked files: ${result.checkedFiles}`);
+          console.log(`  Failures: ${result.failures.length}`);
+
+          for (const failure of outputs.failures) {
+            console.error(chalk.red(`  - [outputs] ${failure}`));
+          }
+          for (const failure of source.failures) {
+            console.error(chalk.red(`  - [source] ${failure}`));
+          }
+
+          const outputsPassed = outputs.status === 'passed';
+
+          if (options.outputsOnly) {
+            if (!outputsPassed) {
+              console.error(chalk.red('Output verification failed'));
+              process.exit(1);
+            }
+
+            if (source.status !== 'passed') {
+              console.log(
+                chalk.yellow(
+                  `Outputs verified; source ${source.status} (ignored with --outputs-only)`
+                )
+              );
+            }
+
+            console.log(chalk.green('Verification passed (outputs-only)'));
+            return;
+          }
+
+          if (!outputsPassed || source.status !== 'passed') {
+            if (outputsPassed) {
+              console.log(chalk.yellow('Outputs verified; source verification did not pass'));
+            }
+            process.exit(1);
+          }
+
+          console.log(chalk.green('Verification passed'));
+          return;
+        }
+
+        console.log(`  Checked files: ${result.checkedFiles}`);
+        console.log(`  Failures: ${result.failures.length}`);
+
+        if (result.failures.length > 0) {
+          for (const failure of result.failures) {
+            console.error(chalk.red(`  - ${failure}`));
+          }
+
+          process.exit(1);
+        }
+
+        console.log(chalk.green('Verification passed'));
+      } catch (error) {
+        const errorMsg = errorMessage(error);
+        console.error(chalk.red(`Verification failed: ${errorMsg}`));
+
+        if (options.verbose && error instanceof Error && error.stack !== undefined) {
+          console.error(chalk.gray(error.stack));
         }
 
         process.exit(1);
       }
-
-      console.log(chalk.green('Verification passed'));
-    } catch (error) {
-      const errorMsg = errorMessage(error);
-      console.error(chalk.red(`Verification failed: ${errorMsg}`));
-
-      if (options.verbose && error instanceof Error && error.stack !== undefined) {
-        console.error(chalk.gray(error.stack));
-      }
-
-      process.exit(1);
     }
-  });
+  );
 
 // ============================================================================
 // LIST-SDKS COMMAND

@@ -41,9 +41,11 @@ import {
 import {
   generateSourceDocs,
   SOURCE_DOCS_MODE,
+  type GenerateSourceGitContext,
   type SourceDocsGeneratorMetadata,
   type SourceDocsPresetMetadata,
 } from './source-docs.js';
+import { captureGitState } from './git-state.js';
 import { generateSourceTruthDocs, SOURCE_TRUTH_DOCS_MODE } from './source-truth-docs.js';
 import {
   SOURCE_VERIFICATION_MODE,
@@ -77,6 +79,10 @@ export class RefreshManifestVerificationError extends RefreshManifestError {
 export interface RefreshManifestOptions {
   manifestPath: string;
   generator: SourceDocsGeneratorMetadata;
+  // Only meaningful for local-source-docs manifests with recorded git
+  // provenance: proceed when the source HEAD has drifted from the recorded
+  // commit and record the new git state in the refreshed manifest.
+  acceptDrift?: boolean;
 }
 
 export interface RefreshManifestResult {
@@ -116,6 +122,7 @@ export async function refreshGenerationManifest(
       manifestPath,
       manifest,
       generator: options.generator,
+      acceptDrift: options.acceptDrift ?? false,
     });
   }
 
@@ -308,6 +315,7 @@ async function refreshSourceDocsManifest(options: {
   manifestPath: string;
   manifest: Record<string, unknown>;
   generator: SourceDocsGeneratorMetadata;
+  acceptDrift: boolean;
 }): Promise<RefreshManifestResult> {
   const source = requiredObject(options.manifest.source, 'source');
   const generatedOutputs = requiredArray(options.manifest.generatedOutputs, 'generatedOutputs');
@@ -328,9 +336,19 @@ async function refreshSourceDocsManifest(options: {
   }
 
   const preset = sourceDocsPresetFromManifest(options.manifest.preset);
+  const recordedGit = readRecordedGit(source.git);
+  const recordedLabel = typeof source.label === 'string' ? source.label : undefined;
+  const excludeGlobs = recordedExcludeGlobs(source.excluded);
   const outputDir = dirname(options.manifestPath);
-  await assertExistingLocalSourcePath(sourcePath);
+  await assertExistingLocalSourcePathForRefresh(sourcePath, recordedGit);
   await assertSourceOutsideRefreshOutput({ sourcePath, outputDir });
+
+  // Git-drift guard: if the prior manifest recorded a commit and the source's
+  // current HEAD differs, refresh would silently rebuild against different
+  // content. Fail with both commits and the remote/tags unless --accept-drift.
+  const currentGit = await captureGitState(sourcePath);
+  assertNoUnacceptedGitDrift({ recordedGit, currentGit, acceptDrift: options.acceptDrift });
+
   const chunks = generatedOutputs.some(
     (output) => isObjectRecord(output) && output.kind === SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND
   )
@@ -352,6 +370,9 @@ async function refreshSourceDocsManifest(options: {
             systemPrompt: preset.defaults.systemPrompt,
           },
         }),
+    ...(currentGit === undefined ? {} : { gitContext: currentGit }),
+    ...(recordedLabel === undefined ? {} : { label: recordedLabel }),
+    ...(excludeGlobs.length === 0 ? {} : { exclude: excludeGlobs }),
     generator: options.generator,
   });
   const chunkOutput = result.manifest.generatedOutputs.find(
@@ -1393,6 +1414,98 @@ async function assertSafeExistingRegularFilePath(options: {
         `${options.label} parent path must be a directory: ${currentPath}`
       );
     }
+  }
+}
+
+interface RecordedGitIdentity {
+  commit: string;
+  remoteUrl: string | null;
+  tags: string[];
+}
+
+function readRecordedGit(value: unknown): RecordedGitIdentity | undefined {
+  if (!isObjectRecord(value)) {
+    return undefined;
+  }
+
+  const commit = value.commit;
+
+  if (typeof commit !== 'string' || commit.length === 0) {
+    return undefined;
+  }
+
+  const remoteUrl = typeof value.remoteUrl === 'string' ? value.remoteUrl : null;
+  const tags = Array.isArray(value.tags)
+    ? value.tags.filter((tag): tag is string => typeof tag === 'string')
+    : [];
+
+  return { commit, remoteUrl, tags };
+}
+
+function recordedExcludeGlobs(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const globs = new Set<string>();
+
+  for (const entry of value) {
+    if (isObjectRecord(entry) && typeof entry.glob === 'string' && entry.glob.length > 0) {
+      globs.add(entry.glob);
+    }
+  }
+
+  return [...globs].sort();
+}
+
+function formatRecordedGitIdentity(git: RecordedGitIdentity): string {
+  return `remote ${git.remoteUrl ?? '(none)'}, commit ${git.commit}, tags [${git.tags.join(', ')}]`;
+}
+
+function assertNoUnacceptedGitDrift(options: {
+  recordedGit: RecordedGitIdentity | undefined;
+  currentGit: GenerateSourceGitContext | undefined;
+  acceptDrift: boolean;
+}): void {
+  const { recordedGit, currentGit, acceptDrift } = options;
+
+  if (recordedGit === undefined) {
+    return;
+  }
+
+  const currentCommit = currentGit?.commit;
+
+  if (currentCommit === recordedGit.commit) {
+    return;
+  }
+
+  if (acceptDrift) {
+    return;
+  }
+
+  throw new RefreshManifestError(
+    `source has drifted from the recorded commit: recorded ${recordedGit.commit}, current ${
+      currentCommit ?? '(no git HEAD found at source)'
+    }. Recorded source git identity: ${formatRecordedGitIdentity(recordedGit)}. Re-obtain the recorded commit or pass --accept-drift to proceed and record the new git state.`
+  );
+}
+
+async function assertExistingLocalSourcePathForRefresh(
+  sourcePath: string,
+  recordedGit: RecordedGitIdentity | undefined
+): Promise<void> {
+  try {
+    await assertExistingLocalSourcePath(sourcePath);
+  } catch (error) {
+    if (error instanceof RefreshManifestError && recordedGit !== undefined) {
+      throw new RefreshManifestError(
+        `${error.message}. Recorded source git identity: ${formatRecordedGitIdentity(
+          recordedGit
+        )}. Re-obtain the recorded commit to refresh.`
+      );
+    }
+
+    throw error;
   }
 }
 

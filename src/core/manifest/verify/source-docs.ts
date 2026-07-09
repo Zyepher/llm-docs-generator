@@ -2,6 +2,7 @@
  * Verifier and validators for source-docs manifests.
  */
 
+import { lstat } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve, win32 } from 'node:path';
 
 import {
@@ -62,7 +63,7 @@ import {
   verifyPathType,
 } from '../fs-verify.js';
 import type { FileCheck, PathTypeCheck } from '../fs-verify.js';
-import type { VerifyGenerationManifestResult } from '../types.js';
+import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
 import { validateRequiredInputProvenance } from '../provenance.js';
 import { validateRequiredArtifactSummary } from '../artifact-summary.js';
@@ -131,7 +132,11 @@ export async function verifySourceDocsManifest(
     };
   }
 
-  const fileChecks: FileCheck[] = [];
+  // Two integrity tiers checked separately: `outputChecks` are the
+  // self-contained generated pack (always verified), `sourceChecks` are the
+  // external recorded source (verified only when the source is available).
+  const outputChecks: FileCheck[] = [];
+  const sourceChecks: FileCheck[] = [];
   const pathTypeChecks: PathTypeCheck[] = [];
   const sourceRecord = source as Record<string, unknown>;
   const sourceFileRecords = sourceFiles as unknown[];
@@ -150,7 +155,7 @@ export async function verifySourceDocsManifest(
   const parserPluginMetadata = validateSourceDocsParserPluginMetadata(
     parserRecord.plugin,
     failures,
-    fileChecks
+    sourceChecks
   );
   const parserPluginFormatId = parserPluginMetadata?.format.id;
 
@@ -244,7 +249,7 @@ export async function verifySourceDocsManifest(
     sourceType,
     sourceResolvedFormat,
     failures,
-    fileChecks,
+    fileChecks: sourceChecks,
   });
 
   if (sourceType === 'file' && sourceFileEntries.length !== 1) {
@@ -305,7 +310,7 @@ export async function verifySourceDocsManifest(
     generatedOutputs: outputRecords,
     manifestDir,
     failures,
-    fileChecks,
+    fileChecks: outputChecks,
     requireTextMetadata: true,
     rejectSymlinks: true,
     allowedKinds: SOURCE_DOCS_GENERATED_OUTPUT_KINDS,
@@ -325,37 +330,91 @@ export async function verifySourceDocsManifest(
   validateRequiredInputProvenance(manifest.inputProvenance, SOURCE_DOCS_MODE, manifest, failures);
   validateRequiredArtifactSummary(manifest.artifactSummary, SOURCE_DOCS_MODE, manifest, failures);
 
-  if (failures.length === 0 && parserPluginMetadata !== undefined) {
-    await verifySourceDocsParserPluginManifestMetadata(parserPluginMetadata, failures);
-  }
-
-  if (failures.length === 0) {
-    for (const check of pathTypeChecks) {
-      await verifyPathType(check, failures);
-    }
-  }
-
-  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
-
-  if (failures.length === 0) {
-    for (const check of fileChecks) {
-      await verifyFile(check, failures);
-    }
-  }
-
-  if (failures.length === 0) {
-    await verifySourceDocsSemanticChunkIndexes({
-      manifestDir,
-      semanticChunkIndexes: semanticChunkIndexEntries,
+  // A malformed manifest cannot be integrity-checked: structural failures block
+  // every filesystem check and no tier is reported.
+  if (failures.length > 0) {
+    return {
+      manifestPath,
+      checkedFiles: 0,
       failures,
-    });
+    };
   }
+
+  // Outputs tier: ALWAYS hash-check the self-contained generated pack, even when
+  // the recorded external source is missing (a relocated pack), so a verifier
+  // can attest the outputs it holds.
+  const outputFailures: string[] = [];
+  for (const check of outputChecks) {
+    await verifyFile(check, outputFailures);
+  }
+  await verifySourceDocsSemanticChunkIndexes({
+    manifestDir,
+    semanticChunkIndexes: semanticChunkIndexEntries,
+    failures: outputFailures,
+  });
+
+  // Source tier: the external recorded source. A missing source root is reported
+  // as `unavailable` (expected for a relocated pack) instead of a wall of
+  // missing-file failures.
+  const sourceFailures: string[] = [];
+  let sourceCheckedFiles = 0;
+  let sourceStatus: VerifyTierResult['status'];
+  const sourceAvailable =
+    isNonEmptyString(sourcePath) && isAbsolute(sourcePath)
+      ? await pathExists(sourcePath)
+      : false;
+
+  if (!sourceAvailable) {
+    sourceStatus = 'unavailable';
+    sourceFailures.push(
+      `source: recorded source path is unavailable at ${
+        isNonEmptyString(sourcePath) ? sourcePath : '(unknown)'
+      }`
+    );
+  } else {
+    if (parserPluginMetadata !== undefined) {
+      await verifySourceDocsParserPluginManifestMetadata(parserPluginMetadata, sourceFailures);
+    }
+
+    for (const check of pathTypeChecks) {
+      await verifyPathType(check, sourceFailures);
+    }
+
+    for (const check of sourceChecks) {
+      await verifyFile(check, sourceFailures);
+    }
+
+    sourceCheckedFiles = sourceChecks.length;
+    sourceStatus = sourceFailures.length === 0 ? 'passed' : 'failed';
+  }
+
+  const outputs: VerifyTierResult = {
+    status: outputFailures.length === 0 ? 'passed' : 'failed',
+    checkedFiles: outputChecks.length,
+    failures: outputFailures,
+  };
+  const sourceTier: VerifyTierResult = {
+    status: sourceStatus,
+    checkedFiles: sourceCheckedFiles,
+    failures: sourceFailures,
+  };
 
   return {
     manifestPath,
-    checkedFiles,
-    failures,
+    checkedFiles: outputs.checkedFiles + sourceTier.checkedFiles,
+    failures: [...outputFailures, ...sourceFailures],
+    outputs,
+    source: sourceTier,
   };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 interface SourceDocsParserPluginRecord {
   manifestPath: string;
