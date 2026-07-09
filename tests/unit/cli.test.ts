@@ -7746,7 +7746,10 @@ describe('CLI compatibility behavior', () => {
       expect(sourceFile.lineCount).toBe(countTextLines(text));
       expect(sourceFile.estimatedTokenCount).toBe(estimateTextTokens(text));
     }
-    expect(outputPaths).toEqual(['llm-docs/docs-source-full-llms.txt']);
+    expect(outputPaths).toEqual([
+      'llm-docs/docs-source-full-llms.txt',
+      'llm-docs/docs-source-toc-llms.txt',
+    ]);
 
     const fullDocPath = join(outputDir, outputPaths[0] ?? '');
     const fullDoc = await readFile(fullDocPath, 'utf-8');
@@ -7873,7 +7876,7 @@ describe('CLI compatibility behavior', () => {
         format: 'custom-doc',
       },
     ]);
-    expect(manifest.generatedOutputs).toHaveLength(1);
+    expect(manifest.generatedOutputs).toHaveLength(2);
     expect(manifest.generatedOutputs[0]).toMatchObject({
       path: 'llm-docs/source-full-llms.txt',
       kind: 'llm-docs',
@@ -7883,6 +7886,7 @@ describe('CLI compatibility behavior', () => {
       lineCount: countTextLines(fullDoc),
       estimatedTokenCount: estimateTextTokens(fullDoc),
     });
+    expect(manifest.generatedOutputs[1]?.path).toBe('llm-docs/source-toc-llms.txt');
     expect(manifest.semanticChunkIndexes).toBeUndefined();
 
     await writeFile(
@@ -8117,7 +8121,7 @@ describe('CLI compatibility behavior', () => {
       expect(sourceFile.lineCount).toBe(countTextLines(text));
       expect(sourceFile.estimatedTokenCount).toBe(estimateTextTokens(text));
     }
-    expect(manifest.generatedOutputs).toHaveLength(1);
+    expect(manifest.generatedOutputs).toHaveLength(2);
     expect(manifest.generatedOutputs[0]).toMatchObject({
       path: 'llm-docs/custom-source-full-llms.txt',
       kind: 'llm-docs',
@@ -8127,6 +8131,7 @@ describe('CLI compatibility behavior', () => {
       lineCount: countTextLines(fullDoc),
       estimatedTokenCount: estimateTextTokens(fullDoc),
     });
+    expect(manifest.generatedOutputs[1]?.path).toBe('llm-docs/custom-source-toc-llms.txt');
     expect(manifest.semanticChunkIndexes).toBeUndefined();
 
     await writeFile(
@@ -8484,7 +8489,7 @@ describe('CLI compatibility behavior', () => {
 
     expect(verifyResult.exitCode).toBe(1);
     expect(verifyResult.stderr).toContain(
-      'generatedOutputs[1].kind must not be semantic-chunks-jsonl for parser.plugin source manifests'
+      'generatedOutputs[2].kind must not be semantic-chunks-jsonl for parser.plugin source manifests'
     );
     expect(await readFile(sideEffectPath, 'utf-8')).toBe('import\ndetect\nparse\n');
   });
@@ -8952,6 +8957,7 @@ describe('CLI compatibility behavior', () => {
     ]);
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'llm-docs/swift-book-full-llms.txt',
+      'llm-docs/swift-book-toc-llms.txt',
     ]);
     expect(manifest.preset).toMatchObject({
       name: 'swift-book',
@@ -9026,6 +9032,7 @@ describe('CLI compatibility behavior', () => {
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'chunks/semantic-chunks.jsonl',
       'llm-docs/swift-book-full-llms.txt',
+      'llm-docs/swift-book-toc-llms.txt',
     ]);
     expect(chunkOutput).toMatchObject({
       path: 'chunks/semantic-chunks.jsonl',
@@ -9103,11 +9110,12 @@ describe('CLI compatibility behavior', () => {
     const llmOutput = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
 
     expect(stdout).toContain('Local source docs generated');
-    expect(stdout).toContain('Generated files: 2');
+    expect(stdout).toContain('Generated files: 3');
     expect(stdout).toContain('Chunk export: chunks/semantic-chunks.jsonl');
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'chunks/semantic-chunks.jsonl',
       'llm-docs/chunk-docs-full-llms.txt',
+      'llm-docs/chunk-docs-toc-llms.txt',
     ]);
     expect(chunkOutput).toMatchObject({
       path: 'chunks/semantic-chunks.jsonl',
@@ -9464,6 +9472,7 @@ describe('CLI compatibility behavior', () => {
     });
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'llm-docs/guide-notes-full-llms.txt',
+      'llm-docs/guide-notes-toc-llms.txt',
     ]);
   });
 
@@ -10860,6 +10869,7 @@ describe('CLI compatibility behavior', () => {
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'chunks/semantic-chunks.jsonl',
       'llm-docs/chunk-docs-full-llms.txt',
+      'llm-docs/chunk-docs-toc-llms.txt',
     ]);
     expect(manifest.semanticChunkIndexes).toHaveLength(1);
     expect(manifest.semanticChunkIndexes?.[0]).toMatchObject({
@@ -10944,6 +10954,7 @@ describe('CLI compatibility behavior', () => {
     expect(refreshedManifest.generatedOutputs.map((output) => output.path)).toEqual([
       'chunks/semantic-chunks.jsonl',
       'llm-docs/swift-book-full-llms.txt',
+      'llm-docs/swift-book-toc-llms.txt',
     ]);
     expect(refreshedManifest.preset?.configPath).toBe(firstManifest.preset.configPath);
     expect(refreshedManifest.preset?.defaults.filenamePrefix).toBe('swift-book');

@@ -41,6 +41,39 @@ const MDX_WRAPPER_COMPONENTS = new Set([
 const MDX_ADMONITION_COMPONENTS = new Set(['Callout', 'Alert', 'Note', 'Warning', 'Tip']);
 
 /**
+ * Reference-link definition captured from a markdown document, keyed by the
+ * definition label (as authored). Stored on document metadata under
+ * `linkDefinitions` so the formatter can inline `[text][label]` uses.
+ */
+export interface MarkdownLinkDefinition {
+  href: string;
+  title?: string;
+}
+
+function collectLinkDefinitions(
+  links: Record<string, { href?: string | null; title?: string | null }> | undefined
+): Record<string, MarkdownLinkDefinition> | undefined {
+  if (links === undefined) {
+    return undefined;
+  }
+
+  const definitions: Record<string, MarkdownLinkDefinition> = {};
+  for (const [label, target] of Object.entries(links)) {
+    const href = target?.href;
+    if (typeof href !== 'string' || href.length === 0) {
+      continue;
+    }
+    const definition: MarkdownLinkDefinition =
+      typeof target?.title === 'string' && target.title.length > 0
+        ? { href, title: target.title }
+        : { href };
+    definitions[label] = definition;
+  }
+
+  return Object.keys(definitions).length > 0 ? definitions : undefined;
+}
+
+/**
  * Parsed markdown document structure
  */
 export interface MarkdownDocument {
@@ -104,8 +137,17 @@ export class MarkdownParser {
       // Parse with marked
       const tokens = marked.lexer(cleaned);
 
-      // Extract title (first H1 or filename)
-      const title = this.extractTitle(tokens, this.filePath);
+      // Capture reference-link definitions (`[label]: url`) so the formatter can
+      // inline them at each use site. marked collects these into tokens.links and
+      // removes them from the token stream; without capturing them here they are
+      // lost and every `[text][label]` use dangles.
+      const linkDefinitions = collectLinkDefinitions(tokens.links);
+      if (linkDefinitions !== undefined) {
+        metadata.set('linkDefinitions', linkDefinitions);
+      }
+
+      // Extract title (frontmatter title, then first H1, then filename slug)
+      const title = this.extractTitle(tokens, this.filePath, metadata);
 
       // Build hierarchical sections plus any document-level (headingless) content
       const { content: documentContent, sections } = this.buildSections(tokens);
@@ -147,7 +189,8 @@ export class MarkdownParser {
    */
   private cleanMarkdownContent(content: string, sourceSyntax: MarkdownSourceSyntax): string {
     const withoutFrontmatter = this.stripYamlFrontmatter(content);
-    return this.cleanOutsideFencedCode(withoutFrontmatter, (segment) => {
+    const withTabs = this.transformDirectiveTabs(withoutFrontmatter);
+    return this.cleanOutsideFencedCode(withTabs, (segment) => {
       let cleanedSegment = this.cleanDocCContentSegment(segment);
       if (sourceSyntax === 'mdx') {
         cleanedSegment = this.cleanMdxContentSegment(cleanedSegment);
@@ -329,6 +372,102 @@ export class MarkdownParser {
     }
 
     flushText();
+    return output.join('\n');
+  }
+
+  /**
+   * Rewrite tab/framework switcher directives so their items become ordinary,
+   * self-describing, correctly-nested headings.
+   *
+   * TanStack docs mark UI switchers with HTML comments:
+   *   <!-- ::start:tabs variant="bundler" --> ... <!-- ::end:tabs -->
+   *   <!-- ::start:framework --> ... <!-- ::end:framework -->
+   * Each tab item is authored as an ATX heading (typically `# Vite`). Stripping
+   * the comment markers alone leaves bare, undifferentiated headings ("Vite",
+   * "React", "npm") and, because those item headings are H1s that appear after
+   * deeper section headings, it scrambles the section tree (all following
+   * content nests under the last tab item).
+   *
+   * This pass, run fence-aware before any other cleaning, does two things per
+   * directive block:
+   *  - appends the switch axis to each item label so it is self-describing:
+   *    `# Vite` under `variant="bundler"` becomes `Vite (bundler)`; a
+   *    `::start:framework` item `# React` becomes `React (framework)`. The axis
+   *    is the `variant` attribute when present, else the directive kind.
+   *  - demotes item headings (and their in-item sub-headings) to nest directly
+   *    under the section that encloses the block, so document order is preserved
+   *    and later content returns to the enclosing section rather than the last
+   *    tab. Nested directives (framework > tabs) nest one level deeper again.
+   * Blocks whose items carry no heading label (for example `variant="files"`,
+   * delimited by code-block titles) are left untouched apart from marker removal.
+   */
+  private transformDirectiveTabs(content: string): string {
+    const lines = content.split('\n');
+    const output: string[] = [];
+    let fence: { marker: '`' | '~'; length: number } | null = null;
+    let lastHeadingLevel = 0;
+    const stack: Array<{ axis: string; itemSourceLevel: number | null; delta: number }> = [];
+
+    for (const line of lines) {
+      if (fence !== null) {
+        output.push(line);
+        if (this.isClosingFence(line, fence)) {
+          fence = null;
+        }
+        continue;
+      }
+
+      const openingFence = this.getOpeningFence(line);
+      if (openingFence !== null) {
+        output.push(line);
+        fence = openingFence;
+        continue;
+      }
+
+      const startMatch = line.match(/<!--\s*::start:([A-Za-z-]+)([^>]*?)-->/);
+      if (startMatch?.[1] !== undefined) {
+        const kind = startMatch[1];
+        const variantMatch = (startMatch[2] ?? '').match(/variant\s*=\s*"([^"]*)"/);
+        const axis = variantMatch?.[1]?.trim() || kind;
+        stack.push({ axis, itemSourceLevel: null, delta: 0 });
+        continue;
+      }
+
+      if (/<!--\s*::end:[A-Za-z-]+\s*-->/.test(line)) {
+        if (stack.length > 0) {
+          stack.pop();
+        }
+        continue;
+      }
+
+      const headingMatch = line.match(/^(#{1,6})\s+(.*?)\s*$/);
+      if (headingMatch?.[1] !== undefined && headingMatch[2] !== undefined) {
+        const sourceLevel = headingMatch[1].length;
+        const text = headingMatch[2];
+        const frame = stack.at(-1);
+
+        if (frame === undefined) {
+          lastHeadingLevel = sourceLevel;
+          output.push(line);
+          continue;
+        }
+
+        if (frame.itemSourceLevel === null) {
+          frame.itemSourceLevel = sourceLevel;
+          frame.delta = lastHeadingLevel + 1 - sourceLevel;
+        }
+
+        const renderedLevel = Math.min(6, Math.max(1, sourceLevel + frame.delta));
+        const isItemLabel = sourceLevel === frame.itemSourceLevel;
+        const newText = isItemLabel ? `${text} (${frame.axis})` : text;
+        output.push(`${'#'.repeat(renderedLevel)} ${newText}`);
+        lastHeadingLevel = renderedLevel;
+        continue;
+      }
+
+      output.push(line);
+    }
+
     return output.join('\n');
   }
 
@@ -808,15 +947,23 @@ export class MarkdownParser {
    *
    * Performance: O(k) where k = number of tokens until first H1
    */
-  private extractTitle(tokens: Token[], filePath: string): string {
-    // Find first heading
+  private extractTitle(tokens: Token[], filePath: string, metadata: Map<string, unknown>): string {
+    // Prefer the frontmatter title so a file's section heading reflects the
+    // authored title (156 of 162 router source files carry `title:`), instead of
+    // silently falling back to the filename slug.
+    const frontmatterTitle = metadata.get('title');
+    if (typeof frontmatterTitle === 'string' && frontmatterTitle.trim().length > 0) {
+      return frontmatterTitle.trim();
+    }
+
+    // Then the first H1 heading in the body.
     for (const token of tokens) {
       if (token.type === 'heading' && token.depth === 1) {
         return token.text;
       }
     }
 
-    // Fallback to filename
+    // Finally the filename slug.
     const parts = filePath.split('/');
     const filename = parts.at(-1) ?? 'document';
     return filename.replace(/\.(?:md|mdx|markdown)$/i, '');
@@ -832,7 +979,7 @@ export class MarkdownParser {
 
     const frontmatter = this.readYamlFrontmatter(content)?.frontmatter;
     if (frontmatter !== undefined) {
-      // Simple key-value parsing (could use yaml parser for complex cases)
+      // Simple key-value parsing keeps broad, backward-compatible key coverage.
       const lines = frontmatter.split('\n');
       for (const line of lines) {
         const colonIndex = line.indexOf(':');
@@ -841,6 +988,30 @@ export class MarkdownParser {
           const value = line.substring(colonIndex + 1).trim();
           metadata.set(key, value);
         }
+      }
+
+      // Robustly resolve `title` and `id` via a real YAML parse so quoted or
+      // escaped scalars (e.g. `title: "Foo: Bar"`) are not mangled by the naive
+      // split above. Only string/number/boolean scalars are accepted.
+      try {
+        const parsed = yamlLoad(frontmatter);
+        if (
+          parsed !== null &&
+          typeof parsed === 'object' &&
+          Object.getPrototypeOf(parsed) === Object.prototype
+        ) {
+          const record = parsed as Record<string, unknown>;
+          for (const key of ['title', 'id']) {
+            const value = record[key];
+            if (typeof value === 'string' && value.trim().length > 0) {
+              metadata.set(key, value.trim());
+            } else if (typeof value === 'number' || typeof value === 'boolean') {
+              metadata.set(key, String(value));
+            }
+          }
+        }
+      } catch {
+        // Keep the line-parsed values when the block is not clean YAML.
       }
     }
 
@@ -932,10 +1103,14 @@ export class MarkdownParser {
   private tokenToContent(token: Token): MarkdownContent | null {
     switch (token.type) {
       case 'code':
+        // Preserve the fence info string byte-verbatim, including the empty
+        // string for a bare ``` fence. Never inject a synthetic `text` tag: the
+        // formatter renders an empty info string as a genuinely bare fence and a
+        // non-empty one (for example `ts title="vite.config.ts"`) exactly.
         return {
           type: 'code',
           content: token.text,
-          language: token.lang || 'text',
+          language: token.lang ?? '',
         };
 
       case 'paragraph':

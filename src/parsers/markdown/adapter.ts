@@ -121,8 +121,11 @@ export function convertSection(section: MarkdownSection, mapH2ToCategory: boolea
 export function convertContent(content: MarkdownContent): ContentBlock {
   switch (content.type) {
     case 'code':
+      // Pass the fence info string through verbatim, including the empty string
+      // for a bare fence, so the formatter can reproduce it exactly rather than
+      // relabeling bare fences to `text`.
       return createContentBlock(ContentBlockType.CODE, content.content, {
-        language: content.language || 'text',
+        language: content.language ?? '',
       });
 
     case 'prose':

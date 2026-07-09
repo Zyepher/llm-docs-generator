@@ -24,7 +24,10 @@ import {
   discoverLocalSource,
 } from './core/discovery.js';
 import { discoverRepo } from './core/repo-discovery.js';
-import type { SourceDocsPresetMetadata } from './core/source-docs.js';
+import type {
+  SourceDocsCategoriesConfig,
+  SourceDocsPresetMetadata,
+} from './core/source-docs.js';
 import { discoverWebsite } from './core/website-discovery.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
@@ -294,6 +297,60 @@ function failGenerateRequest(message: string): never {
   throw new GenerateRequestError(message);
 }
 
+async function loadSourceCategoriesConfig(path: string): Promise<SourceDocsCategoriesConfig> {
+  let parsed: unknown;
+  try {
+    parsed = await readJsonFile(path);
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      failGenerateRequest(`generate --categories file not found: ${path}`);
+    }
+    if (error instanceof SyntaxError) {
+      failGenerateRequest(`generate --categories file is not valid JSON: ${path}`);
+    }
+    throw error;
+  }
+
+  if (!isObjectRecord(parsed)) {
+    failGenerateRequest('generate --categories JSON must be an object');
+  }
+  const rawCategories = parsed.categories;
+  const fallback = parsed.fallback;
+  if (!Array.isArray(rawCategories) || rawCategories.length === 0) {
+    failGenerateRequest('generate --categories JSON requires a non-empty "categories" array');
+  }
+  if (typeof fallback !== 'string' || fallback.trim().length === 0) {
+    failGenerateRequest('generate --categories JSON requires a non-empty "fallback" string');
+  }
+
+  const categories = rawCategories.map((entry, index) => {
+    if (!isObjectRecord(entry)) {
+      failGenerateRequest(`generate --categories entry ${index} must be an object`);
+    }
+    const id = entry.id;
+    const title = entry.title;
+    const include = entry.include;
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      failGenerateRequest(`generate --categories entry ${index} requires a non-empty "id"`);
+    }
+    if (typeof title !== 'string' || title.trim().length === 0) {
+      failGenerateRequest(`generate --categories entry ${index} requires a non-empty "title"`);
+    }
+    if (
+      !Array.isArray(include) ||
+      include.length === 0 ||
+      !include.every((glob) => typeof glob === 'string' && glob.length > 0)
+    ) {
+      failGenerateRequest(
+        `generate --categories entry ${index} requires a non-empty "include" array of glob strings`
+      );
+    }
+    return { id, title, include: include as string[] };
+  });
+
+  return { categories, fallback };
+}
+
 function printGenerateRequestFailure(message: string): void {
   console.error(chalk.red(`Generate failed: ${message}`));
   console.error(
@@ -346,7 +403,28 @@ function validateGenerateOptions(options: {
   chunks?: string;
   preset?: string;
   parserPluginManifest?: string;
+  splitBy?: string;
+  categories?: string;
 }): GenerateMode {
+  if (options.splitBy !== undefined && options.categories !== undefined) {
+    failGenerateRequest('generate --split-by and --categories are mutually exclusive.');
+  }
+
+  if ((options.splitBy !== undefined || options.categories !== undefined) && options.sdk !== undefined) {
+    failGenerateRequest(
+      'generate --split-by/--categories are supported only with explicit --source and cannot be used with --sdk.'
+    );
+  }
+
+  if (options.splitBy !== undefined) {
+    const normalizedSplit = options.splitBy.trim().toLowerCase();
+    if (normalizedSplit !== 'dirs') {
+      failGenerateRequest(
+        `generate --split-by ${options.splitBy} is not supported; the only supported mode is dirs.`
+      );
+    }
+  }
+
   if (
     options.parserPluginManifest !== undefined &&
     options.parserPluginManifest.trim().length === 0
@@ -1115,6 +1193,14 @@ program
     'Explicit local parser plugin manifest for file or opted-in directory source generation'
   )
   .option('--preset <name>', 'Source-only deterministic preset: swift-book')
+  .option(
+    '--split-by <mode>',
+    'Source-only: split output into per-category files. Modes: dirs (category = first path segment). Mutually exclusive with --categories.'
+  )
+  .option(
+    '--categories <file>',
+    'Source-only: explicit category JSON {"categories":[{"id","title","include":["glob"]}],"fallback":"misc"}. Mutually exclusive with --split-by.'
+  )
   .option('--sdk-version <version>', 'Version to generate (or "all" for all versions)', 'latest')
   .option('--config-dir <dir>', 'Configuration directory', 'config')
   .option(
@@ -1131,6 +1217,8 @@ program
       chunks?: string;
       parserPluginManifest?: string;
       preset?: string;
+      splitBy?: string;
+      categories?: string;
       sdkVersion: string;
       configDir: string;
       outputDir?: string;
@@ -1186,6 +1274,12 @@ program
           }
           if (options.parserPluginManifest !== undefined) {
             sourceDocsOptions.parserPluginManifest = options.parserPluginManifest;
+          }
+          if (options.splitBy !== undefined) {
+            sourceDocsOptions.splitBy = 'dirs';
+          }
+          if (options.categories !== undefined) {
+            sourceDocsOptions.categories = await loadSourceCategoriesConfig(options.categories);
           }
 
           const result = await generateSourceDocs(sourceDocsOptions);
