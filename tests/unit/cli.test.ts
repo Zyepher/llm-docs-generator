@@ -3301,6 +3301,7 @@ describe('CLI compatibility behavior', () => {
       '--chunks jsonl',
       '--preset swift-book',
       '--label <label> recorded verbatim into the manifest',
+      '--filename-prefix <prefix> explicit output filename prefix, same sanitization as the derived prefix, not usable with --preset',
       '--exclude <glob> (repeatable)',
     ]);
     expect(implemented.get('generate-source')?.limitations).toEqual(
@@ -15389,5 +15390,154 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Validating swift latest');
     expect(stdout).toContain('Validation successful!');
     expect(stdout).toContain('Version: v2');
+  });
+
+  describe('generate --source --filename-prefix (P1: collision-avoidance flag)', () => {
+    async function makeReactSourceDir(marker: string): Promise<string> {
+      const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-fnprefix-'));
+      tempDirs.push(dir);
+      const reactDir = join(dir, 'react');
+      await mkdir(reactDir, { recursive: true });
+      await writeFile(join(reactDir, 'index.md'), `# ${marker}\n\n${marker} body\n`, 'utf-8');
+      return reactDir;
+    }
+
+    async function makeOutputDir(): Promise<string> {
+      const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-fnprefix-out-'));
+      tempDirs.push(dir);
+      return dir;
+    }
+
+    it('gives two same-basename sources distinct, non-colliding output filenames', async () => {
+      const routerSource = await makeReactSourceDir('Router');
+      const querySource = await makeReactSourceDir('Query');
+      const routerOut = await makeOutputDir();
+      const queryOut = await makeOutputDir();
+
+      const routerRun = await runCli([
+        'generate',
+        '--source',
+        routerSource,
+        '--filename-prefix',
+        'react-router',
+        '--output-dir',
+        routerOut,
+      ]);
+      const queryRun = await runCli([
+        'generate',
+        '--source',
+        querySource,
+        '--filename-prefix',
+        'react-query',
+        '--output-dir',
+        queryOut,
+      ]);
+
+      expect(routerRun.stdout).toContain('Filename prefix: react-router');
+      expect(queryRun.stdout).toContain('Filename prefix: react-query');
+
+      const routerFiles = await readdir(join(routerOut, 'llm-docs'));
+      const queryFiles = await readdir(join(queryOut, 'llm-docs'));
+
+      // Without the flag both would derive 'react' and emit react-full-llms.txt.
+      expect(routerFiles).toContain('react-router-full-llms.txt');
+      expect(queryFiles).toContain('react-query-full-llms.txt');
+      expect(routerFiles.some((name) => name.startsWith('react-full'))).toBe(false);
+      expect(queryFiles.some((name) => name.startsWith('react-full'))).toBe(false);
+
+      const routerManifest = JSON.parse(
+        await readFile(join(routerOut, 'manifest.json'), 'utf-8')
+      ) as SourceDocsManifest;
+      expect(routerManifest.output.filenamePrefix).toBe('react-router');
+    });
+
+    it('rejects a --filename-prefix that is not sanitized, suggesting the sanitized form', async () => {
+      const source = await makeReactSourceDir('Router');
+      const outputDir = await makeOutputDir();
+
+      const result = await runCliWithExit([
+        'generate',
+        '--source',
+        source,
+        '--filename-prefix',
+        'react query!',
+        '--output-dir',
+        outputDir,
+      ]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('is not a valid filename prefix');
+      expect(result.stderr).toContain("Suggested: 'react-query'");
+    });
+
+    it('rejects --filename-prefix combined with --preset', async () => {
+      const source = await makeReactSourceDir('Router');
+      const outputDir = await makeOutputDir();
+
+      const result = await runCliWithExit([
+        'generate',
+        '--source',
+        source,
+        '--preset',
+        'swift-book',
+        '--filename-prefix',
+        'custom',
+        '--output-dir',
+        outputDir,
+      ]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('--filename-prefix cannot be combined with --preset');
+    });
+
+    it('rejects --filename-prefix without --source', async () => {
+      const result = await runCliWithExit(['generate', '--filename-prefix', 'custom']);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('--filename-prefix requires --source');
+    });
+  });
+
+  describe('verify --outputs-only (P2: present-but-failed source must not pass)', () => {
+    async function generateVerifyPack(): Promise<{ sourceDir: string; outputDir: string }> {
+      const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-outputs-only-'));
+      tempDirs.push(dir);
+      const sourceDir = join(dir, 'src');
+      const outputDir = join(dir, 'out');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'a.md'), '# A\n\nalpha body\n', 'utf-8');
+      await writeFile(join(sourceDir, 'b.md'), '# B\n\nbeta body\n', 'utf-8');
+      await runCli(['generate', '--source', sourceDir, '--output-dir', outputDir]);
+      return { sourceDir, outputDir };
+    }
+
+    it('exits non-zero when the recorded source is present but tampered', async () => {
+      const { sourceDir, outputDir } = await generateVerifyPack();
+      await writeFile(join(sourceDir, 'a.md'), '# A\n\nTAMPERED\n', 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--output-dir', outputDir, '--outputs-only']);
+
+      expect(result.exitCode).toBe(1);
+      // Two-tier printing preserved: outputs pass, the source mismatch is shown.
+      expect(result.stdout).toContain('Outputs: passed');
+      expect(result.stdout).toContain('Source: failed');
+      expect(result.stderr).toContain('[source]');
+      expect(result.stderr).toContain(
+        'the recorded source is present but does not match the manifest'
+      );
+      expect(result.stdout).not.toContain('Verification passed (outputs-only)');
+    });
+
+    it('exits zero when the recorded source is unavailable (relocated pack)', async () => {
+      const { sourceDir, outputDir } = await generateVerifyPack();
+      await rename(sourceDir, `${sourceDir}-relocated`);
+      tempDirs.push(`${sourceDir}-relocated`);
+
+      const result = await runCliWithExit(['verify', '--output-dir', outputDir, '--outputs-only']);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('source unavailable');
+      expect(result.stdout).toContain('Verification passed (outputs-only)');
+    });
   });
 });

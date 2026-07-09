@@ -41,6 +41,7 @@ import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { sha256File } from '../utils/hash.js';
 import { isSkippedTraversalDirectory } from '../utils/traversal.js';
+import { sanitizeFilenameSegment as sanitizeFileSegment } from '../utils/filename-prefix.js';
 
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
 const SOURCE_DOCS_OUTPUT_DIR = 'llm-docs';
@@ -222,6 +223,9 @@ export interface SourceDocsManifest {
     skippedFiles?: SourceDocsSkippedFile[];
   };
   sourceFiles: SourceDocsFileManifestEntry[];
+  output: {
+    filenamePrefix: string;
+  };
   parser: {
     name: string;
     version: string;
@@ -364,10 +368,16 @@ export async function generateSourceDocs(
       ...(options.gitContext === undefined ? {} : { gitContext: options.gitContext }),
     };
 
+    // The prefix operators actually get: an explicit --filename-prefix (already
+    // sanitization-validated at the CLI) overrides the prefix derived from the
+    // source basename. Computed once so the formatter and the manifest record
+    // the identical value.
+    const resolvedFilenamePrefix =
+      options.output?.filenamePrefix ?? filenamePrefixForSource(source.resolvedPath, source.type);
+
     const outputPaths = await formatDocNode(root, {
       outputDir: llmDocsDir,
-      filenamePrefix:
-        options.output?.filenamePrefix ?? filenamePrefixForSource(source.resolvedPath, source.type),
+      filenamePrefix: resolvedFilenamePrefix,
       title: options.output?.title ?? root.title,
       systemPrompt:
         options.output?.systemPrompt ??
@@ -397,6 +407,7 @@ export async function generateSourceDocs(
         : { parserPlugin: preparedSource.parserPlugin }),
       generator: options.generator,
       sourceFiles: preparedSource.sourceFiles,
+      filenamePrefix: resolvedFilenamePrefix,
       generatedOutputs,
       ...(semanticChunkIndexes.length === 0 ? {} : { semanticChunkIndexes }),
       ...(options.preset === undefined ? {} : { preset: options.preset }),
@@ -1620,6 +1631,7 @@ function buildSourceDocsManifest(options: {
   parserPlugin?: SourceDocsParserPluginProvenance;
   generator: SourceDocsGeneratorMetadata;
   sourceFiles: BoundedSourceFile[];
+  filenamePrefix: string;
   generatedOutputs: SourceDocsGeneratedOutput[];
   semanticChunkIndexes?: SemanticChunkManifestIndex[];
   preset?: SourceDocsPresetMetadata;
@@ -1671,6 +1683,9 @@ function buildSourceDocsManifest(options: {
         : { skippedFiles: options.skippedFiles }),
     },
     sourceFiles,
+    output: {
+      filenamePrefix: options.filenamePrefix,
+    },
     parser: {
       name: options.parser.name,
       version: options.parserVersion ?? options.generator.version,
@@ -1778,10 +1793,6 @@ function filenamePrefixForSource(sourcePath: string, type: SourceDocsSourceType)
       : sourceBasename;
 
   return sanitizeFileSegment(rawPrefix.toLowerCase());
-}
-
-function sanitizeFileSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'source';
 }
 
 /**

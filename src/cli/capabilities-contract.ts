@@ -250,11 +250,12 @@ export const CAPABILITIES_CONTRACT = {
         '--chunks jsonl',
         '--preset swift-book',
         '--label <label> recorded verbatim into the manifest',
+        '--filename-prefix <prefix> explicit output filename prefix, same sanitization as the derived prefix, not usable with --preset',
         '--exclude <glob> (repeatable)',
       ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic local source parsing through the registered parser or an explicit local parser plugin and universal formatter, with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, a scoped swift-book preset, best-effort git provenance capture, a verbatim operator label, deterministic --exclude globbing, and recorded skipped-file and draft-file facts',
+        'deterministic local source parsing through the registered parser or an explicit local parser plugin and universal formatter, with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, a scoped swift-book preset, best-effort git provenance capture, a verbatim operator label, an explicit or source-derived output filename prefix recorded in manifest.output.filenamePrefix, deterministic --exclude globbing, and recorded skipped-file and draft-file facts',
       limitations: [
         'local files and directories only',
         'input provenance summaries are content-free manifest metadata only',
@@ -402,13 +403,14 @@ export const CAPABILITIES_CONTRACT = {
       inputBoundary: 'local-source-docs manifest.json',
       outputFiles: ['stdout verification result'],
       summary:
-        'recorded generator/parser/formatter metadata, required V2 descriptive manifest contract validation, required V2 content-free input provenance summary validation, required V2 content-free artifact summary validation, source path, source file hash, byte-size, line-count, estimated-token, generated output hash, byte-size, line-count, estimated-token, optional semantic chunk index verification, and optional refresh provenance validation for local source docs manifests, reported in two tiers (generated outputs are always hash-checked; the recorded source may be unavailable for a relocated pack), with --outputs-only to exit zero when the outputs pass',
+        'recorded generator/parser/formatter metadata, required V2 descriptive manifest contract validation, required V2 content-free input provenance summary validation, required V2 content-free artifact summary validation, source path, source file hash, byte-size, line-count, estimated-token, generated output hash, byte-size, line-count, estimated-token, optional semantic chunk index verification, optional refresh provenance validation, and a provenance cross-check binding manifest source.git commit and source.label to the hash-bound primary output header (skipped for pre-stamp and v1 outputs) for local source docs manifests, reported in two tiers (generated outputs are always hash-checked; the recorded source may be unavailable for a relocated pack), with --outputs-only to exit zero only when the outputs pass and the recorded source is unavailable; a present source that fails hash verification still exits non-zero',
       limitations: [
         'local-source-docs manifest mode only',
         'input provenance summaries are content-free manifest metadata only',
         'artifact summaries are content-free manifest metadata only',
         'verify does not refresh outputs',
-        'source-tier checks require the recorded source to be present; --outputs-only accepts an unavailable source only when the operator judges relocation expected',
+        '--outputs-only ignores only an unavailable (relocated) recorded source; a present source that fails hash verification still exits non-zero',
+        'provenance cross-check binds only the git commit and label already stamped into the hash-bound output header; it is not a manifest signature',
         'no repo freshness check',
         'no source-code verification',
       ],

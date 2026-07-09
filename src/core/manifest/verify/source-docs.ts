@@ -2,7 +2,7 @@
  * Verifier and validators for source-docs manifests.
  */
 
-import { lstat } from 'node:fs/promises';
+import { lstat, open } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve, win32 } from 'node:path';
 
 import {
@@ -13,6 +13,7 @@ import {
   isObjectRecord,
 } from '../../../utils/guards.js';
 import { isSha256Hash, isUnprefixedSha256Hash } from '../../../utils/hash.js';
+import { isSanitizedFilenameSegment } from '../../../utils/filename-prefix.js';
 import { aggregateSourceFilesHash } from '../../../utils/source-files-hash.js';
 import {
   buildSemanticChunkJsonlManifestIndex,
@@ -325,6 +326,7 @@ export async function verifySourceDocsManifest(
     failures,
   });
   validateSourceDocsPresetMetadata(preset, failures);
+  validateSourceDocsOutputMetadata(manifest.output, failures);
 
   validateRequiredManifestContract(manifest.manifestContract, SOURCE_DOCS_MODE, failures);
   validateRequiredInputProvenance(manifest.inputProvenance, SOURCE_DOCS_MODE, manifest, failures);
@@ -351,6 +353,21 @@ export async function verifySourceDocsManifest(
     manifestDir,
     semanticChunkIndexes: semanticChunkIndexEntries,
     failures: outputFailures,
+  });
+
+  // Provenance cross-check: the manifest's self-reported source.git commit and
+  // source.label are otherwise unbound, but the same values are stamped into the
+  // primary generated output's <SYSTEM> header, which IS hash-bound by that
+  // output's recorded hash. A mismatch is an outputs-tier failure (so it is
+  // caught even under --outputs-only). Recorded here as it binds to the output.
+  const notes: string[] = [];
+  await crossCheckManifestProvenanceAgainstOutputHeader({
+    manifestDir,
+    source: sourceRecord,
+    generatedOutputs: outputRecords,
+    outputsClean: outputFailures.length === 0,
+    failures: outputFailures,
+    notes,
   });
 
   // Source tier: the external recorded source. A missing source root is reported
@@ -405,7 +422,215 @@ export async function verifySourceDocsManifest(
     failures: [...outputFailures, ...sourceFailures],
     outputs,
     source: sourceTier,
+    ...(notes.length > 0 ? { notes } : {}),
   };
+}
+
+function validateSourceDocsOutputMetadata(output: unknown, failures: string[]): void {
+  // Backward compatible: v1 and pre-`output` manifests omit this block entirely.
+  if (output === undefined) {
+    return;
+  }
+
+  if (!isObjectRecord(output)) {
+    failures.push('malformed manifest: output must be an object when present');
+    return;
+  }
+
+  validateAllowedKeys(output, new Set(['filenamePrefix']), 'output', failures);
+
+  if (!isNonEmptyString(output.filenamePrefix)) {
+    failures.push('malformed manifest: output.filenamePrefix must be a non-empty string');
+  } else if (!isSanitizedFilenameSegment(output.filenamePrefix)) {
+    failures.push(
+      "malformed manifest: output.filenamePrefix must use only letters, digits, '.', '_', '-' with no leading/trailing dashes"
+    );
+  }
+}
+
+interface OutputHeaderProvenance {
+  hasProvenanceSegments: boolean;
+  hasLabelSegment: boolean;
+  labelValue?: string;
+  hasGitSegment: boolean;
+  gitSegmentText?: string;
+}
+
+/**
+ * Cross-check the manifest's self-reported provenance (source.git.commit,
+ * source.label) against the hash-bound <SYSTEM> header of the primary generated
+ * output. The manifest git/label block is otherwise unsigned; the header carries
+ * the same values and cannot be edited without breaking the output's recorded
+ * hash. A mismatch is pushed as an outputs-tier failure.
+ *
+ * Backward compatibility: outputs generated before header provenance stamping
+ * (and v1 packs) carry no provenance segments on line 1. Those are skipped with
+ * a note rather than failed.
+ */
+async function crossCheckManifestProvenanceAgainstOutputHeader(options: {
+  manifestDir: string;
+  source: Record<string, unknown>;
+  generatedOutputs: unknown[];
+  outputsClean: boolean;
+  failures: string[];
+  notes: string[];
+}): Promise<void> {
+  const { manifestDir, source, generatedOutputs, outputsClean, failures, notes } = options;
+
+  const label = source.label;
+  const git = source.git;
+  const hasLabel = isNonEmptyString(label);
+  const gitCommit =
+    isObjectRecord(git) && isNonEmptyString(git.commit) ? git.commit : undefined;
+
+  // Nothing self-reported to bind: no cross-check.
+  if (!hasLabel && gitCommit === undefined) {
+    return;
+  }
+
+  // The check binds to the HASH-BOUND primary output. If the outputs tier is not
+  // clean, that output already failed (or a sibling did) and reading a possibly
+  // tampered header proves nothing; the failure is already surfaced.
+  if (!outputsClean) {
+    return;
+  }
+
+  const primaryPath = findPrimaryGeneratedOutputPath(generatedOutputs);
+  if (primaryPath === undefined) {
+    return;
+  }
+
+  let firstLine: string;
+  try {
+    firstLine = await readFirstLine(resolve(manifestDir, primaryPath));
+  } catch {
+    // Unreadable primary output is an outputs-tier hash-check concern already
+    // reported; do not double-report here.
+    return;
+  }
+
+  const provenance = parseOutputHeaderProvenance(firstLine);
+
+  if (!provenance.hasProvenanceSegments) {
+    notes.push(
+      'provenance cross-check skipped: the primary output header carries no provenance segments (pre-stamp or v1 pack)'
+    );
+    return;
+  }
+
+  if (hasLabel) {
+    if (!provenance.hasLabelSegment) {
+      failures.push(
+        'manifest provenance does not match hash-bound output header: manifest records source.label but the output header carries no label segment'
+      );
+    } else if (provenance.labelValue !== label) {
+      failures.push(
+        'manifest provenance does not match hash-bound output header: source.label does not match the output header label'
+      );
+    }
+  }
+
+  if (gitCommit !== undefined) {
+    if (!provenance.hasGitSegment) {
+      failures.push(
+        'manifest provenance does not match hash-bound output header: manifest records source.git.commit but the output header carries no git segment'
+      );
+    } else if (
+      provenance.gitSegmentText === undefined ||
+      !provenance.gitSegmentText.includes(gitCommit)
+    ) {
+      failures.push(
+        'manifest provenance does not match hash-bound output header: source.git.commit does not appear in the output header'
+      );
+    }
+  }
+}
+
+function findPrimaryGeneratedOutputPath(generatedOutputs: unknown[]): string | undefined {
+  for (const output of generatedOutputs) {
+    if (!isObjectRecord(output)) {
+      continue;
+    }
+
+    const path = output.path;
+    if (output.kind === 'llm-docs' && isNonEmptyString(path) && path.endsWith('-full-llms.txt')) {
+      return path;
+    }
+  }
+
+  return undefined;
+}
+
+async function readFirstLine(path: string): Promise<string> {
+  // Bounded read: the header line is short; never load the whole pack.
+  const handle = await open(path, 'r');
+
+  try {
+    const buffer = Buffer.alloc(65536);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const text = buffer.subarray(0, bytesRead).toString('utf-8');
+    const newlineIndex = text.indexOf('\n');
+
+    return newlineIndex === -1 ? text : text.slice(0, newlineIndex);
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Parse the provenance segments the universal formatter appends inside the
+ * line-1 `<SYSTEM>` tag: `<base> | label: <label> | source: <url>@<commit> ...`
+ * (or `... | commit: <commit> ...` when there is no remote). The label segment,
+ * when present, comes before the git segment, so the label value runs from
+ * `label: ` up to the git marker (or end of the SYSTEM content). This tolerates a
+ * literal `| ` inside an operator label as long as the git segment separator is
+ * intact.
+ */
+function parseOutputHeaderProvenance(firstLine: string): OutputHeaderProvenance {
+  const systemMatch = /<SYSTEM>([\s\S]*?)<\/SYSTEM>/.exec(firstLine);
+  const systemContent = systemMatch?.[1] ?? firstLine;
+
+  const gitMarker = firstGitSegmentMarker(systemContent);
+  const labelMarker = ' | label: ';
+  const labelIndex = systemContent.indexOf(labelMarker);
+
+  const hasLabelSegment = labelIndex !== -1;
+  const hasGitSegment = gitMarker !== undefined;
+
+  let labelValue: string | undefined;
+  if (hasLabelSegment) {
+    const valueStart = labelIndex + labelMarker.length;
+    const valueEnd =
+      gitMarker !== undefined && gitMarker.index > valueStart
+        ? gitMarker.index
+        : systemContent.length;
+    labelValue = systemContent.slice(valueStart, valueEnd);
+  }
+
+  const gitSegmentText =
+    gitMarker === undefined
+      ? undefined
+      : systemContent.slice(gitMarker.index + ' | '.length);
+
+  return {
+    hasProvenanceSegments: hasLabelSegment || hasGitSegment,
+    hasLabelSegment,
+    ...(labelValue === undefined ? {} : { labelValue }),
+    hasGitSegment,
+    ...(gitSegmentText === undefined ? {} : { gitSegmentText }),
+  };
+}
+
+function firstGitSegmentMarker(systemContent: string): { index: number } | undefined {
+  const sourceIndex = systemContent.indexOf(' | source: ');
+  const commitIndex = systemContent.indexOf(' | commit: ');
+  const candidates = [sourceIndex, commitIndex].filter((index) => index !== -1);
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  return { index: Math.min(...candidates) };
 }
 
 async function pathExists(path: string): Promise<boolean> {
