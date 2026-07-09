@@ -810,6 +810,41 @@ LLM docs for Tailwind CSS," the installed skill is what should tell the agent to
 investigate source and scope, then call the globally available `llm-docs` CLI
 with explicit inputs. The CLI then performs the deterministic work.
 
+## Adding A Markdown Directive Dialect
+
+A directive dialect is a deterministic transform for one explicit marker syntax
+embedded in markdown. The bundled comment-directive tabs dialect
+(`src/parsers/markdown/directives/comment-directive-tabs.ts`) is the reference
+example: it rewrites `<!-- ::start:KIND --> ... <!-- ::end:KIND -->` HTML-comment
+switcher blocks into plain, self-describing, correctly-nested headings. A dialect
+owns only that rewrite; it never selects sources, fetches, or infers authority.
+
+Each dialect implements the `MarkdownDirectiveExtension` interface
+(`src/parsers/markdown/directives/types.ts`):
+
+- `name` — stable dialect identifier, used for ordering and diagnostics.
+- `appliesTo(content)` — activation predicate. It MUST return true only when the
+  dialect's exact marker syntax is literally present in `content`. This is the
+  engine-never-guesses contract applied to dialects: an extension activates on
+  explicit syntax alone, never on heuristics, content shape, or guessing. A
+  marker-free document must return false so its transform is skipped and the
+  document is returned byte-for-byte unchanged.
+- `transform(content)` — pure, fence-aware rewrite, invoked only after
+  `appliesTo` returned true.
+
+To contribute one:
+
+1. Implement the interface in `src/parsers/markdown/directives/<name>.ts`.
+2. Register it in `src/parsers/markdown/directives/index.ts`
+   (`MARKDOWN_DIRECTIVE_EXTENSIONS`, in application order).
+3. Add a test in `tests/unit/markdown-directives.test.ts` modeled on the
+   existing one: exact-marker detection true/false, the no-op guarantee for
+   marker-free and fenced-only input, and the transform output.
+
+Runtime dialect loading for installed (non-cloned) users is deferred: if you need
+a dialect without forking, open an issue, since the existing explicit-local
+parser-plugin manifest mechanism is the intended vehicle if demand appears.
+
 ## Source Evidence Categories
 
 The agent should review sources in this order, using CLI reports as evidence

@@ -191,9 +191,9 @@ export class MarkdownParser {
    */
   private cleanMarkdownContent(content: string, sourceSyntax: MarkdownSourceSyntax): string {
     const withoutFrontmatter = this.stripYamlFrontmatter(content);
-    // Directive dialects (e.g. TanStack tabs) run through the extension seam,
-    // which only activates a dialect whose exact markers are present. A document
-    // with no directive markers is returned unchanged.
+    // Directive dialects (e.g. comment-directive tabs) run through the extension
+    // seam, which only activates a dialect whose exact markers are present. A
+    // document with no directive markers is returned unchanged.
     const withTabs = applyMarkdownDirectives(withoutFrontmatter);
     return this.cleanOutsideFencedCode(withTabs, (segment) => {
       let cleanedSegment = this.cleanDocCContentSegment(segment);

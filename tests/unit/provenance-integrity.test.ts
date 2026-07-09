@@ -196,10 +196,10 @@ describe('generate --source --label (task 2)', () => {
       source: join(source, 'a.md'),
       outputDir,
       format: 'markdown',
-      label: '@tanstack/react-router@1.170.17',
+      label: '@example/pkg@1.2.3',
     });
 
-    expect(manifest.source.label).toBe('@tanstack/react-router@1.170.17');
+    expect(manifest.source.label).toBe('@example/pkg@1.2.3');
   });
 
   it('omits label when none is provided', async () => {

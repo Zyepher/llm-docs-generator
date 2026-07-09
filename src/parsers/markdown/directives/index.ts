@@ -9,17 +9,17 @@
  */
 
 import type { MarkdownDirectiveExtension } from './types.js';
-import { tanstackTabsExtension } from './tanstack-tabs.js';
+import { commentDirectiveTabsExtension } from './comment-directive-tabs.js';
 
 export type { MarkdownDirectiveExtension } from './types.js';
-export { tanstackTabsExtension } from './tanstack-tabs.js';
+export { commentDirectiveTabsExtension } from './comment-directive-tabs.js';
 
 /**
- * Registered directive dialects, in application order. TanStack tabs ships as
- * the first (currently only) registered extension.
+ * Registered directive dialects, in application order. The comment-directive
+ * tabs dialect ships as the first (currently only) registered extension.
  */
 export const MARKDOWN_DIRECTIVE_EXTENSIONS: readonly MarkdownDirectiveExtension[] = [
-  tanstackTabsExtension,
+  commentDirectiveTabsExtension,
 ];
 
 /**

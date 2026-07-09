@@ -2,30 +2,30 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyMarkdownDirectives,
+  commentDirectiveTabsExtension,
   MARKDOWN_DIRECTIVE_EXTENSIONS,
-  tanstackTabsExtension,
 } from '../../src/parsers/markdown/directives/index.js';
 
 describe('markdown directive registry', () => {
-  it('ships the TanStack tabs dialect as the first registered extension', () => {
-    expect(MARKDOWN_DIRECTIVE_EXTENSIONS[0]).toBe(tanstackTabsExtension);
-    expect(MARKDOWN_DIRECTIVE_EXTENSIONS[0]?.name).toBe('tanstack-tabs');
+  it('ships the comment-directive tabs dialect as the first registered extension', () => {
+    expect(MARKDOWN_DIRECTIVE_EXTENSIONS[0]).toBe(commentDirectiveTabsExtension);
+    expect(MARKDOWN_DIRECTIVE_EXTENSIONS[0]?.name).toBe('comment-directive-tabs');
   });
 });
 
-describe('tanstack tabs: deterministic marker detection', () => {
+describe('comment-directive tabs: deterministic marker detection', () => {
   it('does not apply to a document without the exact start marker', () => {
-    expect(tanstackTabsExtension.appliesTo('# Heading\n\nprose without markers\n')).toBe(false);
+    expect(commentDirectiveTabsExtension.appliesTo('# Heading\n\nprose without markers\n')).toBe(false);
     // A stray end marker with no start marker is not an activation signal.
-    expect(tanstackTabsExtension.appliesTo('<!-- ::end:tabs -->\n')).toBe(false);
+    expect(commentDirectiveTabsExtension.appliesTo('<!-- ::end:tabs -->\n')).toBe(false);
   });
 
   it('applies only when the exact start-marker syntax is present', () => {
     expect(
-      tanstackTabsExtension.appliesTo('<!-- ::start:framework -->\n# React\n<!-- ::end:framework -->\n')
+      commentDirectiveTabsExtension.appliesTo('<!-- ::start:framework -->\n# React\n<!-- ::end:framework -->\n')
     ).toBe(true);
     expect(
-      tanstackTabsExtension.appliesTo('<!--   ::start:tabs variant="bundler"  -->\n')
+      commentDirectiveTabsExtension.appliesTo('<!--   ::start:tabs variant="bundler"  -->\n')
     ).toBe(true);
   });
 });
@@ -44,7 +44,7 @@ describe('applyMarkdownDirectives: no-op guarantee (structural)', () => {
   });
 });
 
-describe('applyMarkdownDirectives: TanStack tabs transform', () => {
+describe('applyMarkdownDirectives: comment-directive tabs transform', () => {
   it('appends the switch axis to item labels, demotes headings, and strips markers', () => {
     const input = [
       '## Install',
