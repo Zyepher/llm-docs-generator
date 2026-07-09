@@ -1643,7 +1643,7 @@ program
   .option('--output-dir <dir>', 'Output directory containing manifest.json')
   .option(
     '--outputs-only',
-    'Exit zero when the self-contained generated outputs pass, even if the recorded source is unavailable (for relocated packs)',
+    'Exit zero when the self-contained generated outputs pass AND the recorded source is unavailable (relocated pack). A present source that fails hash verification still exits non-zero; only an unavailable source is ignored.',
     false
   )
   .option('-v, --verbose', 'Enable verbose logging', false)
@@ -1689,6 +1689,11 @@ program
           for (const failure of source.failures) {
             console.error(chalk.red(`  - [source] ${failure}`));
           }
+          if (result.notes !== undefined) {
+            for (const note of result.notes) {
+              console.log(chalk.gray(`  - [note] ${note}`));
+            }
+          }
 
           const outputsPassed = outputs.status === 'passed';
 
@@ -1698,10 +1703,24 @@ program
               process.exit(1);
             }
 
-            if (source.status !== 'passed') {
+            // --outputs-only exists for RELOCATED packs whose recorded source is
+            // UNAVAILABLE. A source that is present but fails hash verification
+            // (tampered/drifted) is a real integrity failure and must not be
+            // blessed: only an unavailable source is ignorable. Its red [source]
+            // mismatch lines were already printed above.
+            if (source.status === 'failed') {
+              console.error(
+                chalk.red(
+                  'Source verification failed: the recorded source is present but does not match the manifest; --outputs-only ignores only an unavailable (relocated) source, not a present, failed source'
+                )
+              );
+              process.exit(1);
+            }
+
+            if (source.status === 'unavailable') {
               console.log(
                 chalk.yellow(
-                  `Outputs verified; source ${source.status} (ignored with --outputs-only)`
+                  'Outputs verified; source unavailable (ignored with --outputs-only for a relocated pack)'
                 )
               );
             }

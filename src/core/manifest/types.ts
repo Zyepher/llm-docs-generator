@@ -77,6 +77,9 @@ export interface VerifyGenerationManifestResult {
   // relocated pack). Other manifest modes leave these undefined.
   outputs?: VerifyTierResult;
   source?: VerifyTierResult;
+  // Non-fatal verifier notes (e.g. a provenance cross-check skipped because the
+  // output header predates provenance stamping). Never affect the exit code.
+  notes?: string[];
 }
 
 export interface WriteDiscoveryReportManifestOptions {

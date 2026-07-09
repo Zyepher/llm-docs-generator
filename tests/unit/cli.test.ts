@@ -15390,4 +15390,47 @@ describe('CLI compatibility behavior', () => {
     expect(stdout).toContain('Validation successful!');
     expect(stdout).toContain('Version: v2');
   });
+
+  describe('verify --outputs-only (P2: present-but-failed source must not pass)', () => {
+    async function generateVerifyPack(): Promise<{ sourceDir: string; outputDir: string }> {
+      const dir = await mkdtemp(join(await realpath(tmpdir()), 'llm-docs-outputs-only-'));
+      tempDirs.push(dir);
+      const sourceDir = join(dir, 'src');
+      const outputDir = join(dir, 'out');
+      await mkdir(sourceDir, { recursive: true });
+      await writeFile(join(sourceDir, 'a.md'), '# A\n\nalpha body\n', 'utf-8');
+      await writeFile(join(sourceDir, 'b.md'), '# B\n\nbeta body\n', 'utf-8');
+      await runCli(['generate', '--source', sourceDir, '--output-dir', outputDir]);
+      return { sourceDir, outputDir };
+    }
+
+    it('exits non-zero when the recorded source is present but tampered', async () => {
+      const { sourceDir, outputDir } = await generateVerifyPack();
+      await writeFile(join(sourceDir, 'a.md'), '# A\n\nTAMPERED\n', 'utf-8');
+
+      const result = await runCliWithExit(['verify', '--output-dir', outputDir, '--outputs-only']);
+
+      expect(result.exitCode).toBe(1);
+      // Two-tier printing preserved: outputs pass, the source mismatch is shown.
+      expect(result.stdout).toContain('Outputs: passed');
+      expect(result.stdout).toContain('Source: failed');
+      expect(result.stderr).toContain('[source]');
+      expect(result.stderr).toContain(
+        'the recorded source is present but does not match the manifest'
+      );
+      expect(result.stdout).not.toContain('Verification passed (outputs-only)');
+    });
+
+    it('exits zero when the recorded source is unavailable (relocated pack)', async () => {
+      const { sourceDir, outputDir } = await generateVerifyPack();
+      await rename(sourceDir, `${sourceDir}-relocated`);
+      tempDirs.push(`${sourceDir}-relocated`);
+
+      const result = await runCliWithExit(['verify', '--output-dir', outputDir, '--outputs-only']);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('source unavailable');
+      expect(result.stdout).toContain('Verification passed (outputs-only)');
+    });
+  });
 });

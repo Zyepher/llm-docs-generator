@@ -447,3 +447,130 @@ describe('refresh git-drift detection (task 5)', () => {
     );
   });
 });
+
+describe('verify provenance cross-check (P3: manifest git/label vs hash-bound header)', () => {
+  async function generateProvenancePack(): Promise<{
+    manifestPath: string;
+    commit: string;
+    label: string;
+  }> {
+    const repo = await makeTempDir('llm-docs-provenance-');
+    await initRepo(repo);
+    await writeSourceFile(repo, 'docs/g.md', '# Guide\n\nbody\n');
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-qm', 'init']);
+    const commit = git(repo, ['rev-parse', 'HEAD']);
+    const outputDir = await makeTempDir('llm-docs-provenance-out-');
+    const sourceDir = join(repo, 'docs');
+    const gitContext = await captureGitState(sourceDir);
+    const label = 'mylib@1.2.3';
+    const { manifestPath } = await generate({
+      source: sourceDir,
+      outputDir,
+      format: 'markdown',
+      label,
+      ...(gitContext === undefined ? {} : { gitContext }),
+    });
+
+    return { manifestPath, commit, label };
+  }
+
+  it('passes when the manifest git commit and label match the output header', async () => {
+    const { manifestPath } = await generateProvenancePack();
+
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.outputs?.status).toBe('passed');
+    expect(
+      result.failures.some((failure) => failure.includes('manifest provenance'))
+    ).toBe(false);
+    expect(result.notes).toBeUndefined();
+  });
+
+  it('fails the outputs tier when the manifest git commit is forged', async () => {
+    const { manifestPath } = await generateProvenancePack();
+    const manifest = await readManifest(manifestPath);
+    manifest.source.git!.commit = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.outputs?.status).toBe('failed');
+    expect(
+      result.outputs?.failures.some(
+        (failure) =>
+          failure.includes('manifest provenance') && failure.includes('source.git.commit')
+      )
+    ).toBe(true);
+  });
+
+  it('fails the outputs tier when the manifest label is forged', async () => {
+    const { manifestPath } = await generateProvenancePack();
+    const manifest = await readManifest(manifestPath);
+    manifest.source.label = 'totally-different-label';
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.outputs?.status).toBe('failed');
+    expect(
+      result.outputs?.failures.some(
+        (failure) => failure.includes('manifest provenance') && failure.includes('source.label')
+      )
+    ).toBe(true);
+  });
+
+  it('does not run the cross-check when the manifest carries no git or label', async () => {
+    const source = await makeTempDir('llm-docs-noprov-');
+    await writeSourceFile(source, 'a.md', '# A\n');
+    const outputDir = await makeTempDir('llm-docs-noprov-out-');
+    const { manifestPath } = await generate({
+      source: join(source, 'a.md'),
+      outputDir,
+      format: 'markdown',
+    });
+
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.outputs?.status).toBe('passed');
+    expect(result.notes).toBeUndefined();
+  });
+
+  it('skips with a note (no failure) for a pre-stamp output header while the manifest records provenance', async () => {
+    // A no-provenance pack: its header carries no label/source segments, exactly
+    // like a v1 / pre-stamp output.
+    const source = await makeTempDir('llm-docs-prestamp-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-prestamp-out-');
+    const { manifestPath } = await generate({
+      source: join(source, 'a.md'),
+      outputDir,
+      format: 'markdown',
+    });
+
+    // Inject provenance into the MANIFEST only: source.git + source.label the
+    // hash-bound output header does not carry. inputProvenance and artifactSummary
+    // do not include git/label, so the injection leaves structural validation
+    // intact and isolates the cross-check's backward-compat behavior.
+    const manifest = await readManifest(manifestPath);
+    manifest.source.git = {
+      remoteUrl: null,
+      commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      tags: [],
+      dirty: false,
+      sourceRootFromRepo: 'a.md',
+    };
+    manifest.source.label = 'v1-pack';
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.outputs?.status).toBe('passed');
+    expect(
+      result.failures.some((failure) => failure.includes('manifest provenance'))
+    ).toBe(false);
+    expect(result.notes?.some((note) => note.includes('provenance cross-check skipped'))).toBe(
+      true
+    );
+  });
+});
