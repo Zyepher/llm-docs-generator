@@ -250,11 +250,12 @@ export const CAPABILITIES_CONTRACT = {
         '--chunks jsonl',
         '--preset swift-book',
         '--label <label> recorded verbatim into the manifest',
+        '--filename-prefix <prefix> explicit output filename prefix, same sanitization as the derived prefix, not usable with --preset',
         '--exclude <glob> (repeatable)',
       ],
       outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
       summary:
-        'deterministic local source parsing through the registered parser or an explicit local parser plugin and universal formatter, with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, a scoped swift-book preset, best-effort git provenance capture, a verbatim operator label, deterministic --exclude globbing, and recorded skipped-file and draft-file facts',
+        'deterministic local source parsing through the registered parser or an explicit local parser plugin and universal formatter, with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, a scoped swift-book preset, best-effort git provenance capture, a verbatim operator label, an explicit or source-derived output filename prefix recorded in manifest.output.filenamePrefix, deterministic --exclude globbing, and recorded skipped-file and draft-file facts',
       limitations: [
         'local files and directories only',
         'input provenance summaries are content-free manifest metadata only',

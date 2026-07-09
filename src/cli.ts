@@ -55,6 +55,10 @@ import {
   isObjectRecord,
 } from './utils/guards.js';
 import { readJsonFile } from './utils/json.js';
+import {
+  isSanitizedFilenameSegment,
+  sanitizeFilenameSegment,
+} from './utils/filename-prefix.js';
 import { Logger, LogLevel } from './utils/logger.js';
 import {
   CLI_NAME,
@@ -405,7 +409,36 @@ function validateGenerateOptions(options: {
   parserPluginManifest?: string;
   splitBy?: string;
   categories?: string;
+  filenamePrefix?: string;
 }): GenerateMode {
+  if (options.filenamePrefix !== undefined) {
+    if (options.sdk !== undefined) {
+      failGenerateRequest(
+        'generate --filename-prefix is supported only with explicit --source and cannot be used with --sdk.'
+      );
+    }
+
+    if (options.preset !== undefined) {
+      failGenerateRequest(
+        'generate --filename-prefix cannot be combined with --preset; the preset controls the output filename prefix.'
+      );
+    }
+
+    if (options.source === undefined) {
+      failGenerateRequest(
+        'generate --filename-prefix requires --source <explicit-local-file-or-directory>.'
+      );
+    }
+
+    const trimmedPrefix = options.filenamePrefix.trim();
+
+    if (!isSanitizedFilenameSegment(trimmedPrefix)) {
+      failGenerateRequest(
+        `generate --filename-prefix '${options.filenamePrefix}' is not a valid filename prefix; use only letters, digits, '.', '_', and '-' with no spaces or leading/trailing dashes. Suggested: '${sanitizeFilenameSegment(trimmedPrefix)}'.`
+      );
+    }
+  }
+
   if (options.splitBy !== undefined && options.categories !== undefined) {
     failGenerateRequest('generate --split-by and --categories are mutually exclusive.');
   }
@@ -1206,6 +1239,10 @@ program
     'Source-only operator-provided human version label recorded verbatim into the manifest'
   )
   .option(
+    '--filename-prefix <prefix>',
+    "Source-only explicit output filename prefix (overrides the prefix derived from the source basename, e.g. two 'react' dirs -> react-router / react-query). Same sanitization as the derived prefix: letters, digits, '.', '_', '-', no spaces or leading/trailing dashes. Not usable with --preset."
+  )
+  .option(
     '--exclude <glob>',
     'Source-only exclude glob (**, *, ?) matched against source-root-relative paths; repeatable',
     (value: string, previous: string[]) => [...previous, value],
@@ -1230,6 +1267,7 @@ program
       splitBy?: string;
       categories?: string;
       label?: string;
+      filenamePrefix?: string;
       exclude: string[];
       sdkVersion: string;
       configDir: string;
@@ -1280,6 +1318,12 @@ program
             sourceDocsOptions.preset = sourcePreset.manifest;
           } else if (options.format !== undefined) {
             sourceDocsOptions.format = options.format;
+          }
+          // Operator-supplied output prefix. Validated and mutually exclusive
+          // with --preset in validateGenerateOptions, so it never collides with
+          // a preset-provided output block.
+          if (options.filenamePrefix !== undefined) {
+            sourceDocsOptions.output = { filenamePrefix: options.filenamePrefix.trim() };
           }
           if (options.chunks !== undefined) {
             sourceDocsOptions.chunks = options.chunks;
@@ -1341,6 +1385,7 @@ program
           if (result.manifest.preset !== undefined) {
             console.log(`  Preset: ${result.manifest.preset.name}`);
           }
+          console.log(`  Filename prefix: ${result.manifest.output.filenamePrefix}`);
           console.log(`  Source files: ${result.manifest.sourceFiles.length}`);
           console.log(`  Generated files: ${result.manifest.generatedOutputs.length}`);
           if (chunkOutput !== undefined) {
