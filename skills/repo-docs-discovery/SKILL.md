@@ -1,139 +1,110 @@
 ---
 name: repo-docs-discovery
-description: Guide an AI agent through documentation-source investigation for repos, docs URLs, packages, products, or local paths before calling llm-docs with explicit inputs. Use when a user asks to generate, inspect, or prepare agent-ready docs from external or local documentation sources.
+description: Upstream-resolution playbook for turning an installed package into an explicit pinned docs source before calling llm-docs generate. Use to resolve a package to its repo, tag, commit, and docs tree, especially across monorepos where a package's docs live under another package's tree.
 ---
 
 # repo-docs-discovery
 
-Use this skill to turn a user's documentation goal into explicit CLI inputs. The agent investigates and chooses; `llm-docs` reports deterministic facts and converts only explicit sources.
+This skill resolves the question Step 1 of the `llm-docs-generator` playbook asks: *for the exact version this project runs, where is the authoritative docs tree, at which commit?* You investigate and decide; `llm-docs` only converts the explicit local path you hand it. Hand generation a concrete answer: **repo URL + tag + commit + docs subtree path**, plus notes on anything non-obvious (drafts, framework subtrees, docs that live in another package's repo).
 
-## Required Boundary
+Every step states WHY so you can adapt it to a repo whose layout differs from the examples.
 
-- The agent owns ambiguity resolution, source authority, task fit, version choice, and candidate selection.
-- The CLI owns bounded inspection, parsing, formatting, metadata, validation, and honest failure reporting.
-- Candidate evidence reports are evidence reports. Deterministic ordering is for review readability, not authority, task-fit judgment, or source selection. Do not generate from the first ordered candidate unless the user selected it, the agent explicitly selected it, or a documented automation flag exists.
-- Do not execute repository scripts, docs build scripts, package install hooks, examples, or arbitrary commands from inspected sources.
-- Do not store credentials or tokens in manifests, reports, or generated docs.
+## Division Of Labor (never violate)
 
-## Workflow
+- You own version choice, source authority, docs-tree selection, and task fit.
+- The CLI owns bounded inspection, parsing, formatting, and honest failure. It never decides which repo, tag, or docs path is authoritative.
+- Never pass a package name, repo URL, docs URL, or discovery report to `generate --source`. Resolve it to an explicit local path first.
+- Run `llm-docs capabilities --json` before assuming a discovery mode exists; modes not reported there are unavailable unless the installed CLI says otherwise. `llm-docs agent doctor --json` is read-only diagnostics; do not claim `agent install codex` or other lifecycle commands unless capabilities reports them.
+- Never store credentials or tokens in reports, manifests, or notes.
+- Do not execute repository scripts, docs-build scripts, or install hooks from an inspected source.
 
-1. Clarify the user goal only when the source, version, or intent materially changes the result.
-2. Determine whether the user wants official docs, local docs, repo docs, source-truth codebase docs, or verification of existing output.
-3. Inspect current-state context before assuming support. When working inside
-   this repo, read `AGENT_CONTEXT.md` and `index.md`; when using a packaged
-   install, run `llm-docs agent context --json` to locate packaged context and
-   skill artifact metadata, then read the relevant artifacts.
-4. Inspect implemented CLI capabilities before assuming support:
+## Step 1 — Package → Repo (primary evidence: the installed package.json)
+
+WHY: the package the project actually installed names its own upstream repo. That is stronger evidence than a web search or memory.
 
 ```bash
-llm-docs capabilities --json
+cat <project>/node_modules/<pkg>/package.json
 ```
 
-5. Classify the input as a local path, repo URL, docs URL, package name, product name, or prior manifest.
-6. Resolve an explicit source boundary before invoking generation:
-   - local path: verify the exact file or directory and any requested format
-   - repo URL: choose the repo URL and repo-relative scope; if a branch, tag, or commit is required, materialize that checkout outside the active workspace before discovery because `discover --repo` has no ref checkout flag
-   - docs URL: choose the explicit URL to inspect and record that current URL discovery is bounded
-   - package or product name: the agent resolves package metadata/product identity to explicit repo/docs/source/scope before calling the CLI
-7. Run the appropriate implemented discovery command for evidence:
+Read three fields:
+
+- `version` — the exact version you must match.
+- `repository.url` — the upstream repo (often a monorepo hosting many packages).
+- `repository.directory` — the package's subpath *inside* that repo when present (e.g. `packages/react-query`). This tells you where the package lives, which is the anchor for finding its docs.
+
+Cross-check the repo by confirming a tag exists for this version:
 
 ```bash
-llm-docs discover --source ./docs --output-dir ./reports/local-docs
-llm-docs discover --repo https://github.com/owner/repo --scope docs --output-dir ./reports/repo-docs
-llm-docs discover --url https://example.com/docs --output-dir ./reports/site-docs
+git ls-remote --tags <repository.url> | grep -E '<pkg>@<version>|v<version>'
 ```
 
-8. Read `discovery-report.json` and its `manifest.json`. Treat `candidateEvidenceIndex` as compact report integrity/index metadata, not a replacement for reading the candidate evidence.
-9. Select an explicit source only after checking task fit, source intent, version constraints, provenance, warnings, and skipped candidates.
-10. If generation is supported for the selected explicit local file or directory, call `generate --source` with that path. Do not pass a discovery report, package name, repo URL, docs URL, or unresolved candidate to `generate --source`.
-11. If no candidate fits, continue investigation with another explicit source or ask the user.
+If `repository.url` and the tag listing agree, the repo is resolved. If `package.json` lacks `repository`, fall back to the npm registry's `repository` field for that exact version — but the installed `package.json` is the primary evidence.
 
-## Discovery Rules
+## Step 2 — Locate The Docs Tree Inside The Repo
 
-- Local discovery inspects only the provided local file or directory.
-- Repo discovery uses an explicit repo URL or local git repo plus optional repo-relative `--scope`. It produces evidence for agent review and does not decide which docs path is authoritative.
-- URL discovery fetches only the explicit HTTP(S) URL, same-origin root `/llms.txt`, and same-origin root `/sitemap.xml`. It does not fetch extracted candidate links, render JavaScript, or crawl arbitrary paths. By default it refuses private, link-local, and cloud-metadata IP targets (SSRF guard); `--allow-private-hosts` opts out for intentional private-network inspection.
-- Discovery reports factual evidence, warnings, skipped items, and deterministic ordering. The agent must review the report before selecting a source.
-- Do not describe candidate order as trust, authority, source truth, freshness, or task-fit proof.
-- Do not add or infer candidate scores; if a compatibility report already contains one, treat it as non-authoritative readability metadata only.
+WHY: a monorepo rarely puts a package's docs next to its code. Docs are usually centralized and often split by framework, so `repository.directory` (the code path) is not the docs path.
 
-## Cache Rules
+Clone at the pinned commit (blobless is enough for inspection), then look for the docs root and any framework split:
 
-- Keep external repo exploration outside the active project workspace. The conventional cache root is under `~/.explore/repos/`; actual CLI cache directory names may include stable suffixes rather than exactly matching `<owner>__<repo>`.
-- Reuse a cached checkout only when it matches the intended remote and version/ref requirements.
-- Never discard local changes in a cached checkout. If the cache is dirty or contains ignored local files, inspect it as-is, choose a separate cache/worktree, or ask the user.
-- If a package or product name resolves to a repo, the agent records that resolution and then calls the CLI with the explicit repo URL, scope, or selected local path. The CLI does not resolve package authority.
-
-## Candidate Evidence Report Handling
-
-- Read the report path, discovery kind, inspected input, candidate count, warnings, skipped paths or resources, provenance fields, and manifest integrity facts.
-- Use report ordering only to make review deterministic. The agent decides whether a candidate fits the user's intent.
-- If multiple candidates remain plausible, explain the difference or ask the user instead of using the first ordered candidate silently.
-- Preserve the selected source path/URL, repo commit/ref when known, and warnings in the final response or downstream manifest notes.
-
-## Failure Handling
-
-- If a discovery command exits non-zero, report the command, explicit input/scope, CLI error, and what the agent can try next.
-- Successful discovery may still report warnings or skipped candidates in `discovery-report.json`; surface those as evidence, not failure artifacts.
-- If a requested command or mode is missing from `capabilities --json`, state that it is planned/unsupported instead of improvising a workflow.
-- If a docs URL report finds only remote candidates and the current CLI cannot generate from them directly, stop at the report or obtain an explicit local source through an approved agent workflow before running `generate --source`.
-- If evidence is incomplete, say so. Do not invent docs, authority, source truth, or source-code verification.
-
-## Examples
-
-### Repo URL Input
-
-```text
-User: Generate LLM docs from https://github.com/owner/project using the docs folder.
-Agent: Treat the repo URL as explicit, resolve that the user wants repo docs rather than source-truth codebase docs, choose scope `docs`, then run:
-  llm-docs discover --repo https://github.com/owner/project --scope docs --output-dir ./reports/project-repo-docs
-Agent: Read the candidate evidence report and warnings. If the agent selects `docs/reference` and it resolves to a local source inside the repo cache, run:
-  llm-docs generate --source <explicit-cache-path>/docs/reference --format markdown --output-dir ./agent-docs/project
+```bash
+git clone --filter=blob:none <repository.url> <clone-dir>
+git -C <clone-dir> checkout <commit>
+git -C <clone-dir> ls-files 'docs/*' | head -50
 ```
 
-### Docs URL Input
+Common shapes to recognize:
 
-```text
-User: Inspect https://example.com/docs and prepare agent-ready docs if possible.
-Agent: Treat the docs URL as explicit and run bounded URL discovery:
-  llm-docs discover --url https://example.com/docs --output-dir ./reports/example-site-docs
-Agent: Review the report. If the selected source is still only a remote URL, do not pass it to `generate --source`; report the candidate evidence or obtain an explicit local source first.
+- **Root `docs/`** — a single docs tree for one product.
+- **Framework-split subtrees** — `docs/framework/react`, `docs/framework/vue`, or nested product+framework like `docs/start/framework/react` vs `docs/router/framework/react`. Pick the exact subtree for the package and framework you are packing; a whole-`docs/` source pulls in every framework and every product.
+- **A docs-site nav config** (`config.json`, `docs.json`, sidebar manifest) — note its path; the generation step translates it into a `--categories` file. It also confirms which pages the vendor actually ships (anything not in the nav is often a draft or internal page).
+
+Record the exact docs subtree path relative to the repo root. That path is what generation points `--source` at.
+
+## Step 3 — Confirm The Ref Covers ALL Target Packages
+
+WHY (the TanStack lesson): a package's docs may not live in its own repo, and different packages release at different commits. If you pin one package's tag and assume it covers the others, you can ship docs from the wrong commit — or miss a package entirely.
+
+Two concrete traps to check:
+
+1. **Docs that ship inside another package's tree.** Example: `@tanstack/react-start` documentation lives in the `TanStack/router` repo, not a `react-start` repo. So `node_modules/@tanstack/react-start/package.json` may point at `TanStack/router`, and the docs subtree is under router's tree. When a package's docs live under a *different* package's tree, verify it explicitly and **write it into the discovery notes** you hand to generation — do not let the generation step assume one package == one repo.
+
+2. **Independent release commits with byte-identical docs.** In an independently-released monorepo (e.g. `TanStack/router`), `<pkgA>@x` and `<pkgB>@y` are different tags at different commits. Their shared or adjacent doc files (devtools, ssr, `@tanstack/ssr-query`) may nonetheless be **byte-identical** across those tags. Do not eyeball it or assume they differ — prove it:
+
+```bash
+# tree hash of the docs subtree at each relevant tag
+git rev-parse <tagA>:<docs-subtree>
+git rev-parse <tagB>:<docs-subtree>
+
+# or a single shared file's blob hash across tags
+git rev-parse <tagA>:<docs-subtree>/<file>.md
+git rev-parse <tagB>:<docs-subtree>/<file>.md
 ```
 
-### Package Or Product Name Input
+Identical hash => the docs are the same bytes at both tags; you can safely cover both from one commit. Different => diff them and choose the newest tag whose differences are acceptable, or generate each package from its own tag. State the choice.
 
-```text
-User: Generate docs for @scope/widget on the v2 line.
-Agent: Resolve the package name as agent work: identify the first-party package metadata, official repo/docs URL, and v2 branch/tag or docs scope. If v2 requires a branch, tag, or commit, prepare an explicit local checkout at that ref outside the active workspace before calling the CLI:
-  llm-docs discover --repo <explicit-v2-local-git-checkout> --scope docs --output-dir ./reports/widget-v2
-Agent: Review candidate evidence. Only after selecting an explicit local docs path, run:
-  llm-docs generate --source <explicit-v2-local-git-checkout>/docs --format markdown --output-dir ./agent-docs/widget-v2
+For lockstep-released monorepos (e.g. `TanStack/query`, one commit per version across all packages) this check is trivial — one tag covers everything — but still confirm the release model rather than assuming it.
+
+## Step 4 — Hand Off Explicit, Annotated Inputs
+
+WHY: the generation step (the `llm-docs-generator` playbook) is deterministic from here. Ambiguity you leave unresolved becomes a wrong pack.
+
+Return, per target package:
+
+- Repo URL, tag, and commit (the pinned ref).
+- The exact docs subtree path to use as `--source`.
+- **Explicit note when a package's docs live in another package's repo/tree** (the react-start-in-router case), so generation points at the right subtree.
+- Whether the repo releases in lockstep or independently, and the tree/blob-hash evidence behind covering multiple packages from one commit.
+- Drafts / framework subtrees / non-markdown noise seen, so generation sets `--exclude` and the right subtree.
+- The nav-config path, if one exists, for `--categories` translation.
+
+If evidence is incomplete or two candidate docs trees are equally plausible, say so and ask rather than guessing. Never silently pick the first thing found, silently upgrade a pinned version, or trust a stale docs path over the pinned ref.
+
+## Optional: Bounded CLI Inspection
+
+WHY: the CLI can produce a deterministic evidence report to review, but it never selects the source — its ordering is readability, not authority.
+
+```bash
+llm-docs discover --repo <repo-url> --scope <docs-subtree> --output-dir ./reports/<pkg>
 ```
 
-```text
-User: Generate Tailwind CSS docs, but stay on Tailwind 3.
-Agent: Resolve the product name, version intent, official docs/repo, and v3 source scope. If v3 maps to a branch, tag, or commit, materialize that checkout outside `discover --repo`; the CLI is called only after those choices are explicit. It does not decide that Tailwind maps to a package, repo, release line, or source path.
-```
-
-### Local Path Input
-
-```text
-User: Generate LLM docs from ./docs.
-Agent: Verify `./docs` exists. Optional evidence pass:
-  llm-docs discover --source ./docs --output-dir ./reports/local-docs
-Agent: If `./docs` is still the selected source, run:
-  llm-docs generate --source ./docs --output-dir ./agent-docs
-```
-
-## Capability Gating
-
-- Use `source-truth inspect` or `source-truth generate` only when the user asks for implementation-source evidence and the installed CLI reports those modes.
-- Use configured SDK generation only for supported configured SDKs.
-- The current CLI implements local/repo/URL `discover`, `generate --source` (with optional `--chunks jsonl` semantic chunk export), the `source-truth` commands, `refresh` for supported explicit local manifests, and `verify`. Treat broad source-code verification of official docs, broad crawling, and `agent install codex` as unsupported. When any capability is uncertain, trust `capabilities --json` as the authoritative contract.
-- Use `agent doctor` only as read-only diagnostics when `capabilities --json`
-  reports it as implemented; it does not install skills, write user config,
-  mutate host skill directories, or prove host registration unless a future explicit check reports that fact directly.
-
-## Reporting Back
-
-Return the selected source, inspected scope, warnings, unsupported capabilities, and relevant report and manifest paths. State when evidence is incomplete instead of inventing low-confidence docs.
+Read `discovery-report.json` and its `manifest.json` as candidate evidence. Report order is not authority, freshness, or task-fit proof; you still decide. Run `llm-docs capabilities --json` first if unsure a discovery mode is implemented.

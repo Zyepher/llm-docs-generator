@@ -1,91 +1,177 @@
 ---
 name: llm-docs-generator
-description: Maintain or use llm-docs-generator as a deterministic documentation-pack CLI. Use when working in this repository, checking implemented CLI capabilities, planning future slices, or generating evidence-bound local docs with the current command surface.
+description: Operating playbook for generating and maintaining version-pinned documentation packs with the llm-docs CLI. Use when building, refreshing, or verifying an agent-ready docs pack for a specific installed library version, or when maintaining this repository.
 ---
 
 # llm-docs-generator
 
-Use this skill when the task is about this repository or about calling the installed `llm-docs` CLI from another workspace.
+`llm-docs` is a deterministic engine: it parses sources, preserves structure, and records provenance. It makes no judgments. YOU make every judgment — which version, which source tree, what to exclude, how to slice, what the index says. A pack is only as correct as the decisions you feed the engine. The failures this playbook prevents are all judgment failures: unpinned versions, drafts swept in, a 250k-token monolith no agent can load, a pack with no index, a pack that broke when it moved.
 
-## Ground Rules
+Run this workflow in order. Every step states WHY so you can adapt it, not cargo-cult it.
 
-- Treat the AI agent as the planner and the CLI as the deterministic capability layer.
-- Read `index.md` and `AGENT_CONTEXT.md` before promising support.
-- Run `llm-docs capabilities --json` before assuming a command, mode, output file, or verification feature exists.
-- Source-docs semantic chunk export is implemented as `generate --source ... --chunks jsonl`. Do not claim `agent install codex`, broad crawling, or broad source-code verification unless `capabilities --json` reports it as implemented.
-- Treat `agent doctor` as read-only diagnostics only when `capabilities --json`
-  reports it as implemented; it must not be described as installing/registering
-  skills, writing user config, mutating host skill directories, or proving
-  source truth or task fit.
-- Do not claim refresh beyond the explicit local-manifest modes reported by
-  `capabilities --json`; parser-plugin source-docs refresh, repo/URL
-  discovery-report refresh, remote freshness refresh, crawling, and
-  source-code verification remain unsupported unless the installed CLI says
-  otherwise. Refresh must not fetch remote sources or run source project
-  scripts.
-- Treat parser plugin support as manifest validation only unless
-  `capabilities --json` reports execution or custom parser generation as
-  implemented. `plugins validate` must not be described as loading, importing,
-  executing, trusting, or selecting plugin code.
-- If `capabilities --json` reports explicit parser plugin generation as
-  implemented, treat it as one local source file or opted-in directory plus
-  one explicit local manifest plus one custom format id only. Directory sources
-  require `directorySupport: true` on the selected manifest format. Plugin
-  code is trusted local code executed for generation and is not sandboxed. Do
-  not claim plugin discovery, installation, package resolution, auto-selection,
-  or sandboxing unless capabilities reports those features separately.
-- Do not treat discovery reports as source-selection decisions. They are candidate evidence reports for agent review, and report order is not authority, source truth, freshness, or task-fit proof.
-- Reject unsupported candidate scoring, CLI source-selection, authority/source-truth, correctness, source-intent, task-fit, or "top candidate" claims in docs or code review. Do not add numeric candidate scores; report ordering is readability only. Require explicit user/agent candidate input or a documented automation flag before generation from discovery candidates.
+## Division Of Labor (never violate)
 
-## Current Safe Workflow
+- You resolve version, source authority, source tree, exclusions, and slicing. The CLI never reads a vendor nav config, never picks a source, never decides a version.
+- `generate --source` takes explicit local files or directories only. Never pass a package name, docs URL, repo URL, or discovery report to `--source`.
+- Run `llm-docs capabilities --json` before assuming any command, flag, mode, or output exists; anything not reported there is unavailable unless the installed CLI says otherwise. If a flag in this playbook is missing from the installed contract, treat it as not yet shipped and adapt.
+- `llm-docs agent doctor --json` is read-only environment diagnostics. Do not claim `agent install codex` or any other install/lifecycle command unless `capabilities --json` reports it as implemented.
+- Parser plugins: treat explicit parser plugin generation as one local source file or opted-in directory plus one explicit local manifest plus one custom format id only. Plugin code is trusted local code and is not sandboxed; `plugins validate` validates manifests only — it never loads or executes plugin code.
 
-1. Resolve the user's intent: official docs, local docs, repo docs, source-truth codebase docs, or tool maintenance.
-2. Resolve explicit source, scope, version, and output path before invoking the CLI.
-3. Inspect implemented modes:
+## Step 1 — PIN THE VERSION (before anything else)
+
+WHY: the entire value of a pack is that it matches the exact version the consuming project runs. Resolve that version from the project itself, not from memory or "latest".
+
+1. Read the exact installed version and upstream repo from the consuming project:
 
 ```bash
-llm-docs capabilities --json
-llm-docs agent context --json
-llm-docs agent doctor --json
+cat <project>/node_modules/<pkg>/package.json   # read "version" and "repository"
 ```
 
-4. Use only implemented deterministic commands for the task.
-5. Report warnings, planned/unsupported capabilities, and incomplete evidence honestly.
+The `repository` field gives you `url` (the monorepo) and often `directory` (the package's subpath inside it). Both are primary evidence — use them, do not guess the repo.
 
-## Pack Navigation (Agent-Authored Index)
+2. Resolve the git tag for that exact version and its commit:
 
-After generating a source-docs pack, write a short `llm-docs/index.md` that maps the pack's contents: the generated `*-llms.txt` file(s) and the main topics or sections inside, with a one-line note for each. The goal is that in a later session you read the index first and load only what you need, instead of pulling the whole pack into context.
-
-This index is your navigation aid, not a CLI output: it is not recorded in `manifest.json` and `verify` ignores it, and `generate`/`refresh` preserve it (they delete only tool-owned outputs: the `*-llms.txt` files and the chunks output). Keep it accurate to the files actually present; the verified pack content remains the source of truth.
-
-## External Target Workflow
-
-When the user's input is a repo URL, docs URL, package name, product name, or local path, use the `repo-docs-discovery` skill for source investigation. Keep these boundaries:
-
-- Package and product names are resolved by the agent before CLI calls. Convert them to explicit repo URLs, docs URLs, scopes, versions, or local paths first.
-- Repo and URL discovery produce candidate evidence reports for agent review. They do not choose package authority, source truth, task fit, or the final source.
-- `generate --source` currently takes explicit local files or directories. Do not pass package names, docs URLs, repo URLs, or discovery reports as `--source`.
-- If URL or repo discovery cannot produce an explicit local source suitable for an implemented generation mode, report the evidence and limitation instead of inventing a conversion.
-
-Example boundaries:
-
-```text
-Repo URL: agent chooses repo intent and scope -> llm-docs discover --repo <url> --scope <scope> -> agent reviews report -> llm-docs generate --source <explicit-local-path>
-Docs URL: agent chooses URL to inspect -> llm-docs discover --url <url> -> agent reviews report; generation needs an explicit local source.
-Package/product: agent resolves official package/product identity, version, repo/docs, and scope -> CLI receives only explicit repo/docs/local inputs.
-Local path: agent verifies the path -> optional llm-docs discover --source <path> -> llm-docs generate --source <path>
+```bash
+git ls-remote --tags <repository.url> | grep -E '<pkg>@<version>|v<version>'
 ```
 
-## Maintenance Workflow
+Record repo URL + tag + commit. That commit is what you clone and what the label cites.
 
-When modifying this repository:
+3. Monorepo release-model nuance (decide explicitly, do not assume):
+   - Some monorepos release in **lockstep** — every package shares one commit per version (e.g. TanStack/query). One tag covers all packages.
+   - Others release **independently** — per-package tags land at different commits (e.g. TanStack/router). `<pkgA>@x` and `<pkgB>@y` are different commits.
+   - When one pack must cover multiple packages from the same repo, check whether the shared docs tree actually differs across the relevant tags before picking one commit:
 
-1. Read `AGENT_CONTEXT.md`, `index.md`, and relevant source/tests.
+```bash
+git rev-parse <tagA>:<docs-path>   # tree hash of the docs subtree at tag A
+git rev-parse <tagB>:<docs-path>   # tree hash at tag B
+# identical hash => docs are byte-identical; either tag is fine.
+# different => diff them, then choose the newest tag whose differences are acceptable.
+```
+
+   State the tag you chose and why. `repo-docs-discovery` covers deeper package→repo→docs-tree resolution (e.g. a package whose docs live in a *different* package's repo); use it when resolution is not obvious.
+
+## Step 2 — CLONE PINNED
+
+WHY: you generate from an immutable, known commit, never from a moving branch or a dirty working tree.
+
+```bash
+git clone --filter=blob:none <repository.url> <clone-dir>   # blobless keeps it fast
+git -C <clone-dir> checkout <commit>                        # exact commit, not a branch name
+git -C <clone-dir> rev-parse HEAD                           # confirm; this is your label commit
+```
+
+Keep the clone outside the consuming project's workspace. The manifest will auto-record `source.git {remoteUrl, commit, tags, dirty, sourceRootFromRepo}` when you generate from this checkout — so a clean checkout is what makes provenance trustworthy.
+
+## Step 3 — INSPECT BEFORE GENERATING (mandatory)
+
+WHY: the engine faithfully converts whatever you point it at. If drafts, a wrong framework subtree, or non-markdown noise are in scope, they land in the pack. Decide exclusions and slicing NOW, before the first `generate`.
+
+Walk the docs tree at the pinned commit and look for:
+
+- **Draft content** — `*.draft.md`, `drafts/` directories, `DRAFT`/`WIP` in frontmatter titles. These are not shipped docs; exclude them.
+- **Docs-site nav config** — e.g. `config.json`, `docs.json`, sidebar/nav manifests. This carries the *authoritative category structure* the vendor publishes. You will translate it into a `--categories` file in Step 4. The engine will not read it for you.
+- **Non-markdown files** — images, scripts, JSON fixtures. The engine skips them and records a warning; know what you are dropping.
+- **Multi-framework subtrees** — e.g. `docs/framework/react` vs `docs/framework/vue`, or `docs/start/framework/react`. Point `--source` at the exact framework subtree you want. Never point it at the whole docs root blindly — that is how a pack balloons to a multi-framework monolith.
+
+Output of this step: the exact `--source` path, the `--exclude` globs, and the slicing plan.
+
+## Step 4 — GENERATE
+
+WHY: explicit flags make the pack reproducible and self-describing. Every flag below encodes a Step 1–3 decision.
+
+```bash
+llm-docs generate \
+  --source <clone-dir>/<framework-subtree> \
+  --format <explicit-format> \
+  --label "<pkg>@<version> @ <commit7>" \
+  --exclude '<glob>' [--exclude '<glob>' ...] \
+  --split-by dirs \
+  --output-dir <project>/agent-docs/<pkg>
+```
+
+Rules:
+
+- **Always pass `--format` explicitly.** Do not rely on auto-detect for a real pack; ambiguity should fail loudly, not guess (see Troubleshooting).
+- **Always pass `--label "<pkg>@<version> @ <commit7>"`.** It is recorded verbatim in `manifest.source.label` and stamped into the pack's `<SYSTEM>` header — this is how a future reader (or you) knows what version the pack is without trusting the directory name.
+- **`--exclude` for every draft/unwanted subtree** you found in Step 3. Excluded files are recorded in the manifest, so exclusions stay auditable.
+- **Slice large or multi-topic docs.** Two options:
+  - `--split-by dirs` — one output file per top-level docs directory. Fast, structural.
+  - `--categories <file.json>` — YOU author this by translating the vendor nav config from Step 3. Shape: `{"categories":[{"id","title","include":["glob"]}],"fallback":"misc"}`, **first-match-wins** ordering. This translation is your judgment; the engine cannot infer it. Prefer this when the nav config's grouping is better than raw directory layout.
+  - Both modes still write the combined `-full` file alongside the per-topic files. A monolith with no split is a known failure — slice unless the pack is genuinely small.
+- **One output dir per pack.** The filename prefix derives from the source dir *basename*: two sources both named `react` (e.g. router's and query's) produce identical filenames and will collide. Keep each pack in its own `--output-dir`, or set a distinct prefix, so `router-react-*` and `query-react-*` never overwrite each other.
+
+The pack the engine writes embeds: frontmatter titles as headings, `[source: <relpath>]` markers per section, a `<prefix>-toc-llms.txt` table-of-contents artifact, `pack:<relpath>` internal links, and commit-pinned GitHub URLs for external links — all traceable back to the pinned commit.
+
+## Step 5 — VERIFY + READ THE WARNINGS
+
+WHY: `verify` proves the pack matches its manifest; `warnings[]` is the engine handing you facts it noticed but is not allowed to judge. Every warning is a decision you now owe.
+
+```bash
+llm-docs verify --output-dir <project>/agent-docs/<pkg>
+```
+
+Then open `manifest.json` and act on every `warnings[]` entry:
+
+- **Skipped non-md files** — confirm you meant to drop them.
+- **Draft-pattern files** — if one slipped through, add an `--exclude` and regenerate.
+- **Unresolved links** — a `pack:` or external link that did not resolve; fix the source scope or accept it consciously.
+
+If `manifest.source.git.dirty` is `true`, stop — you generated from a modified checkout; re-clone clean and regenerate (see Troubleshooting).
+
+If the pack will live **away from the clone** (the normal case — packs ship inside the consuming project, the clone is disposable), verify after relocation with:
+
+```bash
+llm-docs verify --outputs-only --output-dir <project>/agent-docs/<pkg>
+```
+
+WHY `--outputs-only`: once relocated, the recorded source paths no longer exist; this checks output integrity against the manifest without re-reading vanished sources.
+
+## Step 6 — AUTHOR THE INDEX (mandatory, yours)
+
+WHY: without an index, the next session reloads the whole pack into context — the exact waste this tool exists to prevent. The engine preserves `index.md` across regenerate/refresh but never writes it; the map is your job.
+
+Write `llm-docs/index.md` next to the pack containing:
+
+- Versions covered, and for each: repo URL + commit + tag.
+- A table of the generated packs/categories (the `*-llms.txt` files and, if sliced, each topic file) with a one-line **what-to-grep-for** hint per row, so a later agent loads only the slice it needs.
+- Any exclusions or known gaps worth remembering.
+
+This file is a navigation aid, not a verified artifact: it is not in `manifest.json`, `verify` ignores it, and `generate`/`refresh` preserve it (they delete only tool-owned outputs — the `*-llms.txt` files, the `-toc-llms.txt`, and the chunks output). Keep it accurate to the files actually present.
+
+## Step 7 — MAINTAIN
+
+WHY: a pinned pack goes stale when upstream ships. Refresh is a deterministic rebuild from the recorded commit — not a version bump. Version bumps are a conscious re-pin.
+
+On an upstream release:
+
+1. Re-run Step 1 to re-resolve the new tag/commit for the newly installed version.
+2. Re-clone at the new commit (Step 2).
+3. Regenerate with the **same explicit flags** (same `--format`, `--exclude`, `--split-by`/`--categories`), and **bump `--label`** to the new `<pkg>@<version> @ <commit7>`.
+4. Update `index.md` (Step 6).
+
+For a deterministic rebuild from the already-recorded source (no version change):
+
+```bash
+llm-docs refresh --output-dir <project>/agent-docs/<pkg>
+```
+
+`refresh` **fails by default when the source HEAD != the recorded commit** (drift). That failure is a signal, not a bug: either re-obtain the exact recorded commit, or, if you have consciously decided the drift is acceptable, pass `--accept-drift`. Never `--accept-drift` reflexively — it silently accepts whatever the source now says.
+
+## Troubleshooting
+
+- **Ambiguous-format error on `generate`** — the engine is refusing to guess the parser, not failing. Pass `--format` explicitly (`markdown`, `mdx`, `openapi`, `openref`, `rst`, `html`). This is Step 4's rule; treat auto-detect ambiguity as a prompt to be explicit.
+- **`manifest.source.git.dirty: true`** — you generated from a modified or uncommitted checkout, so the recorded commit does not describe the actual bytes. Re-clone clean, `checkout <commit>`, confirm `git status` is empty, and regenerate.
+- **Filename collision between two packs** — both sources share a basename (the prefix source). Put them in separate `--output-dir`s or set distinct prefixes; do not co-locate.
+- **`verify` fails after moving the pack** — you moved it away from its source clone; use `verify --outputs-only`.
+- **`refresh` fails with a drift error** — source HEAD moved off the recorded commit. Re-obtain the recorded commit, or `--accept-drift` only if you have decided the new source is acceptable.
+
+## Maintaining This Repository
+
+When you are modifying llm-docs-generator itself (not generating a pack):
+
+1. Read `AGENT_CONTEXT.md`, `index.md`, and the relevant source/tests first.
 2. Define acceptance criteria before editing.
-3. Keep docs, CLI behavior, tests, and capability contracts aligned.
-4. Preserve the product boundary in code and wording.
-5. Run focused tests, typecheck, build, and relevant CLI smokes before claiming completion.
-
-## Current CLI Boundary
-
-Implemented modes may include local/repo/URL discovery evidence reports with integrity manifests, conservative source-truth evidence extraction/generation and source-truth docs manifest verification, local source docs generation with optional source-only chunk JSONL export and manifest verification, explicit local parser plugin generation for one source file or an opted-in directory with trusted non-sandboxed execution when `capabilities --json` reports it, configured SDK generation and verification, discovery-report verification, explicit local-manifest refresh for current built-in-parser local source docs, source-truth docs, configured SDK (with a recorded local OpenRef spec), source discovery-report, and source-verification local evidence manifests, read-only parser plugin manifest validation, `capabilities --json`, read-only `agent context` metadata, and read-only `agent doctor` diagnostics. Treat parser plugin discovery, installation, package resolution, auto-selection, parser-plugin source-docs refresh, sandboxing, custom parser generation, and any broader lifecycle command as unavailable unless the installed CLI says otherwise.
+3. Keep the CLI behavior, `capabilities --json` contract, tests, and these docs aligned — they are one contract.
+4. Preserve the product boundary: the agent judges, the CLI stays deterministic and honest about failure. Reject any change that makes the CLI decide source authority, version, task fit, or "top candidate".
+5. Run focused tests, typecheck, build, and a relevant CLI smoke before claiming completion.
