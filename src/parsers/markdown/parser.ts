@@ -17,6 +17,8 @@ import { marked } from 'marked';
 import type { Token } from 'marked';
 
 import { ParserError } from '../base.js';
+import { getOpeningFence, isClosingFence, type FenceState } from './fences.js';
+import { applyMarkdownDirectives } from './directives/index.js';
 
 type MarkdownSourceSyntax = 'markdown' | 'mdx';
 type MdxDeclarationKind = 'import' | 'export';
@@ -189,7 +191,10 @@ export class MarkdownParser {
    */
   private cleanMarkdownContent(content: string, sourceSyntax: MarkdownSourceSyntax): string {
     const withoutFrontmatter = this.stripYamlFrontmatter(content);
-    const withTabs = this.transformDirectiveTabs(withoutFrontmatter);
+    // Directive dialects (e.g. TanStack tabs) run through the extension seam,
+    // which only activates a dialect whose exact markers are present. A document
+    // with no directive markers is returned unchanged.
+    const withTabs = applyMarkdownDirectives(withoutFrontmatter);
     return this.cleanOutsideFencedCode(withTabs, (segment) => {
       let cleanedSegment = this.cleanDocCContentSegment(segment);
       if (sourceSyntax === 'mdx') {
@@ -337,7 +342,7 @@ export class MarkdownParser {
   ): string {
     const output: string[] = [];
     let textLines: string[] = [];
-    let fence: { marker: '`' | '~'; length: number } | null = null;
+    let fence: FenceState | null = null;
 
     const flushText = (): void => {
       if (textLines.length === 0) {
@@ -354,13 +359,13 @@ export class MarkdownParser {
     for (const line of content.split('\n')) {
       if (fence !== null) {
         output.push(line);
-        if (this.isClosingFence(line, fence)) {
+        if (isClosingFence(line, fence)) {
           fence = null;
         }
         continue;
       }
 
-      const openingFence = this.getOpeningFence(line);
+      const openingFence = getOpeningFence(line);
       if (openingFence !== null) {
         flushText();
         output.push(line);
@@ -372,102 +377,6 @@ export class MarkdownParser {
     }
 
     flushText();
-    return output.join('\n');
-  }
-
-  /**
-   * Rewrite tab/framework switcher directives so their items become ordinary,
-   * self-describing, correctly-nested headings.
-   *
-   * TanStack docs mark UI switchers with HTML comments:
-   *   <!-- ::start:tabs variant="bundler" --> ... <!-- ::end:tabs -->
-   *   <!-- ::start:framework --> ... <!-- ::end:framework -->
-   * Each tab item is authored as an ATX heading (typically `# Vite`). Stripping
-   * the comment markers alone leaves bare, undifferentiated headings ("Vite",
-   * "React", "npm") and, because those item headings are H1s that appear after
-   * deeper section headings, it scrambles the section tree (all following
-   * content nests under the last tab item).
-   *
-   * This pass, run fence-aware before any other cleaning, does two things per
-   * directive block:
-   *  - appends the switch axis to each item label so it is self-describing:
-   *    `# Vite` under `variant="bundler"` becomes `Vite (bundler)`; a
-   *    `::start:framework` item `# React` becomes `React (framework)`. The axis
-   *    is the `variant` attribute when present, else the directive kind.
-   *  - demotes item headings (and their in-item sub-headings) to nest directly
-   *    under the section that encloses the block, so document order is preserved
-   *    and later content returns to the enclosing section rather than the last
-   *    tab. Nested directives (framework > tabs) nest one level deeper again.
-   * Blocks whose items carry no heading label (for example `variant="files"`,
-   * delimited by code-block titles) are left untouched apart from marker removal.
-   */
-  private transformDirectiveTabs(content: string): string {
-    const lines = content.split('\n');
-    const output: string[] = [];
-    let fence: { marker: '`' | '~'; length: number } | null = null;
-    let lastHeadingLevel = 0;
-    const stack: Array<{ axis: string; itemSourceLevel: number | null; delta: number }> = [];
-
-    for (const line of lines) {
-      if (fence !== null) {
-        output.push(line);
-        if (this.isClosingFence(line, fence)) {
-          fence = null;
-        }
-        continue;
-      }
-
-      const openingFence = this.getOpeningFence(line);
-      if (openingFence !== null) {
-        output.push(line);
-        fence = openingFence;
-        continue;
-      }
-
-      const startMatch = line.match(/<!--\s*::start:([A-Za-z-]+)([^>]*?)-->/);
-      if (startMatch?.[1] !== undefined) {
-        const kind = startMatch[1];
-        const variantMatch = (startMatch[2] ?? '').match(/variant\s*=\s*"([^"]*)"/);
-        const axis = variantMatch?.[1]?.trim() || kind;
-        stack.push({ axis, itemSourceLevel: null, delta: 0 });
-        continue;
-      }
-
-      if (/<!--\s*::end:[A-Za-z-]+\s*-->/.test(line)) {
-        if (stack.length > 0) {
-          stack.pop();
-        }
-        continue;
-      }
-
-      const headingMatch = line.match(/^(#{1,6})\s+(.*?)\s*$/);
-      if (headingMatch?.[1] !== undefined && headingMatch[2] !== undefined) {
-        const sourceLevel = headingMatch[1].length;
-        const text = headingMatch[2];
-        const frame = stack.at(-1);
-
-        if (frame === undefined) {
-          lastHeadingLevel = sourceLevel;
-          output.push(line);
-          continue;
-        }
-
-        if (frame.itemSourceLevel === null) {
-          frame.itemSourceLevel = sourceLevel;
-          frame.delta = lastHeadingLevel + 1 - sourceLevel;
-        }
-
-        const renderedLevel = Math.min(6, Math.max(1, sourceLevel + frame.delta));
-        const isItemLabel = sourceLevel === frame.itemSourceLevel;
-        const newText = isItemLabel ? `${text} (${frame.axis})` : text;
-        output.push(`${'#'.repeat(renderedLevel)} ${newText}`);
-        lastHeadingLevel = renderedLevel;
-        continue;
-      }
-
-      output.push(line);
-    }
-
     return output.join('\n');
   }
 
@@ -524,25 +433,6 @@ export class MarkdownParser {
 
   private compressBlankLines(content: string): string {
     return content.replace(/\n{3,}/g, '\n\n');
-  }
-
-  private getOpeningFence(line: string): { marker: '`' | '~'; length: number } | null {
-    const match = line.match(/^ {0,3}(`{3,}|~{3,})/);
-    const rawMarker = match?.[1];
-    if (rawMarker === undefined) {
-      return null;
-    }
-
-    const marker = rawMarker[0] as '`' | '~';
-    return { marker, length: rawMarker.length };
-  }
-
-  private isClosingFence(line: string, fence: { marker: '`' | '~'; length: number }): boolean {
-    const match = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
-    const rawMarker = match?.[1];
-    return (
-      rawMarker !== undefined && rawMarker[0] === fence.marker && rawMarker.length >= fence.length
-    );
   }
 
   private stripJsxCommentsFromLine(

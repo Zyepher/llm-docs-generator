@@ -44,6 +44,12 @@ export function validateGeneratedOutputs(options: {
     allowedKinds,
   } = options;
 
+  // Duplicate-path guard: two generatedOutputs entries for one path mask a lost
+  // artifact from the hash checks (both entries point at, and clean-hash, the
+  // surviving file). Keyed by resolved path so spelling variants of one target
+  // are caught too. Reported once per repeated path.
+  const seenOutputPaths = new Set<string>();
+
   for (const [index, output] of generatedOutputs.entries()) {
     if (!isObjectRecord(output)) {
       failures.push(`malformed manifest: generatedOutputs[${index}] must be an object`);
@@ -64,6 +70,15 @@ export function validateGeneratedOutputs(options: {
       failures.push(`malformed manifest: ${label}.path must be relative: ${outputPath}`);
     } else if (!isInsideDirectory(manifestDir, resolve(manifestDir, outputPath))) {
       failures.push(`malformed manifest: ${label}.path escapes manifest directory: ${outputPath}`);
+    } else {
+      const pathKey = resolve(manifestDir, outputPath);
+      if (seenOutputPaths.has(pathKey)) {
+        failures.push(
+          `malformed manifest: ${label}.path duplicates an earlier generatedOutputs path: ${outputPath}`
+        );
+      } else {
+        seenOutputPaths.add(pathKey);
+      }
     }
 
     if (!isAllowedOutputKind(outputKind, allowedKinds)) {

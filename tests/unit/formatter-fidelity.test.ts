@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -297,5 +297,79 @@ describe('formatter fidelity: system header stamp', () => {
     expect(tocLine).toContain('per-topic slice');
     expect(tocLine).toContain('never both');
     expect(tocLine).not.toContain('to grep in the full pack');
+  });
+});
+
+describe('formatter fidelity: reserved-name collisions (split-by dirs)', () => {
+  async function generateReservedCorpus() {
+    const source = await mkdtemp(join(tmpdir(), 'llm-docs-reserved-src-'));
+    tempDirs.push(source);
+    const outputDir = await mkdtemp(join(tmpdir(), 'llm-docs-reserved-out-'));
+    tempDirs.push(outputDir);
+
+    // Source directories named exactly like the reserved artifacts: "toc"
+    // collides with the generated table of contents, "full" with the combined
+    // -full file.
+    for (const [dir, body] of [
+      ['toc', '# Toc Dir Page\n\ntoc dir body\n'],
+      ['full', '# Full Dir Page\n\nfull dir body\n'],
+      ['guide', '# Intro\n\nguide body\n'],
+    ] as const) {
+      await mkdir(join(source, dir), { recursive: true });
+      await writeFile(join(source, dir, 'page.md'), body, 'utf-8');
+    }
+    await writeFile(join(source, 'readme.md'), '# Readme\n\nroot body\n', 'utf-8');
+
+    return generateSourceDocs({
+      source,
+      outputDir,
+      format: 'markdown',
+      generator: GENERATOR,
+      splitBy: 'dirs',
+      output: { filenamePrefix: 'demo' },
+    });
+  }
+
+  it('renames the colliding category slice and preserves both artifacts, with a warning', async () => {
+    const result = await generateReservedCorpus();
+    const llmDir = result.llmDocsDir;
+    const entries = (await readdir(llmDir)).sort();
+
+    // Reserved artifacts survive under their canonical names...
+    expect(entries).toContain('demo-toc-llms.txt');
+    expect(entries).toContain('demo-full-llms.txt');
+    // ...and the colliding category slices survive under deduped names (no loss).
+    expect(entries).toContain('demo-toc-2-llms.txt');
+    expect(entries).toContain('demo-full-2-llms.txt');
+
+    // The reserved names hold the real artifacts; the -2 names hold the slices.
+    const toc = await readFile(join(llmDir, 'demo-toc-llms.txt'), 'utf-8');
+    expect(toc).toContain('Table of Contents');
+    const tocSlice = await readFile(join(llmDir, 'demo-toc-2-llms.txt'), 'utf-8');
+    expect(tocSlice).toContain('[source: toc/page.md]');
+    expect(tocSlice).not.toContain('Table of Contents');
+    const fullSlice = await readFile(join(llmDir, 'demo-full-2-llms.txt'), 'utf-8');
+    expect(fullSlice).toContain('[source: full/page.md]');
+
+    // Each rename is recorded as a warning naming the reserved role and new name.
+    const { warnings } = result.manifest;
+    expect(warnings).toContain(
+      'Category slice "demo-toc-llms.txt" collides with the reserved table-of-contents output; renamed to "demo-toc-2-llms.txt".'
+    );
+    expect(warnings).toContain(
+      'Category slice "demo-full-llms.txt" collides with the reserved combined full-document output; renamed to "demo-full-2-llms.txt".'
+    );
+  });
+
+  it('records no duplicate generatedOutputs paths (manifest invariant)', async () => {
+    const result = await generateReservedCorpus();
+    const paths = result.manifest.generatedOutputs.map((output) => output.path);
+    expect(new Set(paths).size).toBe(paths.length);
+    // The toc slice, the toc artifact, the full slice and the full artifact are
+    // four distinct recorded paths.
+    expect(paths).toContain('llm-docs/demo-toc-llms.txt');
+    expect(paths).toContain('llm-docs/demo-toc-2-llms.txt');
+    expect(paths).toContain('llm-docs/demo-full-llms.txt');
+    expect(paths).toContain('llm-docs/demo-full-2-llms.txt');
   });
 });
