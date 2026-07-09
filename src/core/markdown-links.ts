@@ -9,15 +9,25 @@
  *    are inlined to `[text](url)` using the source file's captured reference
  *    definitions. A full/collapsed use with no matching definition is left
  *    unchanged and reported as an unresolved-reference warning.
- *  - Relative links to `.md`/`.mdx`/`.markdown` files are rewritten. Only `./`,
- *    `../`, and bare relative targets are eligible; a target starting with `/`
- *    is a documentation-SITE absolute path (not a repo/pack path) and is left
- *    unchanged. When an eligible target file is part of this pack, the link
- *    becomes `pack:<target-relpath>` (preserving any `#fragment`), which
- *    resolves to the section whose `[source: ...]` marker matches. When the
- *    target is outside the pack and a git context is available, it becomes the
- *    pinned permanent blob URL. With no git context, the link is left unchanged
- *    and counted.
+ *  - Relative document links are rewritten. Two target shapes are eligible:
+ *    explicit `.md`/`.mdx`/`.markdown` targets, and extension-less targets
+ *    (TanStack/VitePress/Docusaurus/MkDocs route-style links such as
+ *    `./server-routes`, `../installation/with-vite`, `../api/router#createlink`).
+ *    Only `./`, `../`, and bare relative targets are eligible; a target starting
+ *    with `/` is a documentation-SITE absolute path (not a repo/pack path) and is
+ *    left unchanged (but counted). Eligibility for an extension-less target is
+ *    decided by DETERMINISTIC existence, never a guess: the target is resolved
+ *    against the linking file's directory and the candidate set
+ *    (`<resolved>.md|.mdx|.markdown`, `<resolved>/index.md|.mdx|.markdown`) is
+ *    probed against the pack file set and, for out-of-pack targets, the on-disk
+ *    repo file set. When a candidate is part of this pack, the link becomes
+ *    `pack:<target-relpath>` (preserving any `#fragment`), which resolves to the
+ *    section whose `[source: ...]` marker matches. When the target is outside the
+ *    pack, exists on disk, and a git context is available, it becomes the pinned
+ *    permanent blob URL. Otherwise the link is left unchanged and counted, keyed
+ *    by class (site-absolute, unresolvable relative, or out-of-pack with no git
+ *    context / non-github remote) so the warning can report honest per-class
+ *    totals.
  *  - In-page `#anchor` links are intentionally left unchanged. Titles are now
  *    preserved verbatim, so the heading text is directly greppable; a `pack:`
  *    target plus a grep on the heading is the resolution path. This is a known
@@ -38,6 +48,18 @@ export interface MarkdownLinkGitContext {
   sourceRootFromRepo: string;
 }
 
+/**
+ * Class of a doc cross-reference that was left unrewritten, so the caller can
+ * report honest per-class totals in the unrewritten-links warning:
+ *  - `site-absolute`: a leading-`/` documentation-SITE path (never a repo/pack
+ *    path, so unrewritable by design).
+ *  - `unresolvable-relative`: a relative doc-looking target (`.md` or
+ *    extension-less) that resolves to no file in the pack or on disk.
+ *  - `no-git-context`: a relative doc-looking target that IS out-of-pack but has
+ *    no git context to pin to a permanent blob URL.
+ */
+export type UnrewrittenLinkClass = 'site-absolute' | 'unresolvable-relative' | 'no-git-context';
+
 export interface LinkRewriteContext {
   /** POSIX relpath (from the source root) of the file whose prose is rewritten. */
   currentRelpath: string;
@@ -46,12 +68,23 @@ export interface LinkRewriteContext {
   /** Reference definitions for the current file, keyed by authored label. */
   linkDefinitions: ReadonlyMap<string, string>;
   gitContext?: MarkdownLinkGitContext;
+  /**
+   * Existence oracle for extension-less out-of-pack resolution. Given a POSIX
+   * relpath from the source root (which may contain leading `..`), returns true
+   * iff a regular markdown file exists there on disk within the repo. Used ONLY
+   * for extension-less targets that miss the pack file set; explicit `.md`
+   * targets keep the historical no-disk-probe behavior. Absent in pure unit
+   * contexts and for the configured-SDK path, where no local repo is present.
+   */
+  fileExistsInRepo?: (relpathFromSourceRoot: string) => boolean;
   onUnresolvedReference: (label: string) => void;
-  onUnrewrittenRelativeLink: () => void;
+  onUnrewrittenLink: (kind: UnrewrittenLinkClass) => void;
   onNonGithubRemote: () => void;
 }
 
 const MARKDOWN_TARGET = /\.(?:md|mdx|markdown)$/i;
+const MARKDOWN_EXTENSIONS = ['md', 'mdx', 'markdown'] as const;
+const INDEX_BASENAMES = MARKDOWN_EXTENSIONS.map((extension) => `index.${extension}`);
 
 /** Rewrite the link constructs in a single prose string. */
 export function rewriteProseLinks(text: string, context: LinkRewriteContext): string {
@@ -395,11 +428,41 @@ function findClosingBacktickRun(text: string, from: number, runLength: number): 
   return -1;
 }
 
+/** Class of a target path, deciding which resolution rules apply to it. */
+type TargetClass = 'markdown' | 'extensionless' | 'non-doc';
+
 /**
- * Rewrite one URL if it targets a relative markdown file. Returns undefined when
- * the URL must be left unchanged (absolute URL, protocol-relative URL, in-page
- * anchor, site-absolute path, non-markdown target, or an unrewritable external
- * target with no git context).
+ * Classify a fragment-stripped target path. `markdown` targets carry an explicit
+ * `.md`/`.mdx`/`.markdown` extension. `extensionless` targets have no file
+ * extension in their last segment (route-style links, or a trailing-slash
+ * directory reference); these are only rewrite-eligible when they deterministic-
+ * ally resolve to a real file. `non-doc` targets carry a concrete non-markdown
+ * extension (e.g. `.png`, `.json`) and are never doc cross-references.
+ */
+function classifyTarget(pathPart: string): TargetClass {
+  if (MARKDOWN_TARGET.test(pathPart)) {
+    return 'markdown';
+  }
+  const withoutTrailingSlash = pathPart.replace(/\/+$/, '');
+  if (withoutTrailingSlash.length === 0) {
+    // Trailing-slash directory reference (or a bare `/`): a directory index.
+    return 'extensionless';
+  }
+  const lastSegment = withoutTrailingSlash.slice(withoutTrailingSlash.lastIndexOf('/') + 1);
+  const dot = lastSegment.lastIndexOf('.');
+  // `dot <= 0` covers both no-dot segments and dotfiles (e.g. `.gitignore`),
+  // neither of which carries a file extension that rules out a doc route.
+  return dot <= 0 ? 'extensionless' : 'non-doc';
+}
+
+/**
+ * Rewrite one URL if it targets a relative document (an explicit `.md`/`.mdx`/
+ * `.markdown` file or an extension-less route that deterministically resolves).
+ * Returns undefined when the URL must be left unchanged (absolute URL, protocol-
+ * relative URL, in-page anchor, site-absolute path, non-doc asset, or an
+ * unrewritable/unresolvable relative target). Every left-unrewritten target that
+ * still looks like a doc cross-reference is reported via `onUnrewrittenLink`/
+ * `onNonGithubRemote` so the warning can state honest per-class totals.
  */
 export function rewriteRelativeMarkdownUrl(
   url: string,
@@ -418,30 +481,91 @@ export function rewriteRelativeMarkdownUrl(
     return undefined;
   }
 
+  if (pathPart.startsWith('<')) {
+    // A CommonMark angle-bracket destination (`<https://…>`, `</abs/path>`) that
+    // the whitespace-delimited inline-destination parser left with its leading
+    // `<` intact. It is not a repo/pack doc reference; leave it unchanged and,
+    // crucially, do NOT count it (it would otherwise masquerade as an
+    // unresolvable relative once the `>` is stripped from its last segment).
+    return undefined;
+  }
+
+  const targetClass = classifyTarget(pathPart);
+
   if (pathPart.startsWith('/')) {
     // A leading single `/` is a documentation-SITE absolute path (e.g.
-    // `/router/latest/docs/.../README.md`), not a repo/pack-relative path. It
-    // must never be joined onto the section dir or pinned to a blob URL. Only
-    // `./`, `../`, and bare relative targets are eligible for rewriting. Count a
-    // site-absolute markdown target in the unrewritten-links warning.
-    if (MARKDOWN_TARGET.test(pathPart)) {
-      context.onUnrewrittenRelativeLink();
+    // `/router/latest/docs/.../README.md` or `/router/latest/docs/guide/route`),
+    // not a repo/pack-relative path. It must never be joined onto the section dir
+    // or pinned to a blob URL. Count it when it looks like a doc cross-reference
+    // (markdown or extension-less), but not when it is a non-doc asset.
+    if (targetClass !== 'non-doc') {
+      context.onUnrewrittenLink('site-absolute');
     }
     return undefined;
   }
 
-  if (!MARKDOWN_TARGET.test(pathPart)) {
+  if (targetClass === 'non-doc') {
+    // Relative asset (image, stylesheet, data file): left untouched, not counted.
     return undefined;
   }
 
-  const targetRelpath = joinPosix(dirnamePosix(context.currentRelpath), pathPart);
+  const baseRelpath = joinPosix(dirnamePosix(context.currentRelpath), pathPart);
 
-  if (context.packRelpaths.has(targetRelpath)) {
-    return `pack:${targetRelpath}${fragment}`;
+  if (targetClass === 'markdown') {
+    // Explicit markdown extension: the base relpath already includes it.
+    if (context.packRelpaths.has(baseRelpath)) {
+      return `pack:${baseRelpath}${fragment}`;
+    }
+    return pinOutOfPackTarget(baseRelpath, fragment, context);
   }
 
+  return resolveExtensionlessTarget(baseRelpath, pathPart, fragment, context);
+}
+
+/**
+ * Resolve an extension-less relative target by DETERMINISTIC existence only.
+ * Probes the candidate set (`<base>.md|.mdx|.markdown`, `<base>/index.md|…`)
+ * against the pack file set first, then the on-disk repo file set; unresolvable
+ * targets are counted, never guessed into a broken link.
+ */
+function resolveExtensionlessTarget(
+  baseRelpath: string,
+  pathPart: string,
+  fragment: string,
+  context: LinkRewriteContext
+): string | undefined {
+  const candidates = extensionlessCandidates(baseRelpath, isDirectoryStyle(pathPart));
+
+  for (const candidate of candidates) {
+    if (context.packRelpaths.has(candidate)) {
+      return `pack:${candidate}${fragment}`;
+    }
+  }
+
+  if (context.fileExistsInRepo !== undefined) {
+    for (const candidate of candidates) {
+      if (context.fileExistsInRepo(candidate)) {
+        return pinOutOfPackTarget(candidate, fragment, context);
+      }
+    }
+  }
+
+  context.onUnrewrittenLink('unresolvable-relative');
+  return undefined;
+}
+
+/**
+ * Pin an out-of-pack target (already known to exist, or an explicit `.md`
+ * target) to its permanent blob URL, or count it when it cannot be pinned (no
+ * git context, or a non-github remote).
+ */
+function pinOutOfPackTarget(
+  targetRelpath: string,
+  fragment: string,
+  context: LinkRewriteContext
+): string | undefined {
   if (context.gitContext === undefined) {
-    context.onUnrewrittenRelativeLink();
+    context.onUnrewrittenLink('no-git-context');
     return undefined;
   }
 
@@ -452,6 +576,34 @@ export function rewriteRelativeMarkdownUrl(
   }
 
   return blobUrl;
+}
+
+/**
+ * True when an extension-less target denotes a directory (so its index file is
+ * the natural resolution): a trailing slash, or a `.`/`..` final segment.
+ */
+function isDirectoryStyle(pathPart: string): boolean {
+  if (pathPart.endsWith('/')) {
+    return true;
+  }
+  const lastSegment = pathPart.slice(pathPart.lastIndexOf('/') + 1);
+  return lastSegment === '.' || lastSegment === '..';
+}
+
+/**
+ * Candidate relpaths an extension-less base could resolve to. For a plain route
+ * the file form (`base.md`) is tried before the directory-index form; for a
+ * directory-style reference the index form is tried first. An empty base (a
+ * link to the current/root directory) only has index candidates.
+ */
+function extensionlessCandidates(base: string, directoryStyle: boolean): string[] {
+  const fileCandidates =
+    base.length === 0 ? [] : MARKDOWN_EXTENSIONS.map((extension) => `${base}.${extension}`);
+  const indexPrefix = base.length === 0 ? '' : `${base}/`;
+  const indexCandidates = INDEX_BASENAMES.map((name) => `${indexPrefix}${name}`);
+  return directoryStyle
+    ? [...indexCandidates, ...fileCandidates]
+    : [...fileCandidates, ...indexCandidates];
 }
 
 function buildGithubBlobUrl(

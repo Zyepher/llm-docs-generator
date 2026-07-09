@@ -9,14 +9,19 @@
  * - Hierarchical numbering for precise navigation
  */
 
+import { statSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 import { writeTextFileSafely } from '../utils/safe-write.js';
 
 import type { DocNode, ContentBlock } from './models.js';
 import { DocNodeType, ContentBlockType } from './models.js';
-import { rewriteProseLinks, type MarkdownLinkGitContext } from './markdown-links.js';
+import {
+  rewriteProseLinks,
+  type MarkdownLinkGitContext,
+  type UnrewrittenLinkClass,
+} from './markdown-links.js';
 
 // ============================================================================
 // CONSTANTS
@@ -97,7 +102,11 @@ export class UniversalFormatter {
   // Link-rewrite warning accumulators. Populated only on the canonical full-doc
   // render (category/TOC renders reuse the same nodes and must not double-count).
   private readonly unresolvedReferenceLabels = new Set<string>();
-  private unrewrittenRelativeLinkCount = 0;
+  private readonly unrewrittenLinkCounts: Record<UnrewrittenLinkClass, number> = {
+    'site-absolute': 0,
+    'unresolvable-relative': 0,
+    'no-git-context': 0,
+  };
   private nonGithubRemoteCount = 0;
 
   async generateAll(): Promise<string[]> {
@@ -129,14 +138,32 @@ export class UniversalFormatter {
     for (const label of [...this.unresolvedReferenceLabels].sort()) {
       sourcePack.onWarning(`Unresolved reference-link label with no definition: [${label}]`);
     }
-    if (this.unrewrittenRelativeLinkCount > 0) {
+
+    // Honest per-class breakdown of every doc cross-reference left unrewritten,
+    // so the total can never undercount (the previous message only counted a
+    // subset). Each nonzero class is named; a `.md` and an extension-less dead
+    // link both land here.
+    const siteAbsolute = this.unrewrittenLinkCounts['site-absolute'];
+    const unresolvableRelative = this.unrewrittenLinkCounts['unresolvable-relative'];
+    const noGitContext = this.unrewrittenLinkCounts['no-git-context'];
+    const total =
+      siteAbsolute + unresolvableRelative + noGitContext + this.nonGithubRemoteCount;
+    if (total > 0) {
+      const parts: string[] = [];
+      if (siteAbsolute > 0) {
+        parts.push(`${siteAbsolute} site-absolute`);
+      }
+      if (unresolvableRelative > 0) {
+        parts.push(`${unresolvableRelative} unresolvable relative`);
+      }
+      if (noGitContext > 0) {
+        parts.push(`${noGitContext} out-of-pack with no git context`);
+      }
+      if (this.nonGithubRemoteCount > 0) {
+        parts.push(`${this.nonGithubRemoteCount} non-github remote`);
+      }
       sourcePack.onWarning(
-        `Left ${this.unrewrittenRelativeLinkCount} relative markdown link(s) unrewritten (site-absolute path, or out-of-pack target with no git context to pin)`
-      );
-    }
-    if (this.nonGithubRemoteCount > 0) {
-      sourcePack.onWarning(
-        `Left ${this.nonGithubRemoteCount} relative markdown link(s) unrewritten (non-github remote)`
+        `Left ${total} doc cross-reference(s) unrewritten: ${parts.join(', ')}`
       );
     }
   }
@@ -413,14 +440,15 @@ export class UniversalFormatter {
       ...(sourcePack.gitContext === undefined
         ? {}
         : { gitContext: toLinkGitContext(sourcePack.gitContext) }),
+      fileExistsInRepo: (relpath) => this.repoFileExists(sourcePack, relpath),
       onUnresolvedReference: (label) => {
         if (collect) {
           this.unresolvedReferenceLabels.add(label);
         }
       },
-      onUnrewrittenRelativeLink: () => {
+      onUnrewrittenLink: (kind) => {
         if (collect) {
-          this.unrewrittenRelativeLinkCount += 1;
+          this.unrewrittenLinkCounts[kind] += 1;
         }
       },
       onNonGithubRemote: () => {
@@ -429,6 +457,41 @@ export class UniversalFormatter {
         }
       },
     });
+  }
+
+  /**
+   * Existence oracle for extension-less out-of-pack resolution. Resolves a
+   * source-root-relative candidate to an absolute path and reports whether a
+   * regular file lives there, constrained to within the repo (or, absent git
+   * context, within the source root) so a `../`-escaping target can never probe
+   * arbitrary disk locations or produce a blob URL that escapes the repo.
+   */
+  private repoFileExists(sourcePack: FormatterSourcePack, relpath: string): boolean {
+    const containmentRoot = this.diskContainmentRoot(sourcePack);
+    const absolute = resolve(sourcePack.resolvedPath, relpath);
+    if (absolute !== containmentRoot && !absolute.startsWith(`${containmentRoot}${sep}`)) {
+      return false;
+    }
+    try {
+      return statSync(absolute).isFile();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The directory that on-disk extension-less resolution is confined to: the
+   * repo root when git context pins the source root within a repo, otherwise the
+   * source root itself.
+   */
+  private diskContainmentRoot(sourcePack: FormatterSourcePack): string {
+    const git = sourcePack.gitContext;
+    if (git === undefined) {
+      return resolve(sourcePack.resolvedPath);
+    }
+    const depth = git.sourceRootFromRepo.split('/').filter((s) => s.length > 0 && s !== '.');
+    const upFromSource = depth.length === 0 ? '.' : depth.map(() => '..').join('/');
+    return resolve(sourcePack.resolvedPath, upFromSource);
   }
 
   /**

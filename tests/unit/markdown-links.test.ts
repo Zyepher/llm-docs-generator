@@ -6,27 +6,33 @@ import {
   rewriteRelativeMarkdownUrl,
   type LinkRewriteContext,
   type MarkdownLinkGitContext,
+  type UnrewrittenLinkClass,
 } from '../../src/core/markdown-links.js';
 
 interface Spies {
   unresolved: string[];
-  unrewritten: number;
+  unrewritten: UnrewrittenLinkClass[];
   nonGithub: number;
 }
 
-function makeContext(overrides: Partial<LinkRewriteContext> & { spies?: Spies } = {}): {
+function makeContext(
+  overrides: Partial<LinkRewriteContext> & { spies?: Spies } = {}
+): {
   context: LinkRewriteContext;
   spies: Spies;
 } {
-  const spies: Spies = overrides.spies ?? { unresolved: [], unrewritten: 0, nonGithub: 0 };
+  const spies: Spies = overrides.spies ?? { unresolved: [], unrewritten: [], nonGithub: 0 };
   const context: LinkRewriteContext = {
     currentRelpath: overrides.currentRelpath ?? 'guide/intro.md',
     packRelpaths: overrides.packRelpaths ?? new Set(['guide/intro.md', 'api/router.md']),
     linkDefinitions: overrides.linkDefinitions ?? new Map([['site', 'https://example.com/site']]),
     ...(overrides.gitContext === undefined ? {} : { gitContext: overrides.gitContext }),
+    ...(overrides.fileExistsInRepo === undefined
+      ? {}
+      : { fileExistsInRepo: overrides.fileExistsInRepo }),
     onUnresolvedReference: (label) => spies.unresolved.push(label),
-    onUnrewrittenRelativeLink: () => {
-      spies.unrewritten += 1;
+    onUnrewrittenLink: (kind) => {
+      spies.unrewritten.push(kind);
     },
     onNonGithubRemote: () => {
       spies.nonGithub += 1;
@@ -194,7 +200,7 @@ describe('rewriteProseLinks relative links', () => {
     expect(rewriteProseLinks('see [x](../../outside/thing.md)', context)).toBe(
       'see [x](../../outside/thing.md)'
     );
-    expect(spies.unrewritten).toBe(1);
+    expect(spies.unrewritten).toEqual(['no-git-context']);
   });
 
   it('leaves an in-page anchor unchanged', () => {
@@ -205,6 +211,174 @@ describe('rewriteProseLinks relative links', () => {
   it('does not rewrite image links', () => {
     const { context } = makeContext();
     expect(rewriteProseLinks('![alt](../api/router.md)', context)).toBe('![alt](../api/router.md)');
+  });
+});
+
+describe('rewriteRelativeMarkdownUrl extension-less in-pack resolution', () => {
+  // TanStack/VitePress/Docusaurus/MkDocs default: route-style links with no
+  // `.md` extension. These MUST resolve deterministically against the file set.
+  const startPack = () =>
+    makeContext({
+      currentRelpath: 'framework/react/guide/seo.md',
+      packRelpaths: new Set([
+        'framework/react/guide/seo.md',
+        'framework/react/guide/server-routes.md',
+        'framework/react/installation/with-vite.md',
+        'framework/react/api/router.md',
+      ]),
+      linkDefinitions: new Map(),
+    });
+
+  it('rewrites a sibling extension-less route (./server-routes) to a pack link', () => {
+    const { context, spies } = startPack();
+    expect(rewriteRelativeMarkdownUrl('./server-routes', context)).toBe(
+      'pack:framework/react/guide/server-routes.md'
+    );
+    expect(spies.unrewritten).toEqual([]);
+  });
+
+  it('rewrites a bare (no ./) extension-less sibling route', () => {
+    const { context } = startPack();
+    expect(rewriteRelativeMarkdownUrl('server-routes', context)).toBe(
+      'pack:framework/react/guide/server-routes.md'
+    );
+  });
+
+  it('rewrites an ancestor extension-less route (../installation/with-vite)', () => {
+    const { context } = startPack();
+    expect(rewriteRelativeMarkdownUrl('../installation/with-vite', context)).toBe(
+      'pack:framework/react/installation/with-vite.md'
+    );
+  });
+
+  it('preserves the #fragment on an extension-less route (../api/router#createlink)', () => {
+    const { context } = startPack();
+    expect(rewriteRelativeMarkdownUrl('../api/router#createlink', context)).toBe(
+      'pack:framework/react/api/router.md#createlink'
+    );
+  });
+
+  it('resolves an .mdx candidate', () => {
+    const { context } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md', 'guide/deep-dive.mdx']),
+      linkDefinitions: new Map(),
+    });
+    expect(rewriteRelativeMarkdownUrl('./deep-dive', context)).toBe('pack:guide/deep-dive.mdx');
+  });
+
+  it('resolves a directory reference to its index file', () => {
+    const { context } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md', 'guide/advanced/index.md']),
+      linkDefinitions: new Map(),
+    });
+    expect(rewriteRelativeMarkdownUrl('./advanced', context)).toBe('pack:guide/advanced/index.md');
+    expect(rewriteRelativeMarkdownUrl('./advanced/', context)).toBe('pack:guide/advanced/index.md');
+  });
+
+  it('prefers the file candidate over a directory index for a plain route', () => {
+    const { context } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md', 'guide/topic.md', 'guide/topic/index.md']),
+      linkDefinitions: new Map(),
+    });
+    expect(rewriteRelativeMarkdownUrl('./topic', context)).toBe('pack:guide/topic.md');
+  });
+
+  it('prefers the directory index for a trailing-slash route', () => {
+    const { context } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md', 'guide/topic.md', 'guide/topic/index.md']),
+      linkDefinitions: new Map(),
+    });
+    expect(rewriteRelativeMarkdownUrl('./topic/', context)).toBe('pack:guide/topic/index.md');
+  });
+});
+
+describe('rewriteRelativeMarkdownUrl extension-less unresolvable + on-disk', () => {
+  it('counts an unresolvable extension-less relative target and leaves it unchanged', () => {
+    const { context, spies } = makeContext({ linkDefinitions: new Map() });
+    expect(rewriteRelativeMarkdownUrl('./does-not-exist', context)).toBeUndefined();
+    expect(spies.unrewritten).toEqual(['unresolvable-relative']);
+  });
+
+  it('does not probe disk for an extension-less target that resolves in-pack', () => {
+    let probed = false;
+    const { context } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md', 'guide/seo.md']),
+      linkDefinitions: new Map(),
+      fileExistsInRepo: () => {
+        probed = true;
+        return true;
+      },
+    });
+    expect(rewriteRelativeMarkdownUrl('./seo', context)).toBe('pack:guide/seo.md');
+    expect(probed).toBe(false);
+  });
+
+  it('pins an out-of-pack extension-less target that exists on disk to a github blob url', () => {
+    const seen: string[] = [];
+    const { context, spies } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md']),
+      linkDefinitions: new Map(),
+      gitContext: { remoteUrl: 'git@github.com:acme/widget.git', commit: 'c0ffee', sourceRootFromRepo: 'docs' },
+      fileExistsInRepo: (relpath) => {
+        seen.push(relpath);
+        return relpath === '../shared/util.md';
+      },
+    });
+    expect(rewriteRelativeMarkdownUrl('../../shared/util', context)).toBe(
+      'https://github.com/acme/widget/blob/c0ffee/shared/util.md'
+    );
+    expect(spies.unrewritten).toEqual([]);
+    // The .md candidate is probed first, in order.
+    expect(seen[0]).toBe('../shared/util.md');
+  });
+
+  it('counts an on-disk extension-less target as no-git-context when git is absent', () => {
+    const { context, spies } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md']),
+      linkDefinitions: new Map(),
+      fileExistsInRepo: (relpath) => relpath === '../shared/util.md',
+    });
+    expect(rewriteRelativeMarkdownUrl('../../shared/util', context)).toBeUndefined();
+    expect(spies.unrewritten).toEqual(['no-git-context']);
+  });
+
+  it('reports a non-github remote for an on-disk extension-less out-of-pack target', () => {
+    const { context, spies } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md']),
+      linkDefinitions: new Map(),
+      gitContext: { remoteUrl: 'git@gitlab.com:acme/widget.git', commit: 'c0ffee', sourceRootFromRepo: 'docs' },
+      fileExistsInRepo: (relpath) => relpath === '../shared/util.md',
+    });
+    expect(rewriteRelativeMarkdownUrl('../../shared/util', context)).toBeUndefined();
+    expect(spies.nonGithub).toBe(1);
+    expect(spies.unrewritten).toEqual([]);
+  });
+});
+
+describe('rewriteRelativeMarkdownUrl non-doc and asset targets', () => {
+  it('leaves a relative non-doc asset untouched and does not count it', () => {
+    const { context, spies } = makeContext({ linkDefinitions: new Map() });
+    expect(rewriteRelativeMarkdownUrl('../assets/logo.png', context)).toBeUndefined();
+    expect(rewriteRelativeMarkdownUrl('./data.json', context)).toBeUndefined();
+    expect(spies.unrewritten).toEqual([]);
+  });
+
+  it('does not rewrite an extension-less image target', () => {
+    const { context } = makeContext({
+      currentRelpath: 'guide/intro.md',
+      packRelpaths: new Set(['guide/intro.md', 'guide/seo.md']),
+      linkDefinitions: new Map(),
+    });
+    // Images never have their destination rewritten, even when it would resolve.
+    expect(rewriteProseLinks('![diagram](./seo)', context)).toBe('![diagram](./seo)');
   });
 });
 
@@ -249,15 +423,33 @@ describe('rewriteRelativeMarkdownUrl external targets', () => {
         context
       )
     ).toBeUndefined();
-    expect(spies.unrewritten).toBe(1);
+    expect(spies.unrewritten).toEqual(['site-absolute']);
   });
 
-  it('leaves a site-absolute non-markdown path unchanged without counting it', () => {
+  it('counts a site-absolute extension-less route as a doc cross-reference (F4)', () => {
     const { context, spies } = makeContext({ gitContext: git('git@github.com:acme/widget.git') });
     expect(
       rewriteRelativeMarkdownUrl('/router/latest/docs/guide/preloading', context)
     ).toBeUndefined();
-    expect(spies.unrewritten).toBe(0);
+    expect(spies.unrewritten).toEqual(['site-absolute']);
+  });
+
+  it('does not count a site-absolute non-doc asset path', () => {
+    const { context, spies } = makeContext({ gitContext: git('git@github.com:acme/widget.git') });
+    expect(rewriteRelativeMarkdownUrl('/img/logo.png', context)).toBeUndefined();
+    expect(spies.unrewritten).toEqual([]);
+  });
+
+  it('leaves an angle-bracket destination unchanged and never counts it', () => {
+    const { context, spies } = makeContext({ linkDefinitions: new Map() });
+    // `[abbr](<https://en.wikipedia.org/wiki/Garbage_collection_(computer_science)>)`
+    // parses to a `<...`-prefixed target; its last segment has no extension, so
+    // without the guard it would be miscounted as an unresolvable relative link.
+    expect(
+      rewriteRelativeMarkdownUrl('<https://en.wikipedia.org/wiki/Garbage_collection_(x', context)
+    ).toBeUndefined();
+    expect(spies.unrewritten).toEqual([]);
+    expect(spies.nonGithub).toBe(0);
   });
 });
 
