@@ -1,15 +1,18 @@
 /**
- * TanStack tabs/framework switcher directive dialect.
+ * Comment-directive tabs/framework switcher dialect.
  *
- * TanStack docs mark UI switchers with private HTML comments:
+ * Parses the generic HTML-comment directive syntax; nothing in the transform is
+ * vendor-specific:
  *   <!-- ::start:tabs variant="bundler" --> ... <!-- ::end:tabs -->
  *   <!-- ::start:framework --> ... <!-- ::end:framework -->
  * Each tab item is authored as an ATX heading (typically `# Vite`). This dialect
  * rewrites those items into ordinary, self-describing, correctly-nested headings
  * so the section tree and document order survive stripping the switcher chrome.
  *
- * The first extension registered in the directive seam; other vendors' dialects
- * register alongside it without touching the parser core.
+ * Known user of this dialect: the TanStack docs site (https://tanstack.com/).
+ *
+ * The first extension registered in the directive seam; other dialects register
+ * alongside it without touching the parser core.
  */
 
 import { getOpeningFence, isClosingFence, type FenceState } from '../fences.js';
@@ -25,8 +28,8 @@ const END_DIRECTIVE = /<!--\s*::end:[A-Za-z-]+\s*-->/;
 const VARIANT_ATTRIBUTE = /variant\s*=\s*"([^"]*)"/;
 const ATX_HEADING = /^(#{1,6})\s+(.*?)\s*$/;
 
-export const tanstackTabsExtension: MarkdownDirectiveExtension = {
-  name: 'tanstack-tabs',
+export const commentDirectiveTabsExtension: MarkdownDirectiveExtension = {
+  name: 'comment-directive-tabs',
 
   appliesTo(content: string): boolean {
     // A switcher block is only meaningful once an `::start:` marker opens it; a

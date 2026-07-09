@@ -19,15 +19,15 @@ Run this workflow in order. Every step states WHY so you can adapt it, not cargo
 
 ## Step 1 — PIN THE VERSION (before anything else)
 
-WHY: the entire value of a pack is that it matches the exact version the consuming project runs. Resolve that version from the project itself, not from memory or "latest".
+WHY: the entire value of a pack is that it matches the exact version the consuming project runs. Resolve that version from the project's own package-manager metadata, not from memory or "latest". The metadata source is ecosystem-specific; the rule is not.
 
-1. Read the exact installed version and upstream repo from the consuming project:
+1. Read the exact installed version and upstream repo from the package manager's own metadata. npm worked example:
 
 ```bash
 cat <project>/node_modules/<pkg>/package.json   # read "version" and "repository"
 ```
 
-The `repository` field gives you `url` (the monorepo) and often `directory` (the package's subpath inside it). Both are primary evidence — use them, do not guess the repo.
+The `repository` field gives you `url` (the monorepo) and often `directory` (the package's subpath inside it). Both are primary evidence — use them, do not guess the repo. Other ecosystems publish the same two facts elsewhere (see the non-npm reference below); resolve version and repo from whatever metadata the package manager installed, never from memory.
 
 2. Resolve the git tag for that exact version and its commit:
 
@@ -157,6 +157,33 @@ llm-docs refresh --output-dir <project>/agent-docs/<pkg>
 ```
 
 `refresh` **fails by default when the source HEAD != the recorded commit** (drift). That failure is a signal, not a bug: either re-obtain the exact recorded commit, or, if you have consciously decided the drift is acceptable, pass `--accept-drift`. Never `--accept-drift` reflexively — it silently accepts whatever the source now says.
+
+## Non-npm Worked Reference (Python + RST)
+
+The same pin → clone → inspect → generate flow on a non-npm ecosystem, to show the playbook is not npm-shaped. Only the metadata source and the format change; every WHY above still holds.
+
+- **PIN (Step 1).** Resolve the installed version and repo from Python's own package metadata instead of `node_modules`:
+
+```bash
+python -c "import importlib.metadata as m; print(m.version('<dist>'))"  # installed version
+pip show <dist>                                                          # version + summary
+```
+
+  Read the repo from the project's `pyproject.toml` `[project.urls]` (e.g. `Repository`/`Source`) — the equivalent of npm's `repository` field.
+- **CLONE (Step 2).** `git clone --filter=blob:none <repo>` and `checkout` the tag/commit for that exact version, identical to the npm flow.
+- **INSPECT (Step 3).** Sphinx/RST projects keep docs under `docs/` as an RST tree (often topic- or framework-split) with a `conf.py`/`index.rst` nav; find drafts and non-doc files before generating.
+- **GENERATE (Step 4).** Point `--source` at the RST subtree and pass `--format rst`:
+
+```bash
+llm-docs generate \
+  --source <clone-dir>/docs \
+  --format rst \
+  --label "<dist>@<version> @ <commit7>" \
+  --split-by dirs \
+  --output-dir <project>/agent-docs/<dist>
+```
+
+Verify, author the index, and maintain exactly as Steps 5–7.
 
 ## Troubleshooting
 

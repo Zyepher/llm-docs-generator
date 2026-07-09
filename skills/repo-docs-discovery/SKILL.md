@@ -18,9 +18,11 @@ Every step states WHY so you can adapt it to a repo whose layout differs from th
 - Never store credentials or tokens in reports, manifests, or notes.
 - Do not execute repository scripts, docs-build scripts, or install hooks from an inspected source.
 
-## Step 1 — Package → Repo (primary evidence: the installed package.json)
+## Step 1 — Package → Repo (primary evidence: the installed package's own metadata)
 
-WHY: the package the project actually installed names its own upstream repo. That is stronger evidence than a web search or memory.
+WHY: the package the project actually installed names its own upstream repo in its installed metadata. That is stronger evidence than a web search or memory. The metadata store is ecosystem-specific; the rule — resolve version and repo from what the package manager installed — is not.
+
+npm worked example — read the installed `package.json`:
 
 ```bash
 cat <project>/node_modules/<pkg>/package.json
@@ -38,7 +40,17 @@ Cross-check the repo by confirming a tag exists for this version:
 git ls-remote --tags <repository.url> | grep -E '<pkg>@<version>|v<version>'
 ```
 
-If `repository.url` and the tag listing agree, the repo is resolved. If `package.json` lacks `repository`, fall back to the npm registry's `repository` field for that exact version — but the installed `package.json` is the primary evidence.
+If `repository.url` and the tag listing agree, the repo is resolved. If `package.json` lacks `repository`, fall back to the registry's `repository` field for that exact version — but the installed metadata is the primary evidence.
+
+Non-npm ecosystems expose the same two facts elsewhere. Python worked example — resolve the version from installed metadata and the repo from the project's `pyproject.toml`:
+
+```bash
+python -c "import importlib.metadata as m; print(m.version('<dist>'))"  # installed version
+pip show <dist>                                                          # version + summary
+# repo: read [project.urls] (Repository/Source) in the project's pyproject.toml
+```
+
+Whatever the ecosystem, the rule holds: take version and repo from the metadata the package manager installed, then cross-check the tag on the resolved repo.
 
 ## Step 2 — Locate The Docs Tree Inside The Repo
 
@@ -62,7 +74,7 @@ Record the exact docs subtree path relative to the repo root. That path is what 
 
 ## Step 3 — Confirm The Ref Covers ALL Target Packages
 
-WHY (the TanStack lesson): a package's docs may not live in its own repo, and different packages release at different commits. If you pin one package's tag and assume it covers the others, you can ship docs from the wrong commit — or miss a package entirely.
+WHY: two general facts about monorepos break the naive "one package, one repo, one tag" assumption, and either can ship docs from the wrong commit or miss a package entirely. A package's docs may live in *another* package's repo/tree; and a monorepo may release either in **lockstep** (one commit per version across all packages) or **independently** (per-package tags at different commits). Prove which before you pin. (TanStack is the worked example below: `@tanstack/react-start`'s docs live in `TanStack/router`, `TanStack/router` releases independently, and `TanStack/query` releases lockstep.)
 
 Two concrete traps to check:
 
