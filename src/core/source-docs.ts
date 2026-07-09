@@ -5,7 +5,10 @@ import { pathToFileURL } from 'node:url';
 
 import { chunkDocNode, type SemanticChunk, type SemanticChunkWarning } from './chunker.js';
 import { detectFormat, getParserForFormat } from './detector.js';
-import { describeGeneratedTextOutput } from './generated-output-metadata.js';
+import {
+  assertUniqueGeneratedOutputPaths,
+  describeGeneratedTextOutput,
+} from './generated-output-metadata.js';
 import { createDocNode, DocNodeSchema, DocNodeType, type DocNode } from './models.js';
 import {
   validateParserPluginManifestFile,
@@ -1651,6 +1654,11 @@ function buildSourceDocsManifest(options: {
     format: options.resolvedFormat,
   }));
   const sourceFile = options.source.type === 'file' ? sourceFiles[0] : undefined;
+
+  // Invariant: no two generated outputs may share a path (see
+  // assertUniqueGeneratedOutputPaths). Enforced at manifest construction so a
+  // reserved-name collision can never ship a masked, duplicate-path manifest.
+  assertUniqueGeneratedOutputPaths(options.generatedOutputs);
 
   const manifest = {
     schemaVersion: SOURCE_DOCS_SCHEMA_VERSION,

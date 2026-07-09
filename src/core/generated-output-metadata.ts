@@ -29,6 +29,28 @@ export async function describeGeneratedTextOutput(
   };
 }
 
+/**
+ * Manifest invariant: a manifest's `generatedOutputs` must never contain two
+ * entries for the same path. Two entries for one path (which can arise when a
+ * reserved artifact name is claimed by a category slice, so one file overwrites
+ * the other) hide the loss from verify — a duplicate path+hash pair still hashes
+ * clean. Every manifest writer runs this before serializing, so the corruption
+ * fails loudly at generation instead of shipping a masked pack.
+ */
+export function assertUniqueGeneratedOutputPaths(
+  outputs: ReadonlyArray<{ path: string }>
+): void {
+  const seen = new Set<string>();
+  for (const output of outputs) {
+    if (seen.has(output.path)) {
+      throw new Error(
+        `manifest invariant violated: generatedOutputs contains duplicate path ${output.path}`
+      );
+    }
+    seen.add(output.path);
+  }
+}
+
 export function countTextLines(text: string): number {
   if (text.length === 0) {
     return 0;

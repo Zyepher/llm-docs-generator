@@ -168,6 +168,23 @@ export class UniversalFormatter {
   }
 
   /**
+   * Reserved output basenames a category slice must never claim. These name
+   * distinct generated artifacts: the combined `-full-llms.txt` (written before
+   * the category pass) and, when emitted, the `-toc-llms.txt` table of contents
+   * (written after it). A source directory literally named "full" or "toc" would
+   * otherwise produce a category slice with an identical filename, so one file
+   * would silently overwrite the other and the manifest would carry two
+   * generatedOutputs entries for the same path.
+   */
+  private reservedOutputFilenames(prefix: string): Set<string> {
+    const reserved = new Set<string>([`${prefix}-full-llms.txt`]);
+    if (this.options.sourcePack?.emitToc === true) {
+      reserved.add(`${prefix}-toc-llms.txt`);
+    }
+    return reserved;
+  }
+
+  /**
    * Generate modular documentation files (one per category)
    */
   private async generateModularDocs(): Promise<string[]> {
@@ -178,15 +195,28 @@ export class UniversalFormatter {
 
     const prefix = sanitizeFileSegment(this.options.filenamePrefix || 'documentation');
     const outputPaths: string[] = [];
-    const usedFilenames = new Set([`${prefix}-full-llms.txt`]);
+    // Seed the dedup set with every reserved artifact name so a colliding
+    // category is deterministically renamed via the same suffix mechanism used
+    // for duplicate category ids (e.g. `${prefix}-toc-2-llms.txt`) instead of
+    // overwriting the reserved artifact.
+    const reservedFilenames = this.reservedOutputFilenames(prefix);
+    const usedFilenames = new Set(reservedFilenames);
 
     // Generate file for each category
     for (const category of categories) {
-      const filename = uniqueFilename(
-        `${prefix}-${sanitizeFileSegment(category.id)}`,
-        '-llms.txt',
-        usedFilenames
-      );
+      const baseName = `${prefix}-${sanitizeFileSegment(category.id)}`;
+      const naturalFilename = `${baseName}-llms.txt`;
+      const filename = uniqueFilename(baseName, '-llms.txt', usedFilenames);
+
+      // Only warn when the natural name was claimed by a RESERVED artifact (not
+      // by a sibling category), because that is the collision that would have
+      // silently destroyed an artifact before this guard.
+      if (filename !== naturalFilename && reservedFilenames.has(naturalFilename)) {
+        this.options.sourcePack?.onWarning(
+          `Category slice "${naturalFilename}" collides with the reserved ${reservedArtifactRole(naturalFilename, prefix)} output; renamed to "${filename}".`
+        );
+      }
+
       const filepath = join(this.options.outputDir, filename);
 
       const parts: string[] = [];
@@ -565,6 +595,15 @@ export async function formatDocNode(root: DocNode, options: FormatterOptions): P
 
 function sanitizeFileSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'documentation';
+}
+
+/**
+ * Human-readable role of the reserved artifact a category slice collided with,
+ * used only to phrase the rename warning. Reserved names are exactly the
+ * combined `-full` file and the optional `-toc` table of contents.
+ */
+function reservedArtifactRole(filename: string, prefix: string): string {
+  return filename === `${prefix}-toc-llms.txt` ? 'table-of-contents' : 'combined full-document';
 }
 
 function uniqueFilename(baseName: string, extension: string, usedFilenames: Set<string>): string {

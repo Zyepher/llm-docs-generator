@@ -5,7 +5,11 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-import { countTextLines, describeGeneratedTextOutput } from './generated-output-metadata.js';
+import {
+  assertUniqueGeneratedOutputPaths,
+  countTextLines,
+  describeGeneratedTextOutput,
+} from './generated-output-metadata.js';
 import {
   isObjectRecord,
   errorMessage,
@@ -93,6 +97,8 @@ export async function writeGenerationManifest(
         })
     )
   ).sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+
+  assertUniqueGeneratedOutputPaths(generatedOutputs);
 
   const manifest = {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
