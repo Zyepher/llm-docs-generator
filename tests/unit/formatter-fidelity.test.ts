@@ -267,4 +267,35 @@ describe('formatter fidelity: system header stamp', () => {
     expect(firstLine).toContain('https://github.com/acme/widget');
     expect(firstLine).toContain('tags: v2.0.0');
   });
+
+  it('stamps the same provenance into every slice and the toc header (F2)', async () => {
+    const gitContext: GenerateSourceGitContext = {
+      remoteUrl: 'https://github.com/acme/widget',
+      commit: 'cafe1234',
+      tags: ['v2.0.0'],
+      dirty: false,
+      sourceRootFromRepo: 'docs',
+    };
+    const { llmDir } = await generate({ gitContext, label: 'release-pack', splitBy: 'dirs' });
+
+    const sliceFirstLine = async (file: string): Promise<string> =>
+      (await readFile(join(llmDir, file), 'utf-8')).split('\n')[0] ?? '';
+
+    for (const slice of ['docs-guide-llms.txt', 'docs-api-llms.txt']) {
+      const line = await sliceFirstLine(slice);
+      expect(line).toContain('<SYSTEM>');
+      expect(line).toContain('label: release-pack');
+      expect(line).toContain('cafe1234');
+      expect(line).toContain('https://github.com/acme/widget');
+    }
+
+    const tocLine = await sliceFirstLine('docs-toc-llms.txt');
+    expect(tocLine).toContain('label: release-pack');
+    expect(tocLine).toContain('cafe1234');
+    // With slices present the toc must direct readers to the per-topic slice,
+    // not to grepping the full pack, and warn against loading both.
+    expect(tocLine).toContain('per-topic slice');
+    expect(tocLine).toContain('never both');
+    expect(tocLine).not.toContain('to grep in the full pack');
+  });
 });
