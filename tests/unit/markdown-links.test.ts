@@ -78,6 +78,109 @@ describe('rewriteProseLinks reference definitions', () => {
   });
 });
 
+describe('rewriteProseLinks opaque link text (F1)', () => {
+  const backtickContext = () =>
+    makeContext({
+      currentRelpath: 'api/router/FileRouteClass.md',
+      packRelpaths: new Set(['api/router/FileRouteClass.md', 'api/router/RouteOptionsType.md']),
+      linkDefinitions: new Map(),
+    });
+
+  it('rewrites an inline link whose text is an inline code span (FileRouteClass case)', () => {
+    const { context } = backtickContext();
+    expect(rewriteProseLinks('- [`RouteOptions`](./RouteOptionsType.md)', context)).toBe(
+      '- [`RouteOptions`](pack:api/router/RouteOptionsType.md)'
+    );
+  });
+
+  it('rewrites plain-text and backtick-text links to the same target identically', () => {
+    const { context: plain } = backtickContext();
+    const { context: coded } = backtickContext();
+    expect(rewriteProseLinks('[RouteOptions](./RouteOptionsType.md)', plain)).toBe(
+      '[RouteOptions](pack:api/router/RouteOptionsType.md)'
+    );
+    expect(rewriteProseLinks('[`RouteOptions`](./RouteOptionsType.md)', coded)).toBe(
+      '[`RouteOptions`](pack:api/router/RouteOptionsType.md)'
+    );
+  });
+
+  it('preserves an inline code span in link text while rewriting the target', () => {
+    const { context } = backtickContext();
+    expect(
+      rewriteProseLinks('see [the `RouteOptions` type](./RouteOptionsType.md) here', context)
+    ).toBe('see [the `RouteOptions` type](pack:api/router/RouteOptionsType.md) here');
+  });
+
+  it('does not let a stray code span outside a link swallow the link', () => {
+    const { context } = backtickContext();
+    expect(rewriteProseLinks('`code` then [`RouteOptions`](./RouteOptionsType.md)', context)).toBe(
+      '`code` then [`RouteOptions`](pack:api/router/RouteOptionsType.md)'
+    );
+  });
+});
+
+describe('rewriteProseLinks nested badge constructs (F3)', () => {
+  const badgeDefs = () =>
+    new Map([
+      ['stars-router', 'https://img.shields.io/github/stars/tanstack/router'],
+      ['gh-router', 'https://github.com/tanstack/router'],
+    ]);
+
+  it('inlines the outer link ref around an already-inlined image ref', () => {
+    const { context } = makeContext({ linkDefinitions: badgeDefs() });
+    expect(rewriteProseLinks('[![][stars-router]][gh-router]', context)).toBe(
+      '[![](https://img.shields.io/github/stars/tanstack/router)](https://github.com/tanstack/router)'
+    );
+  });
+
+  it('leaves no dangling ][ref] when both defs resolve', () => {
+    const { context } = makeContext({ linkDefinitions: badgeDefs() });
+    const out = rewriteProseLinks('| [![][stars-router]][gh-router] |', context);
+    expect(out).not.toContain('][gh-router]');
+    expect(out).not.toContain('[stars-router]');
+  });
+
+  it('warns and leaves the whole construct raw when the outer ref is missing', () => {
+    const { context, spies } = makeContext({
+      linkDefinitions: new Map([['stars-router', 'https://img.shields.io/x']]),
+    });
+    // The outer full-reference `[...][gh-router]` is unresolved: the construct is
+    // atomic, so it is emitted verbatim (inner not separately inlined) and warned.
+    expect(rewriteProseLinks('[![][stars-router]][gh-router]', context)).toBe(
+      '[![][stars-router]][gh-router]'
+    );
+    expect(spies.unresolved).toEqual(['gh-router']);
+  });
+});
+
+describe('rewriteProseLinks bare relative targets', () => {
+  it('rewrites a bare (no ./ prefix) in-pack relative link', () => {
+    const { context } = makeContext({
+      currentRelpath: 'api/functions/injectQuery.md',
+      packRelpaths: new Set(['api/functions/injectQuery.md', 'api/functions/createQuery.md']),
+      linkDefinitions: new Map(),
+    });
+    expect(rewriteProseLinks('[q](createQuery.md)', context)).toBe(
+      '[q](pack:api/functions/createQuery.md)'
+    );
+  });
+});
+
+describe('rewriteProseLinks site-absolute targets (F4)', () => {
+  it('leaves a site-absolute .md link unchanged even with git context', () => {
+    const { context } = makeContext({
+      gitContext: {
+        remoteUrl: 'https://github.com/acme/widget',
+        commit: 'abc123',
+        sourceRootFromRepo: 'docs',
+      },
+    });
+    const input =
+      'see the [How-to Guides](/router/latest/docs/framework/react/how-to/README.md#authentication)';
+    expect(rewriteProseLinks(input, context)).toBe(input);
+  });
+});
+
 describe('rewriteProseLinks relative links', () => {
   it('rewrites an in-pack relative .md link to a pack: link with fragment', () => {
     const { context } = makeContext();
@@ -136,6 +239,25 @@ describe('rewriteRelativeMarkdownUrl external targets', () => {
     const { context } = makeContext();
     expect(rewriteRelativeMarkdownUrl('https://x.example/y.md', context)).toBeUndefined();
     expect(rewriteRelativeMarkdownUrl('../assets/logo.png', context)).toBeUndefined();
+  });
+
+  it('treats a site-absolute .md path as unrewritable and counts it (F4)', () => {
+    const { context, spies } = makeContext({ gitContext: git('git@github.com:acme/widget.git') });
+    expect(
+      rewriteRelativeMarkdownUrl(
+        '/router/latest/docs/framework/react/how-to/README.md#auth',
+        context
+      )
+    ).toBeUndefined();
+    expect(spies.unrewritten).toBe(1);
+  });
+
+  it('leaves a site-absolute non-markdown path unchanged without counting it', () => {
+    const { context, spies } = makeContext({ gitContext: git('git@github.com:acme/widget.git') });
+    expect(
+      rewriteRelativeMarkdownUrl('/router/latest/docs/guide/preloading', context)
+    ).toBeUndefined();
+    expect(spies.unrewritten).toBe(0);
   });
 });
 

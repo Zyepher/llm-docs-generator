@@ -131,7 +131,7 @@ export class UniversalFormatter {
     }
     if (this.unrewrittenRelativeLinkCount > 0) {
       sourcePack.onWarning(
-        `Left ${this.unrewrittenRelativeLinkCount} relative markdown link(s) unrewritten (no git context to pin out-of-pack targets)`
+        `Left ${this.unrewrittenRelativeLinkCount} relative markdown link(s) unrewritten (site-absolute path, or out-of-pack target with no git context to pin)`
       );
     }
     if (this.nonGithubRemoteCount > 0) {
@@ -249,9 +249,29 @@ export class UniversalFormatter {
     if (sourcePack === undefined) {
       return base;
     }
+    return this.appendProvenance(base);
+  }
 
-    // Append provenance segments to whatever base prompt was chosen (a preset may
-    // supply its own). Segments are omitted when not provided.
+  /**
+   * Append the pack's provenance segments (operator label + pinned git
+   * remote@commit with tags/dirty flags) to a base SYSTEM sentence. Used by the
+   * full doc, every category slice, and the TOC so each generated output is
+   * self-describing and an agent loading only one file can still state the
+   * version. Returns the base unchanged when no provenance is available.
+   */
+  private appendProvenance(base: string): string {
+    const segments = this.provenanceSegments();
+    if (segments.length === 0) {
+      return base;
+    }
+    return `${base.replace(/\.\s*$/, '')} | ${segments.join(' | ')}`;
+  }
+
+  private provenanceSegments(): string[] {
+    const sourcePack = this.options.sourcePack;
+    if (sourcePack === undefined) {
+      return [];
+    }
     const segments: string[] = [];
     if (sourcePack.label !== undefined && sourcePack.label.length > 0) {
       segments.push(`label: ${sourcePack.label}`);
@@ -270,11 +290,7 @@ export class UniversalFormatter {
       }
       segments.push(gitSegment);
     }
-
-    if (segments.length === 0) {
-      return base;
-    }
-    return `${base.replace(/\.\s*$/, '')} | ${segments.join(' | ')}`;
+    return segments;
   }
 
   /**
@@ -284,7 +300,11 @@ export class UniversalFormatter {
     const parts: string[] = [];
 
     const title = this.options.title || this.root.title;
-    const systemPrompt = `This is the developer documentation for ${title} - ${category.title}.`;
+    // Stamp the same provenance (label + git remote@commit) that the full doc
+    // carries so a slice loaded on its own is self-describing and version-stated.
+    const systemPrompt = this.appendProvenance(
+      `This is the developer documentation for ${title} - ${category.title}.`
+    );
     parts.push(`<SYSTEM>${systemPrompt}</SYSTEM>`, DOUBLE_NEWLINE);
 
     parts.push(`# ${title} ${category.title} Documentation`, DOUBLE_NEWLINE);
@@ -475,8 +495,13 @@ export class UniversalFormatter {
     const filepath = join(this.options.outputDir, `${prefix}-toc-llms.txt`);
 
     const title = this.options.title || this.root.title;
+    const hasSlices = this.root.children.some((child) => child.type === DocNodeType.CATEGORY);
+    const navSentence = hasSlices
+      ? `Each entry lists the heading number, title, and, for file sections, its [source: path]. Load the matching per-topic slice ("<topic>-llms.txt") to read a section, or grep its [source: path] within that slice. Slices duplicate the full pack — load a slice or the full file, never both.`
+      : 'Each entry lists the heading number, title, and, for file sections, the [source: path] to grep in the full pack.';
+    const tocSystemPrompt = this.appendProvenance(`Table of contents for ${title}. ${navSentence}`);
     const lines: string[] = [
-      `<SYSTEM>Table of contents for ${title}. Each entry lists the heading number, title, and, for file sections, the [source: path] to grep in the full pack.</SYSTEM>`,
+      `<SYSTEM>${tocSystemPrompt}</SYSTEM>`,
       '',
       `# ${title} Table of Contents`,
       '',
