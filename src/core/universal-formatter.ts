@@ -270,17 +270,11 @@ export class UniversalFormatter {
     // System prompt (stamped with provenance for local source packs)
     parts.push(`<SYSTEM>${this.buildSystemPrompt()}</SYSTEM>`, DOUBLE_NEWLINE);
 
-    // Metadata
+    // Metadata. No generation date: it would make repeated runs over identical
+    // input produce different bytes (and vary by locale and timezone).
     if (this.options.includeMetadata !== false) {
-      const now = new Date();
-      const date = now.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
-
       const format = this.root.metadata.get('format') || 'unknown';
-      parts.push(`<!-- Format: ${format}, Generated: ${date} -->`, DOUBLE_NEWLINE);
+      parts.push(`<!-- Format: ${format} -->`, DOUBLE_NEWLINE);
     }
 
     // Title

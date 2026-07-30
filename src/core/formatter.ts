@@ -386,14 +386,9 @@ export class LLMFormatter {
     const filename = `${this.versionConfig.output.filenamePrefix}-full-llms.txt`;
     const filepath = `${outputDir}/${filename}`;
 
-    // Build header with metadata
-    const now = new Date();
-    const generatedDate = now.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-
+    // Build header with metadata. No generation date: the manifest records
+    // generatedAt, and a date stamp here would make a refresh change output
+    // bytes when nothing else changed (and vary by locale and timezone).
     const headerParts: string[] = [];
     headerParts.push(
       `<SYSTEM>This is the complete developer documentation for ${this.versionConfig.displayName}.</SYSTEM>`,
@@ -402,7 +397,7 @@ export class LLMFormatter {
     headerParts.push(
       `<!-- Generated from: ${this.specPath} -->`,
       NEWLINE,
-      `<!-- SDK: ${this.sdkName}, Version: ${this.version}, Generated: ${generatedDate} -->`,
+      `<!-- SDK: ${this.sdkName}, Version: ${this.version} -->`,
       DOUBLE_NEWLINE
     );
     headerParts.push(`# ${this.versionConfig.displayName} Reference`, DOUBLE_NEWLINE);
