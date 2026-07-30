@@ -225,6 +225,14 @@ export type SpecInfo = z.infer<typeof SpecInfoSchema>;
 export interface SpecData {
   info: SpecInfo;
   operations: Operation[];
+  /**
+   * Code language declared by the SDK catalog (config/sdks.json) for the
+   * configured-SDK flow: recorded configuration, never inferred from code
+   * content. Kept out of the serialized parsed-spec JSON (saveJSON writes info
+   * and operations only) so refresh, which runs without the SDK catalog,
+   * reproduces identical bytes.
+   */
+  declaredLanguage?: string;
   _operationMap?: Map<string, Operation>; // Cached for O(1) lookup
   _totalExamples?: number; // Cached count
 }
@@ -233,7 +241,11 @@ export interface SpecData {
  * Create SpecData with performance optimizations
  * Builds operation map for O(1) lookups vs O(n) linear search
  */
-export function createSpecData(info: SpecInfo, operations: Operation[]): SpecData {
+export function createSpecData(
+  info: SpecInfo,
+  operations: Operation[],
+  declaredLanguage?: string
+): SpecData {
   // Pre-build operation map for efficient lookups (O(n) once vs O(n) per lookup)
   const operationMap = new Map<string, Operation>();
   let totalExamples = 0;
@@ -246,6 +258,7 @@ export function createSpecData(info: SpecInfo, operations: Operation[]): SpecDat
   return {
     info,
     operations,
+    ...(declaredLanguage === undefined ? {} : { declaredLanguage }),
     _operationMap: operationMap,
     _totalExamples: totalExamples,
   };
