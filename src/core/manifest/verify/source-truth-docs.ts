@@ -22,7 +22,12 @@ import {
   SOURCE_TRUTH_REPORT_SCHEMA_VERSION,
 } from '../constants.js';
 import { isInsideDirectory, isSourceTruthSourceType } from '../predicates.js';
-import { pathExists, verifyFile, verifyPathType } from '../fs-verify.js';
+import {
+  pathExists,
+  scanManifestDirectoryForUnlistedFiles,
+  verifyFile,
+  verifyPathType,
+} from '../fs-verify.js';
 import type { FileCheck, PathTypeCheck } from '../fs-verify.js';
 import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
@@ -195,6 +200,12 @@ export async function verifySourceTruthDocsManifest(
     });
   }
 
+  const scan = await scanManifestDirectoryForUnlistedFiles({
+    manifestPath,
+    listedPaths: [...sourceChecks, ...outputChecks].map((check) => check.path),
+  });
+  outputFailures.push(...scan.failures);
+
   // Source tier: the external recorded source. A missing source root is
   // reported as `unavailable` (expected for a relocated pack) instead of a
   // wall of missing-file failures.
@@ -245,6 +256,7 @@ export async function verifySourceTruthDocsManifest(
     failures: [...outputFailures, ...sourceFailures],
     outputs,
     source: sourceTier,
+    ...(scan.unmanagedFiles.length > 0 ? { unmanagedFiles: scan.unmanagedFiles } : {}),
   };
 }
 

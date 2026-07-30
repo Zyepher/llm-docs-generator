@@ -92,7 +92,7 @@ Now your agent reads the v3 pack from disk and writes a real v3 `tailwind.config
 llm-docs verify  --output-dir ./agent-docs/tailwind-v3   # confirm the pack still matches its manifest
 ```
 
-`verify` re-hashes every file against the manifest and tells you, deterministically, whether the pack still matches what was generated. Two commands keep a pack trustworthy: `verify` catches drift or corruption, and `llm-docs refresh` rebuilds a pack from the exact source recorded in its manifest. When the upstream docs change, your agent re-fetches that source and regenerates; `refresh` on its own is a deterministic rebuild from what's already recorded.
+`verify` re-hashes every file the manifest lists, reports any file in the pack it does not cover, and tells you, deterministically, whether the pack still matches what was generated. An unlisted file that imitates the tool's own output naming fails verification; anything else unlisted (your agent's own `llm-docs/index.md`, a stray `.DS_Store`) is listed informationally and never fails the pack. Two commands keep a pack trustworthy: `verify` catches drift or corruption, and `llm-docs refresh` rebuilds a pack from the exact source recorded in its manifest. When the upstream docs change, your agent re-fetches that source and regenerates; `refresh` on its own is a deterministic rebuild from what's already recorded.
 
 That is the general path, and it works for almost any library with real docs: your agent finds the right version's source and converts it. A few popular SDKs (Supabase's clients) are wired in as a single `--sdk` command, with no source hunting at all.
 

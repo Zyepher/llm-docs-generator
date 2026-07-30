@@ -39,7 +39,11 @@ import {
   isPositiveInteger,
 } from '../predicates.js';
 import { validateAllowedKeys, validateOptionalStringArray } from '../field-validators.js';
-import { resolveManifestSourcePath, verifyFile } from '../fs-verify.js';
+import {
+  resolveManifestSourcePath,
+  scanManifestDirectoryForUnlistedFiles,
+  verifyFile,
+} from '../fs-verify.js';
 import type { FileCheck } from '../fs-verify.js';
 import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
@@ -263,6 +267,12 @@ export async function verifyDiscoveryReportManifest(
     });
   }
 
+  const scan = await scanManifestDirectoryForUnlistedFiles({
+    manifestPath,
+    listedPaths: fileChecks.map((check) => check.path),
+  });
+  outputFailures.push(...scan.failures);
+
   const outputs: VerifyTierResult = {
     status: outputFailures.length === 0 ? 'passed' : 'failed',
     checkedFiles: fileChecks.length,
@@ -274,6 +284,7 @@ export async function verifyDiscoveryReportManifest(
     checkedFiles: outputs.checkedFiles,
     failures: outputFailures,
     outputs,
+    ...(scan.unmanagedFiles.length > 0 ? { unmanagedFiles: scan.unmanagedFiles } : {}),
   };
 }
 async function verifyDiscoveryReportFile(options: {

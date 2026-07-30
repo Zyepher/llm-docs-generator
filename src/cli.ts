@@ -1679,6 +1679,22 @@ program
 // VERIFY COMMAND
 // ============================================================================
 
+function printUnmanagedFiles(unmanagedFiles: string[] | undefined): void {
+  if (unmanagedFiles === undefined || unmanagedFiles.length === 0) {
+    return;
+  }
+
+  console.log(
+    chalk.gray(
+      '  Unmanaged files (present in the pack directory but not covered by this manifest; informational only, never a failure):'
+    )
+  );
+
+  for (const entry of unmanagedFiles) {
+    console.log(chalk.gray(`    - ${entry}`));
+  }
+}
+
 program
   .command('verify')
   .description(
@@ -1744,6 +1760,7 @@ program
               console.log(chalk.gray(`  - [note] ${note}`));
             }
           }
+          printUnmanagedFiles(result.unmanagedFiles);
 
           const outputsPassed = outputs.status === 'passed';
 
@@ -1798,6 +1815,7 @@ program
 
         console.log(`  Checked files: ${result.checkedFiles}`);
         console.log(`  Failures: ${result.failures.length}`);
+        printUnmanagedFiles(result.unmanagedFiles);
 
         if (result.failures.length > 0) {
           for (const failure of result.failures) {

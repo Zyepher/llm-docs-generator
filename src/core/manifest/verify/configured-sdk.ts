@@ -14,7 +14,12 @@ import {
   CONFIGURED_SDK_PARSER_FORMAT,
   CONFIGURED_SDK_PARSER_NAME,
 } from '../constants.js';
-import { pathExists, resolveManifestSourcePath, verifyFile } from '../fs-verify.js';
+import {
+  pathExists,
+  resolveManifestSourcePath,
+  scanManifestDirectoryForUnlistedFiles,
+  verifyFile,
+} from '../fs-verify.js';
 import type { FileCheck } from '../fs-verify.js';
 import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
@@ -181,6 +186,12 @@ export async function verifyConfiguredSdkManifest(
     await verifyFile(check, outputFailures);
   }
 
+  const scan = await scanManifestDirectoryForUnlistedFiles({
+    manifestPath,
+    listedPaths: [...sourceChecks, ...outputChecks].map((check) => check.path),
+  });
+  outputFailures.push(...scan.failures);
+
   // Source tier: the recorded spec file. A missing spec is reported as
   // `unavailable` (expected for a relocated pack); a present spec that fails
   // its hash check is a real failure.
@@ -217,6 +228,7 @@ export async function verifyConfiguredSdkManifest(
     failures: [...outputFailures, ...sourceFailures],
     outputs,
     source: sourceTier,
+    ...(scan.unmanagedFiles.length > 0 ? { unmanagedFiles: scan.unmanagedFiles } : {}),
   };
 }
 function validateConfiguredSdkMetadata(sdk: Record<string, unknown>, failures: string[]): void {

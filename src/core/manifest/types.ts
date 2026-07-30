@@ -80,6 +80,12 @@ export interface VerifyGenerationManifestResult {
   // source-verification-local-evidence).
   outputs?: VerifyTierResult;
   source?: VerifyTierResult;
+  // Files found in the pack directory that the manifest does not cover and
+  // that do not match the tool's own output naming (for example an agent's
+  // own llm-docs/index.md nav aid, or .DS_Store). Informational only: never a
+  // failure, never hashed. Sorted by code unit and bounded to 20 entries plus
+  // a trailing "+N more" marker.
+  unmanagedFiles?: string[];
   // Non-fatal verifier notes (e.g. a provenance cross-check skipped because the
   // output header predates provenance stamping). Never affect the exit code.
   notes?: string[];

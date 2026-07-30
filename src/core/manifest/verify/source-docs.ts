@@ -61,6 +61,7 @@ import {
   hasEmptyOrParentPathSegment,
   isUrlLikePath,
   pathExists,
+  scanManifestDirectoryForUnlistedFiles,
   verifyFile,
   verifyPathType,
 } from '../fs-verify.js';
@@ -371,6 +372,15 @@ export async function verifySourceDocsManifest(
     notes,
   });
 
+  // Pack-directory scan: an unlisted file in the pack that matches the tool's
+  // own output naming can masquerade as verified content (outputs-tier
+  // failure); every other unlisted file is reported informationally.
+  const scan = await scanManifestDirectoryForUnlistedFiles({
+    manifestPath,
+    listedPaths: [...outputChecks, ...sourceChecks].map((check) => check.path),
+  });
+  outputFailures.push(...scan.failures);
+
   // Source tier: the external recorded source. A missing source root is reported
   // as `unavailable` (expected for a relocated pack) instead of a wall of
   // missing-file failures.
@@ -423,6 +433,7 @@ export async function verifySourceDocsManifest(
     failures: [...outputFailures, ...sourceFailures],
     outputs,
     source: sourceTier,
+    ...(scan.unmanagedFiles.length > 0 ? { unmanagedFiles: scan.unmanagedFiles } : {}),
     ...(notes.length > 0 ? { notes } : {}),
   };
 }

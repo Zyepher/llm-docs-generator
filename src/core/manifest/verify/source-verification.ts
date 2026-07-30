@@ -26,7 +26,11 @@ import {
   SOURCE_VERIFICATION_SUMMARY_FIELDS,
 } from '../constants.js';
 import { isInsideDirectory, isSourceTruthSourceType } from '../predicates.js';
-import { resolveManifestSourcePath, verifyFile } from '../fs-verify.js';
+import {
+  resolveManifestSourcePath,
+  scanManifestDirectoryForUnlistedFiles,
+  verifyFile,
+} from '../fs-verify.js';
 import type { FileCheck } from '../fs-verify.js';
 import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
@@ -204,6 +208,12 @@ export async function verifySourceVerificationManifest(
     });
   }
 
+  const scan = await scanManifestDirectoryForUnlistedFiles({
+    manifestPath,
+    listedPaths: fileChecks.map((check) => check.path),
+  });
+  outputFailures.push(...scan.failures);
+
   const outputs: VerifyTierResult = {
     status: outputFailures.length === 0 ? 'passed' : 'failed',
     checkedFiles: fileChecks.length,
@@ -215,6 +225,7 @@ export async function verifySourceVerificationManifest(
     checkedFiles: outputs.checkedFiles,
     failures: outputFailures,
     outputs,
+    ...(scan.unmanagedFiles.length > 0 ? { unmanagedFiles: scan.unmanagedFiles } : {}),
   };
 }
 function validateSourceVerificationEndpoint(
