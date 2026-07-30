@@ -41,7 +41,7 @@ import {
 import { validateAllowedKeys, validateOptionalStringArray } from '../field-validators.js';
 import { resolveManifestSourcePath, verifyFile } from '../fs-verify.js';
 import type { FileCheck } from '../fs-verify.js';
-import type { VerifyGenerationManifestResult } from '../types.js';
+import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
 import { validateRequiredInputProvenance } from '../provenance.js';
 import { validateRequiredArtifactSummary } from '../artifact-summary.js';
@@ -221,16 +221,26 @@ export async function verifyDiscoveryReportManifest(
     allowedKinds: DISCOVERY_REPORT_GENERATED_OUTPUT_KINDS,
   });
 
-  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
+  // A malformed manifest cannot be integrity-checked: structural failures block
+  // every filesystem check and no tier is reported.
+  if (failures.length > 0) {
+    return {
+      manifestPath,
+      checkedFiles: 0,
+      failures,
+    };
+  }
 
-  if (failures.length === 0) {
-    for (const check of fileChecks) {
-      await verifyFile(check, failures);
-    }
+  // Outputs tier only: this mode records no source-side hash checks, so the
+  // discovery report IS the entire verification.
+  const outputFailures: string[] = [];
+
+  for (const check of fileChecks) {
+    await verifyFile(check, outputFailures);
   }
 
   if (
-    failures.length === 0 &&
+    outputFailures.length === 0 &&
     isDiscoveryReportKind(discoveryKind) &&
     isNonEmptyString(reportPath) &&
     !isAbsolute(reportPath)
@@ -249,14 +259,21 @@ export async function verifyDiscoveryReportManifest(
       reportPath: resolve(manifestDir, reportPath),
       expected: expectedReport,
       candidateEvidenceIndex: candidateEvidenceIndexEntry,
-      failures,
+      failures: outputFailures,
     });
   }
 
+  const outputs: VerifyTierResult = {
+    status: outputFailures.length === 0 ? 'passed' : 'failed',
+    checkedFiles: fileChecks.length,
+    failures: outputFailures,
+  };
+
   return {
     manifestPath,
-    checkedFiles,
-    failures,
+    checkedFiles: outputs.checkedFiles,
+    failures: outputFailures,
+    outputs,
   };
 }
 async function verifyDiscoveryReportFile(options: {

@@ -28,7 +28,7 @@ import {
 import { isInsideDirectory, isSourceTruthSourceType } from '../predicates.js';
 import { resolveManifestSourcePath, verifyFile } from '../fs-verify.js';
 import type { FileCheck } from '../fs-verify.js';
-import type { VerifyGenerationManifestResult } from '../types.js';
+import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
 import { validateRequiredInputProvenance } from '../provenance.js';
 import { validateRequiredArtifactSummary } from '../artifact-summary.js';
@@ -170,15 +170,26 @@ export async function verifySourceVerificationManifest(
     allowedKinds: SOURCE_VERIFICATION_GENERATED_OUTPUT_KINDS,
   });
 
-  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
-
-  if (failures.length === 0) {
-    for (const check of fileChecks) {
-      await verifyFile(check, failures);
-    }
+  // A malformed manifest cannot be integrity-checked: structural failures block
+  // every filesystem check and no tier is reported.
+  if (failures.length > 0) {
+    return {
+      manifestPath,
+      checkedFiles: 0,
+      failures,
+    };
   }
 
-  if (failures.length === 0 && isNonEmptyString(reportPath) && !isAbsolute(reportPath)) {
+  // Outputs tier only: this mode records no source-side hash checks (the
+  // recorded source and docs paths are inputs to the report, not verified
+  // artifacts), so the evidence report IS the entire verification.
+  const outputFailures: string[] = [];
+
+  for (const check of fileChecks) {
+    await verifyFile(check, outputFailures);
+  }
+
+  if (outputFailures.length === 0 && isNonEmptyString(reportPath) && !isAbsolute(reportPath)) {
     await verifySourceVerificationReportFile({
       manifestDir,
       reportPath: resolve(manifestDir, reportPath),
@@ -189,14 +200,21 @@ export async function verifySourceVerificationManifest(
         summary: summary as Record<string, unknown>,
         fileEvidenceIndex,
       },
-      failures,
+      failures: outputFailures,
     });
   }
 
+  const outputs: VerifyTierResult = {
+    status: outputFailures.length === 0 ? 'passed' : 'failed',
+    checkedFiles: fileChecks.length,
+    failures: outputFailures,
+  };
+
   return {
     manifestPath,
-    checkedFiles,
-    failures,
+    checkedFiles: outputs.checkedFiles,
+    failures: outputFailures,
+    outputs,
   };
 }
 function validateSourceVerificationEndpoint(

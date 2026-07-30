@@ -71,10 +71,13 @@ export interface VerifyGenerationManifestResult {
   manifestPath: string;
   checkedFiles: number;
   failures: string[];
-  // Two-tier integrity result populated by the local-source-docs verifier:
-  // `outputs` covers the self-contained generated pack (always hash-checked),
-  // `source` covers the external recorded source (may be unavailable for a
-  // relocated pack). Other manifest modes leave these undefined.
+  // Two-tier integrity result: `outputs` covers the self-contained generated
+  // pack (always hash-checked, even when the recorded source is missing or
+  // fails), `source` covers the external recorded source (may be unavailable
+  // for a relocated pack). `outputs` is undefined only when the manifest is
+  // too malformed to integrity-check; `source` additionally stays undefined
+  // for modes that record no source-side checks (discovery-report,
+  // source-verification-local-evidence).
   outputs?: VerifyTierResult;
   source?: VerifyTierResult;
   // Non-fatal verifier notes (e.g. a provenance cross-check skipped because the

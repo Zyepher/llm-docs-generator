@@ -11,26 +11,14 @@ import { errorMessage, isFileNotFoundError } from '../../utils/guards.js';
 import { isParentRelativePath } from '../../utils/fs-path.js';
 import { sha256File } from '../../utils/hash.js';
 import { isInsideDirectory } from './predicates.js';
-import type { VerifyGenerationManifestResult } from './types.js';
 
-export async function runFileChecks(
-  manifestPath: string,
-  failures: string[],
-  fileChecks: FileCheck[]
-): Promise<VerifyGenerationManifestResult> {
-  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
-
-  if (failures.length === 0) {
-    for (const check of fileChecks) {
-      await verifyFile(check, failures);
-    }
+export async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
   }
-
-  return {
-    manifestPath,
-    checkedFiles,
-    failures,
-  };
 }
 
 export async function describeFile(path: string): Promise<{ byteSize: number; hash: string }> {

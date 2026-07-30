@@ -2,7 +2,7 @@
  * Verifier and validators for source-docs manifests.
  */
 
-import { lstat, open } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve, win32 } from 'node:path';
 
 import {
@@ -60,6 +60,7 @@ import {
   describeFile,
   hasEmptyOrParentPathSegment,
   isUrlLikePath,
+  pathExists,
   verifyFile,
   verifyPathType,
 } from '../fs-verify.js';
@@ -633,14 +634,6 @@ function firstGitSegmentMarker(systemContent: string): { index: number } | undef
   return { index: Math.min(...candidates) };
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 interface SourceDocsParserPluginRecord {
   manifestPath: string;
   resolvedManifestPath: string;
