@@ -3,16 +3,12 @@
  *
  * Performance optimizations:
  * - String concatenation using array join (O(n) vs O(n²) with +=)
- * - Streaming writes for large outputs
  * - Lazy computation (only format what's needed)
  * - Efficient regex operations (compile once, reuse)
  * - Minimal string allocations
  */
 
-import { createWriteStream } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
+import { mkdir } from 'node:fs/promises';
 
 import type { ConfigLoader } from '../config/loader.js';
 import type { CategoryConfig, SDKVersionConfig } from '../config/schemas.js';
@@ -26,6 +22,7 @@ import {
   type SpecData,
 } from './models.js';
 import { warn } from '../utils/logger.js';
+import { writeTextFileSafely } from '../utils/safe-write.js';
 
 // ============================================================================
 // CONSTANTS (Compile once, reuse)
@@ -368,7 +365,7 @@ export class LLMFormatter {
     const filename = `${this.versionConfig.output.filenamePrefix}-${categoryName}-llms.txt`;
     const filepath = `${outputDir}/${filename}`;
 
-    await writeFile(filepath, content, 'utf-8');
+    await writeTextFileSafely(filepath, content);
 
     return filepath;
   }
@@ -376,8 +373,6 @@ export class LLMFormatter {
   /**
    * Generate full combined documentation
    * Performance: O(n) where n = total content size
-   *
-   * Optimization: For large outputs, uses streaming
    */
   private async generateFullDoc(
     outputDir: string,
@@ -426,29 +421,14 @@ export class LLMFormatter {
       }
     }
 
-    // For very large content, use streaming (threshold: 10MB)
+    // The full content is already materialized in memory, so streaming offers
+    // no memory benefit. Write atomically (temp file + fsync + rename,
+    // symlink-refusing) so a crash mid-write cannot truncate the output and a
+    // pre-existing symlink at the path is never followed.
     const fullContent = contentParts.join('');
-
-    if (fullContent.length > 10 * 1024 * 1024) {
-      // Stream for large files (> 10MB)
-      await this.writeFileStream(filepath, fullContent);
-    } else {
-      // Direct write for smaller files
-      await writeFile(filepath, fullContent, 'utf-8');
-    }
+    await writeTextFileSafely(filepath, fullContent);
 
     return filepath;
-  }
-
-  /**
-   * Stream large file writes for memory efficiency
-   * Performance: O(n) but with constant memory usage
-   */
-  private async writeFileStream(filepath: string, content: string): Promise<void> {
-    const readable = Readable.from([content]);
-    const writable = createWriteStream(filepath, { encoding: 'utf-8' });
-
-    await pipeline(readable, writable);
   }
 }
 
