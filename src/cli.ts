@@ -1474,8 +1474,11 @@ program
               versionConfig.spec.format
             );
 
-            // Parse spec
-            const parser = new OpenRefParser(specPath);
+            // Parse spec, recording the catalog-declared code language on the
+            // parsed data: configuration from config/sdks.json, never a guess.
+            const parser = new OpenRefParser(specPath, {
+              declaredLanguage: config.getSDK(sdkName).language,
+            });
             const parsedData = await parser.parse();
 
             // Save parsed JSON using resolved version

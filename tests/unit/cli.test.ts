@@ -7477,7 +7477,9 @@ describe('CLI compatibility behavior', () => {
       `<!-- Generated from: ${join(configDir, 'supabase_swift_v2.yml')} -->`
     );
     expect(fullDoc).not.toContain('<!-- Generated from:  -->');
-    expect(fullDoc).toContain('<!-- SDK: swift, Version: v2, Generated: ');
+    expect(fullDoc).toContain('<!-- SDK: swift, Version: v2 -->');
+    // Determinism: no generation date stamp may appear in output content.
+    expect(fullDoc).not.toContain('Generated: ');
     expect(fullDoc).toContain('## 1. Database');
     expect(fullDoc).toContain('### 1.1. Select data');
     expect(fullDoc).toContain('#### 1.1.1. Basic select');

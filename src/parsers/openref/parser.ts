@@ -28,7 +28,10 @@ import {
 // ============================================================================
 
 export class OpenRefParser {
-  constructor(private readonly specPath: string) {}
+  constructor(
+    private readonly specPath: string,
+    private readonly options?: { declaredLanguage?: string }
+  ) {}
 
   /**
    * Parse OpenRef YAML specification
@@ -63,8 +66,9 @@ export class OpenRefParser {
     const functions = Array.isArray(specRecord.functions) ? specRecord.functions : [];
     const operations = this.parseOperations(functions);
 
-    // Create optimized SpecData with cached lookups
-    return createSpecData(info, operations);
+    // Create optimized SpecData with cached lookups. The declared language is
+    // caller-supplied configuration (the SDK catalog entry), not spec content.
+    return createSpecData(info, operations, this.options?.declaredLanguage);
   }
 
   /**

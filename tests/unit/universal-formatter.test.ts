@@ -117,6 +117,28 @@ describe('UniversalFormatter', () => {
     );
   });
 
+  it('emits a date-free metadata header so repeated runs are byte-identical', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'llm-docs-formatter-metadata-'));
+    tempDirs.push(outputDir);
+
+    const metadata = new Map<string, unknown>([['format', 'openref']]);
+    const root = createDocNode(DocNodeType.ROOT, 'root', 'Metadata Docs', {
+      metadata,
+      children: [
+        createDocNode(DocNodeType.SECTION, 'intro', 'Intro', {
+          content: [createContentBlock(ContentBlockType.PROSE, 'Intro content.')],
+        }),
+      ],
+    });
+
+    // includeMetadata defaults to true; the header must carry the format only.
+    await formatDocNode(root, { outputDir, filenamePrefix: 'docs' });
+    const output = await readFile(join(outputDir, 'docs-full-llms.txt'), 'utf-8');
+
+    expect(output).toContain('<!-- Format: openref -->');
+    expect(output).not.toContain('Generated: ');
+  });
+
   it('fences code containing triple backticks with a longer fence (regression)', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'llm-docs-formatter-fence-'));
     tempDirs.push(outputDir);

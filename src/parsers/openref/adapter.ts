@@ -49,7 +49,9 @@ export function openRefToDocNode(specData: SpecData, categoryMap?: Map<string, s
     root.children = convertWithCategories(specData, categoryMap);
   } else {
     // Otherwise, treat each operation as a top-level section
-    root.children = specData.operations.map((op) => convertOperation(op));
+    root.children = specData.operations.map((op) =>
+      convertOperation(op, specData.declaredLanguage)
+    );
   }
 
   return root;
@@ -84,7 +86,7 @@ function convertWithCategories(specData: SpecData, categoryMap: Map<string, stri
 
     // Create category node
     const categoryNode = createDocNode(DocNodeType.CATEGORY, categoryName, categoryName, {
-      children: operations.map((op) => convertOperation(op)),
+      children: operations.map((op) => convertOperation(op, specData.declaredLanguage)),
     });
 
     categoryNodes.push(categoryNode);
@@ -99,15 +101,16 @@ function convertWithCategories(specData: SpecData, categoryMap: Map<string, stri
  * Performance: O(k) where k = number of examples
  *
  * @param operation - OpenRef operation
+ * @param declaredLanguage - Code language declared by the SDK catalog, if any
  * @returns DocNode representing the operation
  */
-export function convertOperation(operation: Operation): DocNode {
+export function convertOperation(operation: Operation, declaredLanguage?: string): DocNode {
   const metadata = new Map<string, unknown>();
   metadata.set('operationId', operation.id);
   metadata.set('notes', operation.notes);
 
   // Convert examples to child nodes
-  const children = operation.examples.map((example) => convertExample(example));
+  const children = operation.examples.map((example) => convertExample(example, declaredLanguage));
 
   // Add description as prose content if present
   const content: ContentBlock[] = [];
@@ -132,9 +135,10 @@ export function convertOperation(operation: Operation): DocNode {
  * Performance: O(1)
  *
  * @param example - OpenRef example
+ * @param declaredLanguage - Code language declared by the SDK catalog, if any
  * @returns DocNode representing the example
  */
-export function convertExample(example: Example): DocNode {
+export function convertExample(example: Example, declaredLanguage?: string): DocNode {
   const metadata = new Map<string, unknown>();
   metadata.set('exampleId', example.id);
   metadata.set('isSpotlight', example.isSpotlight);
@@ -146,11 +150,16 @@ export function convertExample(example: Example): DocNode {
     content.push(createContentBlock(ContentBlockType.PROSE, example.description));
   }
 
-  // Add code block
+  // Add code block. The fence language is the SDK catalog's declared language
+  // when one was recorded on the SpecData; otherwise the fence is emitted
+  // untagged (empty info string). The engine never guesses a language from
+  // code content.
   if (example.code) {
-    // Try to infer language from code content or use generic
-    const language = inferLanguage(example.code);
-    content.push(createContentBlock(ContentBlockType.CODE, example.code, { language }));
+    content.push(
+      createContentBlock(ContentBlockType.CODE, example.code, {
+        language: declaredLanguage ?? '',
+      })
+    );
   }
 
   // Add SQL schema as data block if present
@@ -178,46 +187,4 @@ export function convertExample(example: Example): DocNode {
     content,
     metadata,
   });
-}
-
-/**
- * Infer programming language from code content
- *
- * Simple heuristics - can be enhanced
- *
- * @param code - Code snippet
- * @returns Language identifier
- */
-function inferLanguage(code: string): string {
-  // Check more-specific markers first. Swift is checked before JavaScript so
-  // `let x: Int = ...` is not misread as JS (both use `let`), and Python is
-  // detected via `from X import Y` so a JS/TS ESM `import X from '...'` is not
-  // misread as Python.
-  if (code.includes('func ') || (code.includes('let ') && code.includes(':'))) {
-    return 'swift';
-  }
-  if (code.includes('def ') || /\bfrom\s+\S+\s+import\b/.test(code)) {
-    return 'python';
-  }
-  if (code.includes('public class') || code.includes('private val')) {
-    return 'kotlin';
-  }
-  if ((code.includes('class ') && code.includes('{')) || code.includes('using ')) {
-    return 'csharp';
-  }
-  if (code.includes('void ') || code.includes('Future<')) {
-    return 'dart';
-  }
-  if (
-    code.includes('const ') ||
-    code.includes('let ') ||
-    code.includes('async ') ||
-    code.includes('=>') ||
-    /\bimport\b[\s\S]*\bfrom\b/.test(code)
-  ) {
-    return 'javascript';
-  }
-
-  // Default to generic code
-  return 'code';
 }
