@@ -40,8 +40,10 @@ async function buildRepo(): Promise<{ repo: string; docs: string }> {
       '',
       'Set up a [server route](./server-routes) and read the',
       '[Installation with Vite](../installation/with-vite) guide. See the',
-      '[API](../api/router#createlink) for details, plus a [shared helper](../../shared/util).',
-      'A [dead link](./does-not-exist) and a',
+      '[API](../api/router#createlink) for details, plus a [shared helper](../../shared/util)',
+      'and the [shared helper doc](../../shared/util.md).',
+      'A [dead link](./does-not-exist), a [dead md link](./does-not-exist.md), an',
+      '[escaping link](../../../outside-repo.md), and a',
       '[site route](/router/latest/docs/guide/preloading) stay unrewritten.',
       '',
     ].join('\n'),
@@ -91,7 +93,7 @@ describe('extension-less link rewriting (integration)', () => {
     expect(full).toContain('[API](pack:api/router.md#createlink)');
   });
 
-  it('pins an on-disk out-of-pack extension-less target to a github blob url', async () => {
+  it('pins on-disk out-of-pack targets (extension-less and explicit .md) to blob urls', async () => {
     const { docs } = await buildRepo();
     const gitContext: GenerateSourceGitContext = {
       remoteUrl: 'git@github.com:acme/widget.git',
@@ -105,6 +107,9 @@ describe('extension-less link rewriting (integration)', () => {
     expect(full).toContain(
       '[shared helper](https://github.com/acme/widget/blob/deadbeef/shared/util.md)'
     );
+    expect(full).toContain(
+      '[shared helper doc](https://github.com/acme/widget/blob/deadbeef/shared/util.md)'
+    );
   });
 
   it('counts every unrewritten doc cross-reference with an honest per-class breakdown', async () => {
@@ -116,22 +121,30 @@ describe('extension-less link rewriting (integration)', () => {
       dirty: false,
       sourceRootFromRepo: 'docs',
     };
-    const { warnings } = await generate(docs, { gitContext });
+    const { full, warnings } = await generate(docs, { gitContext });
 
-    // Only two links stay unrewritten: the /router/latest site route and the
-    // ./does-not-exist dead relative. The warning must count BOTH, by class.
+    // Four links stay unrewritten: the /router/latest site route, the two dead
+    // relatives (extension-less and explicit .md), and the repo-escaping .md.
+    // The warning must count ALL of them, by class.
     const warning = warnings.find((w) => w.includes('unrewritten'));
     expect(warning).toBeDefined();
-    expect(warning).toContain('Left 2 doc cross-reference(s) unrewritten');
+    expect(warning).toContain('Left 4 doc cross-reference(s) unrewritten');
     expect(warning).toContain('1 site-absolute');
-    expect(warning).toContain('1 unresolvable relative');
+    expect(warning).toContain('3 unresolvable relative');
+    // Neither dead nor escaping target may be guessed into a blob url.
+    expect(full).not.toContain('blob/deadbeef/docs/guide/does-not-exist.md');
+    expect(full).not.toContain('blob/deadbeef/../outside-repo.md');
+    expect(full).toContain('[dead md link](./does-not-exist.md)');
+    expect(full).toContain('[escaping link](../../../outside-repo.md)');
   });
 
-  it('leaves the site-absolute and dead relative links unrewritten in the body', async () => {
+  it('leaves the site-absolute, dead, and escaping links unrewritten in the body', async () => {
     const { docs } = await buildRepo();
     const { full } = await generate(docs);
 
     expect(full).toContain('[dead link](./does-not-exist)');
+    expect(full).toContain('[dead md link](./does-not-exist.md)');
+    expect(full).toContain('[escaping link](../../../outside-repo.md)');
     expect(full).toContain('[site route](/router/latest/docs/guide/preloading)');
   });
 });

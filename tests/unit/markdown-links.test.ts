@@ -15,9 +15,7 @@ interface Spies {
   nonGithub: number;
 }
 
-function makeContext(
-  overrides: Partial<LinkRewriteContext> & { spies?: Spies } = {}
-): {
+function makeContext(overrides: Partial<LinkRewriteContext> & { spies?: Spies } = {}): {
   context: LinkRewriteContext;
   spies: Spies;
 } {
@@ -195,8 +193,20 @@ describe('rewriteProseLinks relative links', () => {
     );
   });
 
-  it('leaves an out-of-pack relative link unchanged and counts it without git context', () => {
+  it('counts an out-of-pack relative .md link as unresolvable when no probe exists', () => {
+    // No fileExistsInRepo oracle: the target is unprovable, so it is counted
+    // (not pinned, whether or not git context is present).
     const { context, spies } = makeContext();
+    expect(rewriteProseLinks('see [x](../../outside/thing.md)', context)).toBe(
+      'see [x](../../outside/thing.md)'
+    );
+    expect(spies.unrewritten).toEqual(['unresolvable-relative']);
+  });
+
+  it('counts an on-disk out-of-pack .md link as no-git-context when git is absent', () => {
+    const { context, spies } = makeContext({
+      fileExistsInRepo: (relpath) => relpath === '../outside/thing.md',
+    });
     expect(rewriteProseLinks('see [x](../../outside/thing.md)', context)).toBe(
       'see [x](../../outside/thing.md)'
     );
@@ -324,7 +334,11 @@ describe('rewriteRelativeMarkdownUrl extension-less unresolvable + on-disk', () 
       currentRelpath: 'guide/intro.md',
       packRelpaths: new Set(['guide/intro.md']),
       linkDefinitions: new Map(),
-      gitContext: { remoteUrl: 'git@github.com:acme/widget.git', commit: 'c0ffee', sourceRootFromRepo: 'docs' },
+      gitContext: {
+        remoteUrl: 'git@github.com:acme/widget.git',
+        commit: 'c0ffee',
+        sourceRootFromRepo: 'docs',
+      },
       fileExistsInRepo: (relpath) => {
         seen.push(relpath);
         return relpath === '../shared/util.md';
@@ -354,7 +368,11 @@ describe('rewriteRelativeMarkdownUrl extension-less unresolvable + on-disk', () 
       currentRelpath: 'guide/intro.md',
       packRelpaths: new Set(['guide/intro.md']),
       linkDefinitions: new Map(),
-      gitContext: { remoteUrl: 'git@gitlab.com:acme/widget.git', commit: 'c0ffee', sourceRootFromRepo: 'docs' },
+      gitContext: {
+        remoteUrl: 'git@gitlab.com:acme/widget.git',
+        commit: 'c0ffee',
+        sourceRootFromRepo: 'docs',
+      },
       fileExistsInRepo: (relpath) => relpath === '../shared/util.md',
     });
     expect(rewriteRelativeMarkdownUrl('../../shared/util', context)).toBeUndefined();
@@ -388,25 +406,102 @@ describe('rewriteRelativeMarkdownUrl external targets', () => {
     commit: 'abc123',
     sourceRootFromRepo: 'docs',
   });
+  const outsideExists = (relpath: string) => relpath === '../outside/thing.md';
 
-  it('pins an out-of-pack target to a github blob url from an ssh remote', () => {
-    const { context } = makeContext({ gitContext: git('git@github.com:acme/widget.git') });
+  it('pins an on-disk out-of-pack target to a github blob url from an ssh remote', () => {
+    const { context } = makeContext({
+      gitContext: git('git@github.com:acme/widget.git'),
+      fileExistsInRepo: outsideExists,
+    });
     expect(rewriteRelativeMarkdownUrl('../../outside/thing.md#a', context)).toBe(
       'https://github.com/acme/widget/blob/abc123/outside/thing.md#a'
     );
   });
 
-  it('pins an out-of-pack target to a github blob url from an https remote', () => {
-    const { context } = makeContext({ gitContext: git('https://github.com/acme/widget') });
+  it('pins an on-disk out-of-pack target to a github blob url from an https remote', () => {
+    const { context } = makeContext({
+      gitContext: git('https://github.com/acme/widget'),
+      fileExistsInRepo: outsideExists,
+    });
     expect(rewriteRelativeMarkdownUrl('../../outside/thing.md', context)).toBe(
       'https://github.com/acme/widget/blob/abc123/outside/thing.md'
     );
   });
 
   it('leaves a non-github remote unchanged and reports it', () => {
-    const { context, spies } = makeContext({ gitContext: git('git@gitlab.com:acme/widget.git') });
+    const { context, spies } = makeContext({
+      gitContext: git('git@gitlab.com:acme/widget.git'),
+      fileExistsInRepo: outsideExists,
+    });
     expect(rewriteRelativeMarkdownUrl('../../outside/thing.md', context)).toBeUndefined();
     expect(spies.nonGithub).toBe(1);
+  });
+
+  it('does not pin a dead .md target and counts it as unresolvable', () => {
+    // Regression: a dead explicit .md target used to be pinned to a confident
+    // blob URL for a file that does not exist (a fabricated citation).
+    const { context, spies } = makeContext({
+      gitContext: git('git@github.com:acme/widget.git'),
+      fileExistsInRepo: () => false,
+    });
+    expect(rewriteRelativeMarkdownUrl('./does-not-exist.md', context)).toBeUndefined();
+    expect(spies.unrewritten).toEqual(['unresolvable-relative']);
+    expect(spies.nonGithub).toBe(0);
+  });
+
+  it('leaves a dead .md link unchanged in prose and never invents a blob url', () => {
+    const { context, spies } = makeContext({
+      gitContext: git('git@github.com:acme/widget.git'),
+      fileExistsInRepo: () => false,
+    });
+    expect(rewriteProseLinks('a [gone](./does-not-exist.md) link', context)).toBe(
+      'a [gone](./does-not-exist.md) link'
+    );
+    expect(spies.unrewritten).toEqual(['unresolvable-relative']);
+  });
+
+  it('does not pin an out-of-pack .md target when no existence probe is available', () => {
+    // Relocated pack / configured-SDK path: no repo on disk, so existence is
+    // unprovable and the link must be counted, not pinned.
+    const { context, spies } = makeContext({ gitContext: git('git@github.com:acme/widget.git') });
+    expect(rewriteRelativeMarkdownUrl('../../outside/thing.md', context)).toBeUndefined();
+    expect(spies.unrewritten).toEqual(['unresolvable-relative']);
+  });
+
+  it('does not probe the repo for an in-pack .md target', () => {
+    let probed = false;
+    const { context } = makeContext({
+      gitContext: git('git@github.com:acme/widget.git'),
+      fileExistsInRepo: () => {
+        probed = true;
+        return true;
+      },
+    });
+    expect(rewriteRelativeMarkdownUrl('../api/router.md', context)).toBe('pack:api/router.md');
+    expect(probed).toBe(false);
+  });
+
+  it('never builds a blob url for a .md target that escapes the repo root', () => {
+    // Even a permissive oracle must not leak a repo-escaping path into a URL:
+    // sourceRootFromRepo is `docs`, so this normalizes above the repo root.
+    const { context, spies } = makeContext({
+      gitContext: git('git@github.com:acme/widget.git'),
+      fileExistsInRepo: () => true,
+    });
+    expect(rewriteRelativeMarkdownUrl('../../../../etc/passwd.md', context)).toBeUndefined();
+    expect(spies.unrewritten).toEqual(['unresolvable-relative']);
+    expect(spies.nonGithub).toBe(0);
+  });
+
+  it('never builds a blob url for an extension-less target that escapes the repo root', () => {
+    const { context, spies } = makeContext({
+      linkDefinitions: new Map(),
+      gitContext: git('git@github.com:acme/widget.git'),
+      fileExistsInRepo: () => true,
+    });
+    expect(rewriteRelativeMarkdownUrl('../../../../etc/passwd', context)).toBeUndefined();
+    expect(spies.unrewritten).toEqual(['unresolvable-relative']);
+    expect(spies.nonGithub).toBe(0);
   });
 
   it('leaves absolute and non-markdown targets alone', () => {

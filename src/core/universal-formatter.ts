@@ -146,8 +146,7 @@ export class UniversalFormatter {
     const siteAbsolute = this.unrewrittenLinkCounts['site-absolute'];
     const unresolvableRelative = this.unrewrittenLinkCounts['unresolvable-relative'];
     const noGitContext = this.unrewrittenLinkCounts['no-git-context'];
-    const total =
-      siteAbsolute + unresolvableRelative + noGitContext + this.nonGithubRemoteCount;
+    const total = siteAbsolute + unresolvableRelative + noGitContext + this.nonGithubRemoteCount;
     if (total > 0) {
       const parts: string[] = [];
       if (siteAbsolute > 0) {
@@ -162,9 +161,7 @@ export class UniversalFormatter {
       if (this.nonGithubRemoteCount > 0) {
         parts.push(`${this.nonGithubRemoteCount} non-github remote`);
       }
-      sourcePack.onWarning(
-        `Left ${total} doc cross-reference(s) unrewritten: ${parts.join(', ')}`
-      );
+      sourcePack.onWarning(`Left ${total} doc cross-reference(s) unrewritten: ${parts.join(', ')}`);
     }
   }
 
@@ -484,11 +481,14 @@ export class UniversalFormatter {
   }
 
   /**
-   * Existence oracle for extension-less out-of-pack resolution. Resolves a
-   * source-root-relative candidate to an absolute path and reports whether a
-   * regular file lives there, constrained to within the repo (or, absent git
-   * context, within the source root) so a `../`-escaping target can never probe
-   * arbitrary disk locations or produce a blob URL that escapes the repo.
+   * Existence oracle for out-of-pack resolution, covering every doc target
+   * shape (explicit `.md` and extension-less alike). Resolves a source-root-
+   * relative candidate to an absolute path and reports whether a regular file
+   * lives there, constrained to within the repo (or, absent git context, within
+   * the source root) so a `../`-escaping target can never probe arbitrary disk
+   * locations. Only targets this oracle proves to exist are pinned; the link
+   * rewriter additionally refuses to build a blob URL for any path that
+   * escapes the repo root, independent of this containment.
    */
   private repoFileExists(sourcePack: FormatterSourcePack, relpath: string): boolean {
     const containmentRoot = this.diskContainmentRoot(sourcePack);

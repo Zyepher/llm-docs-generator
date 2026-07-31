@@ -13,9 +13,14 @@ import { isFileNotFoundError } from './guards.js';
  * same containment logic.
  */
 
-/** True when a relative path points at or above its base (`..` or `../...`). */
+/**
+ * True when a relative path points at or above its base (`..` or `../...`).
+ * Accepts both platform-separated input (from `relative()`) and POSIX-separated
+ * input (normalized relpaths such as the link rewriter's); on POSIX platforms
+ * the two prefixes coincide.
+ */
 export function isParentRelativePath(path: string): boolean {
-  return path === '..' || path.startsWith(`..${sep}`);
+  return path === '..' || path.startsWith(`..${sep}`) || path.startsWith('../');
 }
 
 /**

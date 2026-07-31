@@ -15,19 +15,22 @@
  *    `./server-routes`, `../installation/with-vite`, `../api/router#createlink`).
  *    Only `./`, `../`, and bare relative targets are eligible; a target starting
  *    with `/` is a documentation-SITE absolute path (not a repo/pack path) and is
- *    left unchanged (but counted). Eligibility for an extension-less target is
- *    decided by DETERMINISTIC existence, never a guess: the target is resolved
- *    against the linking file's directory and the candidate set
- *    (`<resolved>.md|.mdx|.markdown`, `<resolved>/index.md|.mdx|.markdown`) is
- *    probed against the pack file set and, for out-of-pack targets, the on-disk
- *    repo file set. When a candidate is part of this pack, the link becomes
+ *    left unchanged (but counted). Eligibility for BOTH shapes is decided by
+ *    DETERMINISTIC existence, never a guess: the target is resolved against the
+ *    linking file's directory and its candidate set (the target itself for an
+ *    explicit markdown extension; `<resolved>.md|.mdx|.markdown` and
+ *    `<resolved>/index.md|.mdx|.markdown` for an extension-less route) is probed
+ *    against the pack file set and, for out-of-pack targets, the on-disk repo
+ *    file set. When a candidate is part of this pack, the link becomes
  *    `pack:<target-relpath>` (preserving any `#fragment`), which resolves to the
  *    section whose `[source: ...]` marker matches. When the target is outside the
- *    pack, exists on disk, and a git context is available, it becomes the pinned
- *    permanent blob URL. Otherwise the link is left unchanged and counted, keyed
- *    by class (site-absolute, unresolvable relative, or out-of-pack with no git
- *    context / non-github remote) so the warning can report honest per-class
- *    totals.
+ *    pack, is proven to exist on disk, stays within the repo root, and a git
+ *    context is available, it becomes the pinned permanent blob URL. Otherwise
+ *    the link is left unchanged and counted, keyed by class (site-absolute,
+ *    unresolvable relative, or out-of-pack with no git context / non-github
+ *    remote) so the warning can report honest per-class totals. A blob URL is
+ *    never fabricated for a target that was not proven to exist, and never built
+ *    for a path that escapes the repo root.
  *  - In-page `#anchor` links are intentionally left unchanged. Titles are now
  *    preserved verbatim, so the heading text is directly greppable; a `pack:`
  *    target plus a grep on the heading is the resolution path. This is a known
@@ -42,6 +45,8 @@
  * intact.
  */
 
+import { isParentRelativePath } from '../utils/fs-path.js';
+
 export interface MarkdownLinkGitContext {
   remoteUrl: string | null;
   commit: string;
@@ -54,9 +59,12 @@ export interface MarkdownLinkGitContext {
  *  - `site-absolute`: a leading-`/` documentation-SITE path (never a repo/pack
  *    path, so unrewritable by design).
  *  - `unresolvable-relative`: a relative doc-looking target (`.md` or
- *    extension-less) that resolves to no file in the pack or on disk.
- *  - `no-git-context`: a relative doc-looking target that IS out-of-pack but has
- *    no git context to pin to a permanent blob URL.
+ *    extension-less) that cannot be deterministically resolved to an existing
+ *    file: it misses the pack and the on-disk probe (or no probe is available),
+ *    or it escapes the repo root, where no honest blob URL can exist.
+ *  - `no-git-context`: a relative doc-looking target that IS out-of-pack and
+ *    proven to exist on disk but has no git context to pin to a permanent blob
+ *    URL.
  */
 export type UnrewrittenLinkClass = 'site-absolute' | 'unresolvable-relative' | 'no-git-context';
 
@@ -69,12 +77,13 @@ export interface LinkRewriteContext {
   linkDefinitions: ReadonlyMap<string, string>;
   gitContext?: MarkdownLinkGitContext;
   /**
-   * Existence oracle for extension-less out-of-pack resolution. Given a POSIX
-   * relpath from the source root (which may contain leading `..`), returns true
-   * iff a regular markdown file exists there on disk within the repo. Used ONLY
-   * for extension-less targets that miss the pack file set; explicit `.md`
-   * targets keep the historical no-disk-probe behavior. Absent in pure unit
-   * contexts and for the configured-SDK path, where no local repo is present.
+   * Existence oracle for out-of-pack resolution. Given a POSIX relpath from the
+   * source root (which may contain leading `..`), returns true iff a regular
+   * markdown file exists there on disk within the repo. Used for ANY doc target
+   * (explicit `.md` or extension-less) that misses the pack file set; a target
+   * is only ever pinned to a blob URL after this probe proves it exists. Absent
+   * in pure unit contexts and for the configured-SDK path, where no local repo
+   * is present; an out-of-pack target is then unprovable and stays unrewritten.
    */
   fileExistsInRepo?: (relpathFromSourceRoot: string) => boolean;
   onUnresolvedReference: (label: string) => void;
@@ -511,31 +520,28 @@ export function rewriteRelativeMarkdownUrl(
 
   const baseRelpath = joinPosix(dirnamePosix(context.currentRelpath), pathPart);
 
-  if (targetClass === 'markdown') {
-    // Explicit markdown extension: the base relpath already includes it.
-    if (context.packRelpaths.has(baseRelpath)) {
-      return `pack:${baseRelpath}${fragment}`;
-    }
-    return pinOutOfPackTarget(baseRelpath, fragment, context);
-  }
+  // An explicit markdown extension names its single candidate directly; an
+  // extension-less route expands to the deterministic candidate set. Both
+  // shapes then resolve by the same existence-only rules.
+  const candidates =
+    targetClass === 'markdown'
+      ? [baseRelpath]
+      : extensionlessCandidates(baseRelpath, isDirectoryStyle(pathPart));
 
-  return resolveExtensionlessTarget(baseRelpath, pathPart, fragment, context);
+  return resolveDocTarget(candidates, fragment, context);
 }
 
 /**
- * Resolve an extension-less relative target by DETERMINISTIC existence only.
- * Probes the candidate set (`<base>.md|.mdx|.markdown`, `<base>/index.md|…`)
- * against the pack file set first, then the on-disk repo file set; unresolvable
- * targets are counted, never guessed into a broken link.
+ * Resolve a relative doc target by DETERMINISTIC existence only. Probes the
+ * candidates against the pack file set first, then the on-disk repo file set;
+ * a target with no proven-to-exist candidate is counted, never guessed into a
+ * broken link (and never pinned to a fabricated blob URL).
  */
-function resolveExtensionlessTarget(
-  baseRelpath: string,
-  pathPart: string,
+function resolveDocTarget(
+  candidates: readonly string[],
   fragment: string,
   context: LinkRewriteContext
 ): string | undefined {
-  const candidates = extensionlessCandidates(baseRelpath, isDirectoryStyle(pathPart));
-
   for (const candidate of candidates) {
     if (context.packRelpaths.has(candidate)) {
       return `pack:${candidate}${fragment}`;
@@ -555,9 +561,9 @@ function resolveExtensionlessTarget(
 }
 
 /**
- * Pin an out-of-pack target (already known to exist, or an explicit `.md`
- * target) to its permanent blob URL, or count it when it cannot be pinned (no
- * git context, or a non-github remote).
+ * Pin an out-of-pack target (already proven to exist on disk) to its permanent
+ * blob URL, or count it when it cannot be pinned (no git context, a repo-root
+ * escape, or a non-github remote).
  */
 function pinOutOfPackTarget(
   targetRelpath: string,
@@ -569,7 +575,17 @@ function pinOutOfPackTarget(
     return undefined;
   }
 
-  const blobUrl = buildGithubBlobUrl(context.gitContext, targetRelpath, fragment);
+  const repoRelativePath = joinPosix(context.gitContext.sourceRootFromRepo, targetRelpath);
+  if (isParentRelativePath(repoRelativePath)) {
+    // The normalized path escapes the repo root: no blob URL under this repo
+    // can honestly cite it, whatever an existence oracle claimed. This guard is
+    // independent of the disk probe's own containment so a permissive oracle
+    // can never leak a `../` path into a URL.
+    context.onUnrewrittenLink('unresolvable-relative');
+    return undefined;
+  }
+
+  const blobUrl = buildGithubBlobUrl(context.gitContext, repoRelativePath, fragment);
   if (blobUrl === undefined) {
     context.onNonGithubRemote();
     return undefined;
@@ -606,9 +622,10 @@ function extensionlessCandidates(base: string, directoryStyle: boolean): string[
     : [...fileCandidates, ...indexCandidates];
 }
 
+/** `repoRelativePath` is pre-joined and repo-contained by the caller. */
 function buildGithubBlobUrl(
   gitContext: MarkdownLinkGitContext,
-  targetRelpath: string,
+  repoRelativePath: string,
   fragment: string
 ): string | undefined {
   const repo = parseGithubRemote(gitContext.remoteUrl);
@@ -616,7 +633,6 @@ function buildGithubBlobUrl(
     return undefined;
   }
 
-  const repoRelativePath = joinPosix(gitContext.sourceRootFromRepo, targetRelpath);
   return `https://github.com/${repo.org}/${repo.name}/blob/${gitContext.commit}/${repoRelativePath}${fragment}`;
 }
 

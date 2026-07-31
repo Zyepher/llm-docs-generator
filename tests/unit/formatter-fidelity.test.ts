@@ -142,6 +142,8 @@ describe('formatter fidelity: link handling', () => {
   });
 
   it('pins out-of-pack links to a github blob url when git context is provided', async () => {
+    // The target exists on disk at fixtures/formatter-fidelity/outside/thing.md:
+    // pinning requires the file to be proven to exist, never guessed.
     const gitContext: GenerateSourceGitContext = {
       remoteUrl: 'git@github.com:acme/widget.git',
       commit: 'deadbeef',
