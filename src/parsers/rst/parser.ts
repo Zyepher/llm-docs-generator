@@ -4,6 +4,15 @@
  * This parser intentionally supports a deterministic subset suitable for
  * Python-style docs. It does not execute directives, resolve includes, fetch
  * remote content, or claim full docutils/Sphinx compatibility.
+ *
+ * Inline markup coverage: interpreted-text roles are rendered readably
+ * (code-referencing roles as backticked targets with Sphinx `~` display
+ * semantics, :ref:/:doc: as their link text), `.. |name| replace::` single
+ * line substitution definitions are collected and applied in one pass (a
+ * substitution whose value contains another |ref| is left as-is, no
+ * recursive expansion), and hyperlink references become markdown links when
+ * an http(s) or relative target is known from the same document. URLs are
+ * never invented; unresolved references degrade to their plain text.
  */
 
 import { lstat, readFile } from 'node:fs/promises';
@@ -30,6 +39,14 @@ const DIRECTIVE_PATTERN = /^\s*\.\.\s+([A-Za-z][\w-]*)::\s*(.*)$/;
 // like docutils comments, including their indented continuation block.
 const EXPLICIT_MARKUP_PATTERN = /^\s*\.\.(?:\s|$)/;
 const CODE_DIRECTIVES = new Set(['code-block', 'code']);
+const SUBSTITUTION_DEF_PATTERN = /^\s*\.\.\s+\|([^|]+)\|\s+replace::\s*(.*)$/;
+const HYPERLINK_TARGET_PATTERN = /^\s*\.\.\s+_([^:`]+):\s*(.*)$/;
+// Role names may be domain-prefixed (py:func, c:macro); match through colons
+// and dots, then key behavior off the last segment.
+const ROLE_PATTERN = /:([A-Za-z][\w+.:-]*):`([^`]+)`/g;
+const INLINE_LINK_PATTERN = /`([^`<>]*\S)\s+<([^`<>\s]+)>`__?/g;
+const NAMED_REFERENCE_PATTERN = /`([^`]+)`__?/g;
+const SUBSTITUTION_USE_PATTERN = /\|([^|\s][^|]*)\|/g;
 
 export interface RstDocument {
   path: string;
@@ -83,7 +100,8 @@ export class RstParser {
       [
         'parserDetails',
         {
-          subset: 'underline headings, paragraphs, simple lists, literal blocks, code directives',
+          subset:
+            'underline headings, paragraphs, simple lists, literal blocks, code directives, interpreted-text roles, single-line replace substitutions, hyperlink references',
           unsupportedDirectives:
             'warned and preserved as prose where safe; includes are not executed',
         },
@@ -112,6 +130,8 @@ export class RstParser {
     let title = '';
     let index = 0;
 
+    const inlineContext = collectInlineContext(lines);
+    const render = (text: string): string => renderInlineMarkup(text, inlineContext);
     const currentContent = (): ContentBlock[] => stack.at(-1)?.content ?? rootContent;
 
     while (index < lines.length) {
@@ -123,16 +143,17 @@ export class RstParser {
       const heading = this.readHeading(lines, index);
       if (heading !== null) {
         const level = getOrCreateLevel(sectionLevels, heading.adornment);
+        const headingTitle = render(heading.title);
         if (title === '' && level === 1) {
-          title = heading.title;
+          title = headingTitle;
           index += heading.linesConsumed;
           continue;
         }
 
         const section: RstSection = {
           level,
-          title: heading.title,
-          id: slugifyAscii(heading.title),
+          title: headingTitle,
+          id: slugifyAscii(headingTitle),
           content: [],
           children: [],
         };
@@ -154,7 +175,7 @@ export class RstParser {
 
       const directive = this.readDirective(lines[index] ?? '');
       if (directive !== null) {
-        const parsedDirective = this.parseDirective(lines, index, directive, warnings);
+        const parsedDirective = this.parseDirective(lines, index, directive, warnings, render);
         currentContent().push(...parsedDirective.blocks);
         index = parsedDirective.nextIndex;
         continue;
@@ -169,7 +190,9 @@ export class RstParser {
 
       if (BULLET_PATTERN.test(lines[index] ?? '') || ENUMERATED_PATTERN.test(lines[index] ?? '')) {
         const parsedList = this.parseList(lines, index);
-        currentContent().push(createContentBlock(ContentBlockType.PROSE, parsedList.content));
+        currentContent().push(
+          createContentBlock(ContentBlockType.PROSE, render(parsedList.content))
+        );
         index = parsedList.nextIndex;
         continue;
       }
@@ -183,7 +206,7 @@ export class RstParser {
         // empty code block (and a lone `::` paragraph is dropped entirely).
         const prose = paragraph.content.replace(/::\s*$/, ':').trim();
         if (prose !== '' && prose !== ':') {
-          currentContent().push(createContentBlock(ContentBlockType.PROSE, prose));
+          currentContent().push(createContentBlock(ContentBlockType.PROSE, render(prose)));
         }
         if (literalBody !== '') {
           currentContent().push(
@@ -191,7 +214,9 @@ export class RstParser {
           );
         }
       } else if (paragraph.content !== '') {
-        currentContent().push(createContentBlock(ContentBlockType.PROSE, paragraph.content));
+        currentContent().push(
+          createContentBlock(ContentBlockType.PROSE, render(paragraph.content))
+        );
       }
       index = paragraph.nextIndex;
     }
@@ -265,7 +290,8 @@ export class RstParser {
     lines: string[],
     index: number,
     directive: Directive,
-    warnings: RstParserWarning[]
+    warnings: RstParserWarning[],
+    render: (text: string) => string
   ): { blocks: ContentBlock[]; nextIndex: number } {
     const body = this.readIndentedBody(lines, index + 1);
 
@@ -295,7 +321,7 @@ export class RstParser {
     const content =
       directive.name === 'include'
         ? message
-        : [message, directive.argument, safeBody].filter(Boolean).join('\n');
+        : [message, render(directive.argument), render(safeBody)].filter(Boolean).join('\n');
 
     return {
       blocks: [createContentBlock(ContentBlockType.PROSE, content)],
@@ -446,6 +472,106 @@ export class RstParser {
       metadata: new Map([['level', section.level]]),
     });
   }
+}
+
+interface InlineContext {
+  substitutions: Map<string, string>;
+  linkTargets: Map<string, string>;
+}
+
+function collectInlineContext(lines: string[]): InlineContext {
+  const substitutions = new Map<string, string>();
+  const linkTargets = new Map<string, string>();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+
+    const substitution = line.match(SUBSTITUTION_DEF_PATTERN);
+    if (substitution?.[1] !== undefined) {
+      substitutions.set(substitution[1].trim(), (substitution[2] ?? '').trim());
+      continue;
+    }
+
+    const target = line.match(HYPERLINK_TARGET_PATTERN);
+    if (target?.[1] !== undefined) {
+      let url = (target[2] ?? '').trim();
+      if (url === '') {
+        // Docutils allows the URL on the next indented line.
+        const next = lines[index + 1] ?? '';
+        if (!isBlank(next) && countIndent(next) > countIndent(line)) {
+          url = next.trim();
+        }
+      }
+      // Skip anchors (no URL) and indirect targets (`.. _a: b_`); references
+      // to them degrade to plain text at render time.
+      if (url !== '' && !url.endsWith('_')) {
+        linkTargets.set(target[1].trim().toLowerCase(), url);
+      }
+    }
+  }
+
+  return { substitutions, linkTargets };
+}
+
+function renderInlineMarkup(text: string, context: InlineContext): string {
+  // Split out ``inline literals`` so their contents are never rewritten.
+  return text
+    .split(/(``[^`]+``)/)
+    .map((segment) =>
+      segment.startsWith('``') && segment.endsWith('``')
+        ? segment
+        : renderInlineSegment(segment, context)
+    )
+    .join('');
+}
+
+function renderInlineSegment(text: string, context: InlineContext): string {
+  let result = text.replace(
+    SUBSTITUTION_USE_PATTERN,
+    (whole, name: string) => context.substitutions.get(name.trim()) ?? whole
+  );
+
+  result = result.replace(ROLE_PATTERN, (_whole, roleName: string, target: string) => {
+    const role = roleName.split(':').at(-1)?.toLowerCase() ?? '';
+    const explicit = target.match(/^(.*\S)\s*<([^<>]+)>$/);
+    const label = explicit?.[1]?.trim();
+    const bareTarget = (explicit?.[2] ?? target).trim();
+    if (role === 'ref' || role === 'doc') {
+      // Cross-references carry no resolvable URL here; keep the readable text.
+      return label ?? bareTarget;
+    }
+    if (label !== undefined) {
+      return `\`${label}\``;
+    }
+    // Sphinx `~` display semantics: show only the last dotted segment.
+    const display = bareTarget.startsWith('~')
+      ? (bareTarget.slice(1).split('.').at(-1) ?? bareTarget.slice(1))
+      : bareTarget;
+    return `\`${display}\``;
+  });
+
+  result = result.replace(INLINE_LINK_PATTERN, (_whole, label: string, url: string) =>
+    isRenderableUrl(url) ? `[${label.trim()}](${url})` : label.trim()
+  );
+
+  result = result.replace(NAMED_REFERENCE_PATTERN, (_whole, label: string) => {
+    const url = context.linkTargets.get(label.trim().toLowerCase());
+    return url !== undefined && isRenderableUrl(url) ? `[${label.trim()}](${url})` : label.trim();
+  });
+
+  return result;
+}
+
+function isRenderableUrl(url: string): boolean {
+  if (/\s/.test(url)) {
+    return false;
+  }
+  if (/^https?:\/\//i.test(url)) {
+    return true;
+  }
+  // A scheme other than http(s) (mailto:, ftp:, javascript:) is rejected;
+  // scheme-less values are treated as relative URLs.
+  return !/^[a-z][a-z0-9+.-]*:/i.test(url);
 }
 
 function getOrCreateLevel(levels: Map<string, number>, adornment: string): number {

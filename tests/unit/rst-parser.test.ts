@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +11,7 @@ import {
   type ContentBlock,
   type DocNode,
 } from '../../src/core/models.js';
+import { generateSourceDocs } from '../../src/core/source-docs.js';
 import { FormatType } from '../../src/parsers/base.js';
 import { RstFormatParser, parseRstFile } from '../../src/parsers/rst/index.js';
 
@@ -295,9 +296,15 @@ describe('reStructuredText parser foundation', () => {
     const sourcePath = join(dir, 'colon.rst');
     await writeFile(
       sourcePath,
-      ['Title', '=====', '', 'A trailing marker with no block follows::', '', 'Next paragraph.', ''].join(
-        '\n'
-      ),
+      [
+        'Title',
+        '=====',
+        '',
+        'A trailing marker with no block follows::',
+        '',
+        'Next paragraph.',
+        '',
+      ].join('\n'),
       'utf-8'
     );
 
@@ -413,7 +420,9 @@ describe('reStructuredText parser foundation', () => {
     const sourcePath = join(dir, 'tabbed.rst');
     await writeFile(
       sourcePath,
-      ['Title', '=====', '', 'Example::', '', '\tconst tabbed = true;', '', 'After.', ''].join('\n'),
+      ['Title', '=====', '', 'Example::', '', '\tconst tabbed = true;', '', 'After.', ''].join(
+        '\n'
+      ),
       'utf-8'
     );
 
@@ -424,5 +433,196 @@ describe('reStructuredText parser foundation', () => {
 
     expect(codeBlocks).toHaveLength(1);
     expect(codeBlocks[0]?.content).toContain('const tabbed = true;');
+  });
+});
+
+describe('reStructuredText inline markup rendering', () => {
+  it('renders interpreted-text roles readably instead of leaking markup', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'roles.rst');
+    await writeFile(
+      sourcePath,
+      [
+        'API Reference',
+        '=============',
+        '',
+        'Use :func:`mypkg.io.read_table` with :class:`~mypkg.frame.DataFrame` and',
+        'call :py:meth:`DataFrame.merge` after. See :ref:`install-guide` and',
+        ':ref:`the install guide <install-guide>` plus :doc:`/user/quickstart`.',
+        'An unknown :term:`iterator` role stays readable, and',
+        ':obj:`labeled name <mypkg.core.thing>` uses its label.',
+        '',
+        'The :mod:`json` module',
+        '----------------------',
+        '',
+        'Heading prose.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new RstFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+
+    expect(parsedText).toContain('`mypkg.io.read_table`');
+    expect(parsedText).toContain('`DataFrame`');
+    expect(parsedText).not.toContain('~mypkg.frame.DataFrame');
+    expect(parsedText).toContain('`DataFrame.merge`');
+    expect(parsedText).toContain('See install-guide and the install guide plus /user/quickstart.');
+    expect(parsedText).toContain('`iterator`');
+    expect(parsedText).toContain('`labeled name`');
+    expect(parsedText).not.toMatch(/:[a-z:]+:`/);
+
+    expect(root.children[0]).toMatchObject({
+      title: 'The `json` module',
+      id: 'the-json-module',
+    });
+  });
+
+  it('applies substitution definitions in a single non-recursive pass', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'substitutions.rst');
+    await writeFile(
+      sourcePath,
+      [
+        'Release Notes',
+        '=============',
+        '',
+        '.. |project| replace:: DataLib',
+        '.. |nested| replace:: uses |project| inside',
+        '',
+        '|project| is fast. |missing| stays as written. |nested| ends here.',
+        '',
+        '- |project| in a list item.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new RstFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+
+    expect(parsedText).toContain('DataLib is fast.');
+    expect(parsedText).toContain('|missing| stays as written.');
+    // Single pass: a substitution value containing another |ref| is not
+    // expanded recursively.
+    expect(parsedText).toContain('uses |project| inside ends here.');
+    expect(parsedText).toContain('- DataLib in a list item.');
+  });
+
+  it('converts hyperlink references to markdown links without inventing URLs', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'links.rst');
+    await writeFile(
+      sourcePath,
+      [
+        'Links',
+        '=====',
+        '',
+        'Visit `Python <https://www.python.org>`_ or the `docs`_ site.',
+        'Anonymous `example <https://example.com>`__ still converts.',
+        'The `orphan ref`_ has no target. Write to `us <mailto:x@y.example>`_.',
+        'See the `guide`_ page and the relative `api`_ index.',
+        '',
+        '.. _docs: https://docs.python.org',
+        '.. _guide:',
+        '   https://example.com/guide',
+        '.. _api: ../api/index.html',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new RstFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+
+    expect(parsedText).toContain('[Python](https://www.python.org)');
+    expect(parsedText).toContain('[docs](https://docs.python.org)');
+    expect(parsedText).toContain('[example](https://example.com)');
+    expect(parsedText).toContain('[guide](https://example.com/guide)');
+    expect(parsedText).toContain('[api](../api/index.html)');
+    expect(parsedText).toContain('The orphan ref has no target.');
+    // Non-http(s) schemes are rejected rather than linked.
+    expect(parsedText).toContain('Write to us.');
+    expect(parsedText).not.toContain('mailto:');
+    expect(parsedText).not.toContain('`_');
+  });
+
+  it('leaves inline literals untouched by role, substitution, and link rewriting', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'literals.rst');
+    await writeFile(
+      sourcePath,
+      [
+        'Literals',
+        '========',
+        '',
+        '.. |ver| replace:: 9.9',
+        '.. _refs: https://example.com',
+        '',
+        'Keep ``refs_`` and ``|ver|`` literal, but link `refs`_ and expand |ver|.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new RstFormatParser().parse(sourcePath);
+    const parsedText = collectText(root);
+
+    expect(parsedText).toContain('``refs_``');
+    expect(parsedText).toContain('``|ver|``');
+    expect(parsedText).toContain('[refs](https://example.com)');
+    expect(parsedText).toContain('expand 9.9.');
+  });
+
+  it('produces a generated pack with no raw role or trailing-underscore residue', async () => {
+    const dir = await createTempDir();
+    const sourceDir = join(dir, 'docs');
+    const outputDir = join(dir, 'out');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(
+      join(sourceDir, 'index.rst'),
+      [
+        'MyPkg Documentation',
+        '===================',
+        '',
+        '.. |project| replace:: MyPkg',
+        '.. _homepage: https://example.com/mypkg',
+        '',
+        '|project| ships :func:`mypkg.load` and :class:`~mypkg.core.Frame`.',
+        'Read the `homepage`_ or `PyPI <https://pypi.org/project/mypkg/>`_ page,',
+        'then see :ref:`Usage <usage>` and :doc:`/api/index`.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    await writeFile(
+      join(sourceDir, 'usage.rst'),
+      [
+        'Usage',
+        '=====',
+        '',
+        'Call :meth:`Frame.head` on the result of :func:`mypkg.load`.',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const result = await generateSourceDocs({
+      source: sourceDir,
+      outputDir,
+      format: 'rst',
+      generator: { name: 'llm-docs', version: '0.0.0-test', cliName: 'llm-docs' },
+    });
+    const full = await readFile(join(result.llmDocsDir, 'docs-full-llms.txt'), 'utf-8');
+
+    expect(full).toContain('MyPkg ships `mypkg.load` and `Frame`.');
+    expect(full).toContain('[homepage](https://example.com/mypkg)');
+    expect(full).toContain('[PyPI](https://pypi.org/project/mypkg/)');
+    expect(full).toContain('Usage and /api/index');
+    expect(full).toContain('`Frame.head`');
+    expect(full).not.toMatch(/:[a-z:]+:`/);
+    expect(full).not.toContain('`_');
+    expect(full).not.toContain('|project|');
   });
 });
