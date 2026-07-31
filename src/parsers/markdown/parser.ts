@@ -154,6 +154,22 @@ export class MarkdownParser {
       // Build hierarchical sections plus any document-level (headingless) content
       const { content: documentContent, sections } = this.buildSections(tokens);
 
+      // When the document's only H1 is the title extractTitle already promoted,
+      // re-nesting it would repeat the title as a section and push every real
+      // section one numbering level deeper. Hoist its content and children to
+      // the document level instead. Multiple H1s or a non-matching first H1
+      // keep the nested structure untouched.
+      const firstSection = sections[0];
+      if (
+        firstSection !== undefined &&
+        firstSection.level === 1 &&
+        firstSection.title === title &&
+        !sections.some((section, index) => index > 0 && section.level === 1)
+      ) {
+        documentContent.push(...firstSection.content);
+        sections.splice(0, 1, ...firstSection.children);
+      }
+
       return {
         path: this.filePath,
         title,
@@ -195,7 +211,11 @@ export class MarkdownParser {
     // seam, which only activates a dialect whose exact markers are present. A
     // document with no directive markers is returned unchanged.
     const withTabs = applyMarkdownDirectives(withoutFrontmatter);
-    return this.cleanOutsideFencedCode(withTabs, (segment) => {
+    // Block-level DocC directives run on the whole document, not per text
+    // segment, because a @Row/@Tab body routinely spans fenced code that
+    // cleanOutsideFencedCode would split away from the closing brace.
+    const withoutDocCBlocks = this.transformDocCBlockDirectives(withTabs);
+    return this.cleanOutsideFencedCode(withoutDocCBlocks, (segment) => {
       let cleanedSegment = this.cleanDocCContentSegment(segment);
       if (sourceSyntax === 'mdx') {
         cleanedSegment = this.cleanMdxContentSegment(cleanedSegment);
@@ -205,16 +225,12 @@ export class MarkdownParser {
   }
 
   /**
-   * Clean DocC-specific syntax and test comments outside fenced code.
+   * Clean inline DocC syntax and test comments outside fenced code.
+   * Block-level directives are handled earlier by
+   * transformDocCBlockDirectives, which needs to see fenced code in place.
    */
   private cleanDocCContentSegment(content: string): string {
     let cleaned = content;
-
-    // Remove @Metadata blocks
-    cleaned = cleaned.replace(/@Metadata\s*\{[^}]*\}/gs, '');
-
-    // Remove @Options blocks
-    cleaned = cleaned.replace(/@Options\([^)]*\)\s*\{[^}]*\}/gs, '');
 
     // Convert <doc:Reference> to just "Reference"
     cleaned = cleaned.replace(/<doc:([^>]+)>/g, '$1');
@@ -223,6 +239,211 @@ export class MarkdownParser {
     cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
 
     return cleaned;
+  }
+
+  /**
+   * Rewrite block-level DocC directives across the whole document.
+   *
+   * - @Metadata / @Options / @Comment blocks are dropped entirely.
+   * - @Row / @Column / @TabNavigator / @Tab are unwrapped: the directive lines
+   *   and closing braces vanish, the body is dedented and kept (a @Tab keeps
+   *   its quoted title as a heading, matching the MDX Tab precedent).
+   * - @Image / @Video render a single-line placeholder carrying source and alt;
+   *   @Snippet renders its path reference as inline code.
+   *
+   * Line-oriented pass with per-frame brace balancing (delimiterBalance
+   * precedent): nested directive bodies are tracked with counters, never with
+   * backtracking regex, and fenced code inside a directive body is passed
+   * through without brace counting.
+   */
+  private transformDocCBlockDirectives(content: string): string {
+    interface DirectiveFrame {
+      kind: 'drop' | 'unwrap';
+      depth: number;
+      // Leading whitespace of the frame's first non-blank body line; stripped
+      // from every body line so unwrapped content is not misread as indented
+      // code by the markdown lexer.
+      stripIndent: number | null;
+    }
+
+    const output: string[] = [];
+    const frames: DirectiveFrame[] = [];
+    let fence: FenceState | null = null;
+
+    const inDropFrame = (): boolean => frames.some((frame) => frame.kind === 'drop');
+    const dedent = (line: string): string => {
+      const strip = frames.at(-1)?.stripIndent ?? 0;
+      let index = 0;
+      while (index < strip && index < line.length) {
+        const char = line[index];
+        if (char !== ' ' && char !== '\t') {
+          break;
+        }
+        index += 1;
+      }
+      return line.slice(index);
+    };
+
+    for (const line of content.split('\n')) {
+      if (fence !== null) {
+        if (!inDropFrame()) {
+          output.push(dedent(line));
+        }
+        if (isClosingFence(dedent(line), fence)) {
+          fence = null;
+        }
+        continue;
+      }
+
+      const frame = frames.at(-1);
+      if (frame !== undefined && frame.stripIndent === null && line.trim() !== '') {
+        frame.stripIndent = line.length - line.trimStart().length;
+      }
+
+      const openingFence = getOpeningFence(dedent(line));
+      if (openingFence !== null) {
+        if (!inDropFrame()) {
+          output.push(dedent(line));
+        }
+        fence = openingFence;
+        continue;
+      }
+
+      const directive = inDropFrame() ? null : this.matchDocCBlockDirective(line);
+      if (directive !== null) {
+        output.push(...directive.replacement.map((replacementLine) => dedent(replacementLine)));
+        if (directive.frame !== null) {
+          frames.push(directive.frame);
+        }
+        continue;
+      }
+
+      if (frames.length === 0) {
+        output.push(line);
+        continue;
+      }
+
+      const wasInDrop = inDropFrame();
+      const dedented = dedent(line);
+      const top = frames.at(-1);
+      if (top !== undefined) {
+        top.depth += this.braceBalance(line);
+      }
+      let poppedUnwrap = false;
+      while (frames.length > 0 && frames[frames.length - 1]!.depth <= 0) {
+        const overshoot = frames[frames.length - 1]!.depth;
+        poppedUnwrap = poppedUnwrap || frames[frames.length - 1]!.kind === 'unwrap';
+        frames.pop();
+        const parent = frames.at(-1);
+        if (parent !== undefined) {
+          parent.depth += overshoot;
+        }
+      }
+
+      if (wasInDrop) {
+        continue;
+      }
+      if (poppedUnwrap && /^[\s}]*$/.test(line)) {
+        // A bare closing-brace line only terminates the directive body.
+        continue;
+      }
+      output.push(dedented);
+    }
+
+    return output.join('\n');
+  }
+
+  /**
+   * Match one block-level DocC directive line. Returns the lines that replace
+   * it plus the frame to push when the directive opens a braced body, or null
+   * when the line is not a recognized directive.
+   */
+  private matchDocCBlockDirective(line: string): {
+    replacement: string[];
+    frame: { kind: 'drop' | 'unwrap'; depth: number; stripIndent: null } | null;
+  } | null {
+    const match = line.match(/^\s*@([A-Za-z][A-Za-z0-9]*)\b\s*(.*)$/);
+    const name = match?.[1];
+    if (name === undefined) {
+      return null;
+    }
+    const rest = match?.[2] ?? '';
+    const balance = this.braceBalance(rest);
+    const bodyFrame = (
+      kind: 'drop' | 'unwrap'
+    ): { kind: 'drop' | 'unwrap'; depth: number; stripIndent: null } | null =>
+      balance > 0 ? { kind, depth: balance, stripIndent: null } : null;
+
+    if (name === 'Metadata' || name === 'Options' || name === 'Comment') {
+      return { replacement: [], frame: bodyFrame('drop') };
+    }
+
+    if (name === 'Row' || name === 'Column' || name === 'TabNavigator' || name === 'Tab') {
+      const title = name === 'Tab' ? /"([^"]*)"/.exec(rest)?.[1]?.trim() : undefined;
+      const replacement = title !== undefined && title !== '' ? [`### ${title}`, ''] : [];
+      return { replacement, frame: bodyFrame('unwrap') };
+    }
+
+    if (name === 'Image' || name === 'Video' || name === 'Snippet') {
+      const args = this.parseDocCDirectiveArguments(rest);
+      const replacement: string[] = [];
+      if (name === 'Image') {
+        const source = args.get('source');
+        if (source !== undefined) {
+          replacement.push(`![${args.get('alt') ?? ''}](${source})`);
+        }
+      } else if (name === 'Video') {
+        const source = args.get('source');
+        if (source !== undefined) {
+          const alt = args.get('alt');
+          replacement.push(`[Video${alt !== undefined ? `: ${alt}` : ''}](${source})`);
+        }
+      } else {
+        const path = args.get('path');
+        if (path !== undefined) {
+          const slice = args.get('slice');
+          replacement.push(`\`${path}${slice !== undefined ? `#${slice}` : ''}\``);
+        }
+      }
+      // A trailing braced body (e.g. an @Image accessibility block) is dropped.
+      return { replacement, frame: bodyFrame('drop') };
+    }
+
+    return null;
+  }
+
+  /**
+   * Parse `name: value` arguments from a DocC directive's parenthesized
+   * argument list. Values may be double-quoted or bare.
+   */
+  private parseDocCDirectiveArguments(rest: string): Map<string, string> {
+    const args = new Map<string, string>();
+    const argumentPattern = /([A-Za-z][\w-]*)\s*:\s*(?:"([^"]*)"|([^,()]+))/g;
+    for (const match of rest.matchAll(argumentPattern)) {
+      const name = match[1];
+      const value = (match[2] ?? match[3] ?? '').trim();
+      if (name !== undefined && value !== '') {
+        args.set(name, value);
+      }
+    }
+    return args;
+  }
+
+  /**
+   * Net `{` versus `}` count for one line. Quotes are not tracked: prose
+   * braces outside fenced code are rare in documentation, and a linear count
+   * cannot be fooled into backtracking.
+   */
+  private braceBalance(line: string): number {
+    let balance = 0;
+    for (const char of line) {
+      if (char === '{') {
+        balance += 1;
+      } else if (char === '}') {
+        balance -= 1;
+      }
+    }
+    return balance;
   }
 
   /**
@@ -1045,9 +1266,12 @@ export class MarkdownParser {
    * Performance: O(n) where n = text length
    */
   private slugify(text: string): string {
+    // Unicode-aware: keep any letter or number (plus underscore, whitespace,
+    // and hyphen) so non-Latin headings produce real ids instead of empty
+    // strings. Pure-ASCII input slugs exactly as the old \w-based rule.
     return text
       .toLowerCase()
-      .replace(/[^\w\s-]/g, '')
+      .replace(/[^\p{L}\p{N}_\s-]/gu, '')
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
       .trim();
