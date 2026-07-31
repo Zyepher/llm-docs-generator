@@ -232,6 +232,24 @@ export async function verifySourceDocsManifest(
     }
   }
 
+  // Backward compatible: manifests generated before exclude-glob recording omit
+  // source.excludeGlobs entirely; when absent the source-tier added-file rescan
+  // is skipped with a note instead of failing.
+  if (sourceRecord.excludeGlobs !== undefined) {
+    if (
+      !Array.isArray(sourceRecord.excludeGlobs) ||
+      !sourceRecord.excludeGlobs.every((glob) => isNonEmptyString(glob))
+    ) {
+      failures.push(
+        'malformed manifest: source.excludeGlobs must be an array of non-empty strings when present'
+      );
+    } else if (sourceType !== 'directory') {
+      failures.push(
+        'malformed manifest: source.excludeGlobs is recorded for directory sources only'
+      );
+    }
+  }
+
   if (
     isNonEmptyString(sourcePath) &&
     isAbsolute(sourcePath) &&
@@ -327,6 +345,7 @@ export async function verifySourceDocsManifest(
   });
   validateSourceDocsPresetMetadata(preset, failures);
   validateSourceDocsOutputMetadata(manifest.output, failures);
+  crossCheckGeneratedOutputFilenamePrefix(manifest.output, outputRecords, failures);
 
   validateRequiredManifestContract(manifest.manifestContract, SOURCE_DOCS_MODE, failures);
   validateRequiredInputProvenance(manifest.inputProvenance, SOURCE_DOCS_MODE, manifest, failures);
@@ -437,7 +456,12 @@ function validateSourceDocsOutputMetadata(output: unknown, failures: string[]): 
     return;
   }
 
-  validateAllowedKeys(output, new Set(['filenamePrefix']), 'output', failures);
+  validateAllowedKeys(
+    output,
+    new Set(['filenamePrefix', 'splitBy', 'categories']),
+    'output',
+    failures
+  );
 
   if (!isNonEmptyString(output.filenamePrefix)) {
     failures.push('malformed manifest: output.filenamePrefix must be a non-empty string');
@@ -445,6 +469,122 @@ function validateSourceDocsOutputMetadata(output: unknown, failures: string[]): 
     failures.push(
       "malformed manifest: output.filenamePrefix must use only letters, digits, '.', '_', '-' with no leading/trailing dashes"
     );
+  }
+
+  // splitBy and categories are recorded (mutually exclusively) so refresh can
+  // replay the exact output shape; both are optional for older manifests.
+  if ('splitBy' in output && output.splitBy !== 'dirs') {
+    failures.push("malformed manifest: output.splitBy must be 'dirs' when present");
+  }
+
+  if ('categories' in output) {
+    validateSourceDocsOutputCategories(output.categories, failures);
+  }
+
+  if ('splitBy' in output && 'categories' in output) {
+    failures.push(
+      'malformed manifest: output.splitBy and output.categories are mutually exclusive'
+    );
+  }
+}
+
+function validateSourceDocsOutputCategories(categories: unknown, failures: string[]): void {
+  if (!isObjectRecord(categories)) {
+    failures.push('malformed manifest: output.categories must be an object when present');
+    return;
+  }
+
+  validateAllowedKeys(
+    categories,
+    new Set(['categories', 'fallback']),
+    'output.categories',
+    failures
+  );
+
+  const definitions = categories.categories;
+
+  if (!Array.isArray(definitions) || definitions.length === 0) {
+    failures.push('malformed manifest: output.categories.categories must be a non-empty array');
+  } else {
+    for (const [index, definition] of definitions.entries()) {
+      const label = `output.categories.categories[${index}]`;
+
+      if (!isObjectRecord(definition)) {
+        failures.push(`malformed manifest: ${label} must be an object`);
+        continue;
+      }
+
+      validateAllowedKeys(definition, new Set(['id', 'title', 'include']), label, failures);
+
+      if (!isNonEmptyString(definition.id)) {
+        failures.push(`malformed manifest: ${label}.id must be a non-empty string`);
+      }
+
+      if (!isNonEmptyString(definition.title)) {
+        failures.push(`malformed manifest: ${label}.title must be a non-empty string`);
+      }
+
+      if (
+        !Array.isArray(definition.include) ||
+        definition.include.length === 0 ||
+        !definition.include.every((glob) => isNonEmptyString(glob))
+      ) {
+        failures.push(
+          `malformed manifest: ${label}.include must be a non-empty array of non-empty strings`
+        );
+      }
+    }
+  }
+
+  if (!isNonEmptyString(categories.fallback)) {
+    failures.push('malformed manifest: output.categories.fallback must be a non-empty string');
+  }
+}
+
+/**
+ * Every llm-docs text output is named `<prefix>-...-llms.txt` by the universal
+ * formatter: the combined -full slice, the reserved -toc slice, category
+ * slices, and their collision-renamed variants all keep the prefix. A basename
+ * that does not start with the recorded output.filenamePrefix therefore proves
+ * the outputs were not generated with the recorded shape (for example a refresh
+ * that fell back to a source-derived prefix), making shape drift detectable
+ * from the manifest alone.
+ */
+function crossCheckGeneratedOutputFilenamePrefix(
+  output: unknown,
+  generatedOutputs: unknown[],
+  failures: string[]
+): void {
+  if (!isObjectRecord(output)) {
+    return;
+  }
+
+  const prefix = output.filenamePrefix;
+
+  // A missing or malformed prefix is already reported by the output metadata
+  // validation; the cross-check needs a trustworthy prefix to compare against.
+  if (!isNonEmptyString(prefix) || !isSanitizedFilenameSegment(prefix)) {
+    return;
+  }
+
+  for (const [index, entry] of generatedOutputs.entries()) {
+    if (!isObjectRecord(entry) || entry.kind !== 'llm-docs') {
+      continue;
+    }
+
+    const path = entry.path;
+
+    if (!isNonEmptyString(path)) {
+      continue;
+    }
+
+    const basename = path.split('/').at(-1) ?? path;
+
+    if (!basename.startsWith(`${prefix}-`)) {
+      failures.push(
+        `malformed manifest: generatedOutputs[${index}] basename '${basename}' does not carry the recorded output.filenamePrefix '${prefix}'`
+      );
+    }
   }
 }
 

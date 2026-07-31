@@ -222,12 +222,19 @@ export interface SourceDocsManifest {
     aggregateHash?: string;
     label?: string;
     git?: GenerateSourceGitContext;
+    // Every --exclude glob as given (trimmed, deduplicated, in given order),
+    // including globs that matched nothing. Always present for built-in
+    // directory sources (possibly empty) so verify and refresh can distinguish
+    // "no excludes recorded" (old manifest) from "no excludes given".
+    excludeGlobs?: string[];
     excluded?: SourceDocsExcludedFile[];
     skippedFiles?: SourceDocsSkippedFile[];
   };
   sourceFiles: SourceDocsFileManifestEntry[];
   output: {
     filenamePrefix: string;
+    splitBy?: SourceDocsSplitBy;
+    categories?: SourceDocsCategoriesConfig;
   };
   parser: {
     name: string;
@@ -300,6 +307,7 @@ interface PreparedSourceDocsInput {
   parserPlugin?: SourceDocsParserPluginProvenance;
   sourceFiles: BoundedSourceFile[];
   warnings: string[];
+  excludeGlobs?: string[];
   excluded?: SourceDocsExcludedFile[];
   skippedFiles?: SourceDocsSkippedFile[];
 }
@@ -416,6 +424,11 @@ export async function generateSourceDocs(
       ...(options.preset === undefined ? {} : { preset: options.preset }),
       ...(options.gitContext === undefined ? {} : { gitContext: options.gitContext }),
       ...(options.label === undefined ? {} : { label: options.label }),
+      ...(options.splitBy === undefined ? {} : { splitBy: options.splitBy }),
+      ...(options.categories === undefined ? {} : { categories: options.categories }),
+      ...(preparedSource.excludeGlobs === undefined
+        ? {}
+        : { excludeGlobs: preparedSource.excludeGlobs }),
       ...(preparedSource.excluded === undefined || preparedSource.excluded.length === 0
         ? {}
         : { excluded: preparedSource.excluded }),
@@ -969,7 +982,7 @@ async function prepareSourceDocsInput(
   }
 
   const excludeGlobs = compileExcludeGlobs(exclude);
-  const sourceFiles = await describeDirectorySourceFiles(source, excludeGlobs);
+  const sourceFiles = await describeDirectorySourceFiles(source.resolvedPath, excludeGlobs);
   const resolvedFormat =
     formatHint.parserHint === FormatType.AUTO
       ? resolveDirectoryAutoFormat(sourceFiles.files, source.resolvedPath)
@@ -1009,6 +1022,7 @@ async function prepareSourceDocsInput(
     parser: getSourceDocsParser(resolvedFormat),
     sourceFiles: selectedFiles,
     warnings,
+    excludeGlobs: excludeGlobs.map((entry) => entry.glob),
     excluded: sourceFiles.excluded,
     skippedFiles,
   };
@@ -1044,7 +1058,7 @@ function formatSupportsDirectory(
 }
 
 async function describeDirectorySourceFiles(
-  source: ResolvedSourceDocsInput,
+  rootPath: string,
   excludeGlobs: CompiledExcludeGlob[]
 ): Promise<SourceFileCollection> {
   const state: DirectoryTraversalState = {
@@ -1056,16 +1070,14 @@ async function describeDirectorySourceFiles(
     skipped: [],
   };
   const files = await collectDirectorySourceFiles({
-    rootPath: source.resolvedPath,
-    currentPath: source.resolvedPath,
+    rootPath,
+    currentPath: rootPath,
     depth: 0,
     state,
   });
 
   if (files.length === 0) {
-    throw new Error(
-      `No supported source files found under local directory: ${source.resolvedPath}`
-    );
+    throw new Error(`No supported source files found under local directory: ${rootPath}`);
   }
 
   return {
@@ -1640,6 +1652,9 @@ function buildSourceDocsManifest(options: {
   preset?: SourceDocsPresetMetadata;
   gitContext?: GenerateSourceGitContext;
   label?: string;
+  splitBy?: SourceDocsSplitBy;
+  categories?: SourceDocsCategoriesConfig;
+  excludeGlobs?: string[];
   excluded?: SourceDocsExcludedFile[];
   skippedFiles?: SourceDocsSkippedFile[];
   warnings: string[];
@@ -1683,6 +1698,7 @@ function buildSourceDocsManifest(options: {
           }),
       ...(options.label === undefined ? {} : { label: options.label }),
       ...(options.gitContext === undefined ? {} : { git: options.gitContext }),
+      ...(options.excludeGlobs === undefined ? {} : { excludeGlobs: [...options.excludeGlobs] }),
       ...(options.excluded === undefined || options.excluded.length === 0
         ? {}
         : { excluded: options.excluded }),
@@ -1693,6 +1709,10 @@ function buildSourceDocsManifest(options: {
     sourceFiles,
     output: {
       filenamePrefix: options.filenamePrefix,
+      ...(options.splitBy === undefined ? {} : { splitBy: options.splitBy }),
+      ...(options.categories === undefined
+        ? {}
+        : { categories: cloneSourceDocsCategoriesConfig(options.categories) }),
     },
     parser: {
       name: options.parser.name,
@@ -2119,6 +2139,19 @@ function skippedSummaryWarnings(
   }
 
   return warnings;
+}
+
+function cloneSourceDocsCategoriesConfig(
+  config: SourceDocsCategoriesConfig
+): SourceDocsCategoriesConfig {
+  return {
+    categories: config.categories.map((category) => ({
+      id: category.id,
+      title: category.title,
+      include: [...category.include],
+    })),
+    fallback: config.fallback,
+  };
 }
 
 /**
