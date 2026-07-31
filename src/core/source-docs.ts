@@ -48,7 +48,7 @@ import {
 import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
 import { writeTextFileSafely } from '../utils/safe-write.js';
 import { sha256File } from '../utils/hash.js';
-import { isSkippedTraversalDirectory } from '../utils/traversal.js';
+import { walkBoundedDirectoryTree } from '../utils/traversal.js';
 import { sanitizeFilenameSegment as sanitizeFileSegment } from '../utils/filename-prefix.js';
 
 const SOURCE_DOCS_FORMATTER_FORMAT = 'universal-llm-docs';
@@ -299,7 +299,6 @@ interface CompiledExcludeGlob {
 }
 
 interface DirectoryTraversalState {
-  entries: number;
   files: number;
   warnings: string[];
   excludeGlobs: CompiledExcludeGlob[];
@@ -599,15 +598,18 @@ async function prepareParserPluginSourceDocsInput(
     sourceType: source.type,
     outputDir: options.outputDir,
   });
-  const sourceFiles =
+  const collected: { files: BoundedSourceFile[]; warnings: string[] } =
     source.type === 'file'
-      ? [
-          await describeSourceFile(
-            source.resolvedPath,
-            basename(source.resolvedPath),
-            requestedFormat
-          ),
-        ]
+      ? {
+          files: [
+            await describeSourceFile(
+              source.resolvedPath,
+              basename(source.resolvedPath),
+              requestedFormat
+            ),
+          ],
+          warnings: [],
+        }
       : await describeParserPluginDirectorySourceFiles(
           source,
           requestedFormat,
@@ -621,8 +623,8 @@ async function prepareParserPluginSourceDocsInput(
       parser: plugin.parser,
       parserVersion: plugin.provenance.version,
       parserPlugin: plugin.provenance,
-      sourceFiles,
-      warnings: [],
+      sourceFiles: collected.files,
+      warnings: collected.warnings,
     },
   };
 }
@@ -1090,19 +1092,13 @@ async function describeDirectorySourceFiles(
   excludeGlobs: CompiledExcludeGlob[]
 ): Promise<SourceFileCollection> {
   const state: DirectoryTraversalState = {
-    entries: 0,
     files: 0,
     warnings: [],
     excludeGlobs,
     excluded: [],
     skipped: [],
   };
-  const files = await collectDirectorySourceFiles({
-    rootPath,
-    currentPath: rootPath,
-    depth: 0,
-    state,
-  });
+  const files = await collectDirectorySourceFiles({ rootPath, state });
 
   if (files.length === 0) {
     throw new Error(`No supported source files found under local directory: ${rootPath}`);
@@ -1141,15 +1137,13 @@ async function describeParserPluginDirectorySourceFiles(
   source: ResolvedSourceDocsInput,
   format: string,
   extensions: readonly string[]
-): Promise<BoundedSourceFile[]> {
+): Promise<{ files: BoundedSourceFile[]; warnings: string[] }> {
   const state = {
-    entries: 0,
     files: 0,
+    warnings: [] as string[],
   };
   const files = await collectParserPluginDirectorySourceFiles({
     rootPath: source.resolvedPath,
-    currentPath: source.resolvedPath,
-    depth: 0,
     format,
     // Manifest validation guarantees lowercase extensions without leading dots.
     extensionSuffixes: extensions.map((extension) => `.${extension}`),
@@ -1162,84 +1156,90 @@ async function describeParserPluginDirectorySourceFiles(
     );
   }
 
-  return files.sort((a, b) => compareStringsByCodeUnit(a.path, b.path));
+  return {
+    files: files.sort((a, b) => compareStringsByCodeUnit(a.path, b.path)),
+    warnings: state.warnings,
+  };
 }
 
 async function collectParserPluginDirectorySourceFiles(options: {
   rootPath: string;
-  currentPath: string;
-  depth: number;
   format: string;
   extensionSuffixes: readonly string[];
-  state: { entries: number; files: number };
+  state: { files: number; warnings: string[] };
 }): Promise<BoundedSourceFile[]> {
-  const { rootPath, currentPath, depth, format, extensionSuffixes, state } = options;
-
-  if (depth > DEFAULT_SOURCE_DOCS_MAX_DEPTH) {
-    throw new Error(
-      `generate --source directory exceeds max traversal depth ${DEFAULT_SOURCE_DOCS_MAX_DEPTH}: ${currentPath}`
-    );
-  }
-
-  const entries = (await readdir(currentPath, { withFileTypes: true })).sort((a, b) =>
-    compareStringsByCodeUnit(a.name, b.name)
-  );
+  const { rootPath, format, extensionSuffixes, state } = options;
   const files: BoundedSourceFile[] = [];
 
-  for (const entry of entries) {
-    state.entries++;
-
-    if (state.entries > DEFAULT_SOURCE_DOCS_MAX_ENTRIES) {
-      throw new Error(
-        `generate --source directory exceeds max traversal entries ${DEFAULT_SOURCE_DOCS_MAX_ENTRIES}`
-      );
-    }
-
-    const entryPath = join(currentPath, entry.name);
-
-    if (entry.isSymbolicLink()) {
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      if (isSkippedTraversalDirectory(entry.name)) {
-        continue;
+  for await (const event of walkBoundedDirectoryTree({
+    root: rootPath,
+    // Engine depth counts path segments below the root, so maxDepth 16 prunes
+    // the first entry at depth 17: the same cutoff the old `depth > 16` check
+    // against the parent-relative counter enforced.
+    maxDepth: DEFAULT_SOURCE_DOCS_MAX_DEPTH,
+    maxEntries: DEFAULT_SOURCE_DOCS_MAX_ENTRIES,
+    // The source-docs file budget counts only files the plugin's extensions
+    // select, not every file the walk sees, so the engine's all-files budget is
+    // left open and the real check stays at the selection site below.
+    maxFiles: Number.MAX_SAFE_INTEGER,
+    skipDirectoryNames: true,
+  })) {
+    switch (event.kind) {
+      case 'depth-pruned': {
+        throw new Error(
+          `generate --source directory exceeds max traversal depth ${DEFAULT_SOURCE_DOCS_MAX_DEPTH}: ${event.absolutePath}`
+        );
       }
+      case 'entries-exhausted': {
+        throw new Error(
+          `generate --source directory exceeds max traversal entries ${DEFAULT_SOURCE_DOCS_MAX_ENTRIES}`
+        );
+      }
+      case 'files-exhausted': {
+        throw new Error(
+          `generate --source directory exceeds max source files ${DEFAULT_SOURCE_DOCS_MAX_FILES}`
+        );
+      }
+      case 'unreadable-directory': {
+        throw event.error;
+      }
+      case 'symlink': {
+        state.warnings.push(
+          `Skipped symlinked source entry: ${relativeSourcePath(rootPath, event.absolutePath)}`
+        );
+        break;
+      }
+      case 'skipped-directory': {
+        state.warnings.push(
+          `Skipped vendored or build directory: ${relativeSourcePath(rootPath, event.absolutePath)}`
+        );
+        break;
+      }
+      case 'file': {
+        const lowerCaseName = event.entry.name.toLowerCase();
 
-      files.push(
-        ...(await collectParserPluginDirectorySourceFiles({
-          rootPath,
-          currentPath: entryPath,
-          depth: depth + 1,
-          format,
-          extensionSuffixes,
-          state,
-        }))
-      );
-      continue;
+        if (!extensionSuffixes.some((suffix) => lowerCaseName.endsWith(suffix))) {
+          break;
+        }
+
+        state.files++;
+
+        if (state.files > DEFAULT_SOURCE_DOCS_MAX_FILES) {
+          throw new Error(
+            `generate --source directory exceeds max source files ${DEFAULT_SOURCE_DOCS_MAX_FILES}`
+          );
+        }
+
+        files.push(
+          await describeSourceFile(
+            event.absolutePath,
+            relativeSourcePath(rootPath, event.absolutePath),
+            format
+          )
+        );
+        break;
+      }
     }
-
-    if (!entry.isFile()) {
-      continue;
-    }
-
-    const lowerCaseName = entry.name.toLowerCase();
-
-    if (!extensionSuffixes.some((suffix) => lowerCaseName.endsWith(suffix))) {
-      continue;
-    }
-
-    state.files++;
-
-    if (state.files > DEFAULT_SOURCE_DOCS_MAX_FILES) {
-      throw new Error(
-        `generate --source directory exceeds max source files ${DEFAULT_SOURCE_DOCS_MAX_FILES}`
-      );
-    }
-
-    files.push(
-      await describeSourceFile(entryPath, relativeSourcePath(rootPath, entryPath), format)
-    );
   }
 
   return files;
@@ -1247,90 +1247,86 @@ async function collectParserPluginDirectorySourceFiles(options: {
 
 async function collectDirectorySourceFiles(options: {
   rootPath: string;
-  currentPath: string;
-  depth: number;
   state: DirectoryTraversalState;
 }): Promise<BoundedSourceFile[]> {
-  const { rootPath, currentPath, depth, state } = options;
-
-  if (depth > DEFAULT_SOURCE_DOCS_MAX_DEPTH) {
-    throw new Error(
-      `generate --source directory exceeds max traversal depth ${DEFAULT_SOURCE_DOCS_MAX_DEPTH}: ${currentPath}`
-    );
-  }
-
-  const entries = (await readdir(currentPath, { withFileTypes: true })).sort((a, b) =>
-    compareStringsByCodeUnit(a.name, b.name)
-  );
+  const { rootPath, state } = options;
   const files: BoundedSourceFile[] = [];
 
-  for (const entry of entries) {
-    state.entries++;
-
-    if (state.entries > DEFAULT_SOURCE_DOCS_MAX_ENTRIES) {
-      throw new Error(
-        `generate --source directory exceeds max traversal entries ${DEFAULT_SOURCE_DOCS_MAX_ENTRIES}`
-      );
-    }
-
-    const entryPath = join(currentPath, entry.name);
-
-    if (entry.isSymbolicLink()) {
-      state.warnings.push(
-        `Skipped symlinked source entry: ${relativeSourcePath(rootPath, entryPath)}`
-      );
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      if (isSkippedTraversalDirectory(entry.name)) {
-        state.warnings.push(
-          `Skipped vendored or build directory: ${relativeSourcePath(rootPath, entryPath)}`
+  for await (const event of walkBoundedDirectoryTree({
+    root: rootPath,
+    // Engine depth counts path segments below the root, so maxDepth 16 prunes
+    // the first entry at depth 17: the same cutoff the old `depth > 16` check
+    // against the parent-relative counter enforced.
+    maxDepth: DEFAULT_SOURCE_DOCS_MAX_DEPTH,
+    maxEntries: DEFAULT_SOURCE_DOCS_MAX_ENTRIES,
+    // The source-docs file budget counts only files that survive the exclude
+    // globs and resolve to a built-in format, not every file the walk sees, so
+    // the engine's all-files budget is left open and the real check stays at
+    // the selection site below.
+    maxFiles: Number.MAX_SAFE_INTEGER,
+    skipDirectoryNames: true,
+  })) {
+    switch (event.kind) {
+      case 'depth-pruned': {
+        throw new Error(
+          `generate --source directory exceeds max traversal depth ${DEFAULT_SOURCE_DOCS_MAX_DEPTH}: ${event.absolutePath}`
         );
-        continue;
       }
+      case 'entries-exhausted': {
+        throw new Error(
+          `generate --source directory exceeds max traversal entries ${DEFAULT_SOURCE_DOCS_MAX_ENTRIES}`
+        );
+      }
+      case 'files-exhausted': {
+        throw new Error(
+          `generate --source directory exceeds max source files ${DEFAULT_SOURCE_DOCS_MAX_FILES}`
+        );
+      }
+      case 'unreadable-directory': {
+        throw event.error;
+      }
+      case 'symlink': {
+        state.warnings.push(
+          `Skipped symlinked source entry: ${relativeSourcePath(rootPath, event.absolutePath)}`
+        );
+        break;
+      }
+      case 'skipped-directory': {
+        state.warnings.push(
+          `Skipped vendored or build directory: ${relativeSourcePath(rootPath, event.absolutePath)}`
+        );
+        break;
+      }
+      case 'file': {
+        const relativePath = relativeSourcePath(rootPath, event.absolutePath);
+        const matchedGlob = matchExcludeGlob(relativePath, state.excludeGlobs);
 
-      files.push(
-        ...(await collectDirectorySourceFiles({
-          rootPath,
-          currentPath: entryPath,
-          depth: depth + 1,
-          state,
-        }))
-      );
-      continue;
+        if (matchedGlob !== undefined) {
+          state.excluded.push({ path: relativePath, glob: matchedGlob });
+          break;
+        }
+
+        const fileFormat = formatForDirectorySourceFile(event.entry.name);
+
+        if (fileFormat === undefined) {
+          // A regular file with no built-in documentation format is not part of
+          // the pack; record the omission rather than dropping it silently.
+          state.skipped.push({ path: relativePath, reason: 'unsupported-file-type' });
+          break;
+        }
+
+        state.files++;
+
+        if (state.files > DEFAULT_SOURCE_DOCS_MAX_FILES) {
+          throw new Error(
+            `generate --source directory exceeds max source files ${DEFAULT_SOURCE_DOCS_MAX_FILES}`
+          );
+        }
+
+        files.push(await describeSourceFile(event.absolutePath, relativePath, fileFormat));
+        break;
+      }
     }
-
-    if (!entry.isFile()) {
-      continue;
-    }
-
-    const relativePath = relativeSourcePath(rootPath, entryPath);
-    const matchedGlob = matchExcludeGlob(relativePath, state.excludeGlobs);
-
-    if (matchedGlob !== undefined) {
-      state.excluded.push({ path: relativePath, glob: matchedGlob });
-      continue;
-    }
-
-    const fileFormat = formatForDirectorySourceFile(entry.name);
-
-    if (fileFormat === undefined) {
-      // A regular file with no built-in documentation format is not part of the
-      // pack; record the omission rather than dropping it silently.
-      state.skipped.push({ path: relativePath, reason: 'unsupported-file-type' });
-      continue;
-    }
-
-    state.files++;
-
-    if (state.files > DEFAULT_SOURCE_DOCS_MAX_FILES) {
-      throw new Error(
-        `generate --source directory exceeds max source files ${DEFAULT_SOURCE_DOCS_MAX_FILES}`
-      );
-    }
-
-    files.push(await describeSourceFile(entryPath, relativePath, fileFormat));
   }
 
   return files;

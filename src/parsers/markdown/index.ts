@@ -9,8 +9,11 @@ import { BaseParser, FormatType } from '../base.js';
 import { DocNodeType, type DocNode } from '../../core/models.js';
 import { MarkdownParser } from './parser.js';
 import { markdownToDocNode } from './adapter.js';
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+
+import {
+  directoryContainsMatchingFile,
+  findFilesRecursively,
+} from '../../utils/traversal.js';
 
 /**
  * Markdown format parser
@@ -39,7 +42,9 @@ export class MarkdownFormatParser extends BaseParser {
       const stats = await stat(sourcePath);
       if (stats.isDirectory()) {
         // Check if directory contains Markdown/MDX files
-        return await this.directoryContainsMarkdownFiles(sourcePath);
+        return await directoryContainsMatchingFile(sourcePath, (fileName) =>
+          this.isMarkdownFileName(fileName)
+        );
       }
     } catch {
       return false;
@@ -90,7 +95,9 @@ export class MarkdownFormatParser extends BaseParser {
    * Recursively finds all .md files and combines them
    */
   private async parseDirectory(dirPath: string): Promise<DocNode> {
-    const files = (await this.findMarkdownFiles(dirPath)).sort();
+    const files = (
+      await findFilesRecursively(dirPath, (fileName) => this.isMarkdownFileName(fileName))
+    ).sort();
 
     if (files.length === 0) {
       throw new Error(`No markdown or MDX files found in ${dirPath}`);
@@ -108,45 +115,6 @@ export class MarkdownFormatParser extends BaseParser {
     const { mergeMarkdownDocuments } = await import('./adapter.js');
     const dirName = dirPath.split('/').pop() || 'Documentation';
     return mergeMarkdownDocuments(docs, dirName);
-  }
-
-  /**
-   * Find all Markdown/MDX files in directory recursively
-   */
-  private async findMarkdownFiles(dirPath: string): Promise<string[]> {
-    const results: string[] = [];
-    const entries = await readdir(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-
-      if (entry.isDirectory()) {
-        // Recurse into subdirectories
-        const subFiles = await this.findMarkdownFiles(fullPath);
-        results.push(...subFiles);
-      } else if (entry.isFile() && this.isMarkdownFileName(entry.name)) {
-        results.push(fullPath);
-      }
-    }
-
-    return results;
-  }
-
-  private async directoryContainsMarkdownFiles(dirPath: string): Promise<boolean> {
-    const entries = await readdir(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-      if (entry.isFile() && this.isMarkdownFileName(entry.name)) {
-        return true;
-      }
-
-      if (entry.isDirectory() && (await this.directoryContainsMarkdownFiles(fullPath))) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   private isMarkdownFileName(fileName: string): boolean {

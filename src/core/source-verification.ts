@@ -1,5 +1,5 @@
-import type { Dirent, Stats } from 'node:fs';
-import { lstat, mkdir, opendir, readFile, realpath, rm } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 import { isObjectRecord, isFileNotFoundError } from '../utils/guards.js';
@@ -11,7 +11,12 @@ import {
 import { sha256Hex } from '../utils/hash.js';
 import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
-import { isSkippedTraversalDirectory, SKIPPED_DIRECTORY_NAMES } from '../utils/traversal.js';
+import {
+  assertNoParentSymlinkComponents,
+  resolveTraversalBound,
+  SKIPPED_DIRECTORY_NAMES,
+  walkBoundedDirectoryTree,
+} from '../utils/traversal.js';
 import { describeGeneratedTextOutput } from './generated-output-metadata.js';
 import {
   buildArtifactSummaryForManifest,
@@ -301,14 +306,7 @@ interface MutableDocsTraversalState {
   // Per-subtree prune: a branch exceeded maxDepth. Does not abort sibling/
   // ancestor traversal; surfaced as traversal.truncated for honest coverage.
   depthLimited: boolean;
-  emittedMaxEntryWarning: boolean;
-  emittedMaxFileWarning: boolean;
   emittedMaxDepthWarning: boolean;
-}
-
-interface DirectoryEntriesResult {
-  entries: Dirent[];
-  reachedLimit: boolean;
 }
 
 interface FenceState {
@@ -487,12 +485,13 @@ async function inspectDocsReferences(options: {
     skippedFiles: 0,
     truncated: false,
     depthLimited: false,
-    emittedMaxEntryWarning: false,
-    emittedMaxFileWarning: false,
     emittedMaxDepthWarning: false,
   };
 
   if (options.type === 'file') {
+    // maxFiles is validated positive, so the one explicitly named docs file is
+    // always within budget. In the directory case the walk engine owns this counter.
+    state.visitedFiles++;
     await inspectDocsFile({
       absolutePath: options.resolvedPath,
       relativePath: basename(options.resolvedPath),
@@ -500,14 +499,11 @@ async function inspectDocsReferences(options: {
       files,
       warnings,
       state,
-      maxFiles: options.maxFiles,
       maxFileBytes: options.maxFileBytes,
     });
   } else {
     await traverseDocsDirectory({
       rootPath: options.resolvedPath,
-      directoryPath: options.resolvedPath,
-      depth: 0,
       files,
       warnings,
       state,
@@ -550,8 +546,6 @@ async function inspectDocsReferences(options: {
 
 async function traverseDocsDirectory(options: {
   rootPath: string;
-  directoryPath: string;
-  depth: number;
   files: SourceVerificationDocsFileEvidence[];
   warnings: string[];
   state: MutableDocsTraversalState;
@@ -560,95 +554,90 @@ async function traverseDocsDirectory(options: {
   maxFiles: number;
   maxFileBytes: number;
 }): Promise<void> {
-  if (options.state.truncated) {
-    return;
-  }
+  const { rootPath, files, warnings, state, maxDepth, maxEntries, maxFiles, maxFileBytes } =
+    options;
+  // The file budget is applied only once a docs file survives its lstat, so the
+  // event just arms the check: an entry that vanished between readdir and lstat
+  // is still reported as unreadable rather than as the budget cutoff.
+  let fileBudgetConsumed = false;
 
-  const directoryEntries = await readDirectoryEntries({
-    rootPath: options.rootPath,
-    directoryPath: options.directoryPath,
-    warnings: options.warnings,
-    state: options.state,
-    maxEntries: options.maxEntries,
-  });
-
-  if (directoryEntries === undefined) {
-    return;
-  }
-
-  const entryBudgetExhausted =
-    directoryEntries.reachedLimit && options.state.visitedEntries >= options.maxEntries;
-
-  for (const entry of directoryEntries.entries) {
-    if (options.state.truncated) {
-      return;
-    }
-
-    const entryPath = join(options.directoryPath, entry.name);
-    const relativePath = normalizePathForReport(relative(options.rootPath, entryPath));
-
-    if (entry.isSymbolicLink()) {
-      options.warnings.push(`Skipped symbolic link: ${relativePath}`);
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      if (isSkippedTraversalDirectory(entry.name)) {
-        options.warnings.push(`Skipped directory by default: ${relativePath}`);
-        continue;
+  for await (const event of walkBoundedDirectoryTree({
+    root: rootPath,
+    maxDepth,
+    maxEntries,
+    maxFiles,
+    skipDirectoryNames: true,
+    counters: state,
+  })) {
+    switch (event.kind) {
+      case 'entries-exhausted': {
+        warnings.push(`Docs traversal maxEntries reached: ${maxEntries}`);
+        state.truncated = true;
+        break;
       }
-
-      if (entryBudgetExhausted) {
-        continue;
+      case 'files-exhausted': {
+        fileBudgetConsumed = true;
+        break;
       }
-
-      if (options.depth >= options.maxDepth) {
+      case 'unreadable-directory': {
+        warnings.push(
+          `Skipped unreadable docs directory: ${normalizePathForReport(event.relativePath)}`
+        );
+        break;
+      }
+      case 'symlink': {
+        warnings.push(`Skipped symbolic link: ${normalizePathForReport(event.relativePath)}`);
+        break;
+      }
+      case 'skipped-directory': {
+        warnings.push(
+          `Skipped directory by default: ${normalizePathForReport(event.relativePath)}`
+        );
+        break;
+      }
+      case 'depth-pruned': {
         // Prune only this over-deep subtree; keep traversing siblings.
-        options.state.depthLimited = true;
-        if (!options.state.emittedMaxDepthWarning) {
-          options.warnings.push(
-            `Docs traversal pruned subtrees at max depth ${options.maxDepth} (first: ${relativePath})`
+        state.depthLimited = true;
+        if (!state.emittedMaxDepthWarning) {
+          warnings.push(
+            `Docs traversal pruned subtrees at max depth ${maxDepth} (first: ${normalizePathForReport(event.relativePath)})`
           );
-          options.state.emittedMaxDepthWarning = true;
+          state.emittedMaxDepthWarning = true;
         }
-        continue;
+        break;
       }
+      case 'file': {
+        const relativePath = normalizePathForReport(event.relativePath);
+        let stats: Stats;
+        try {
+          stats = await lstat(event.absolutePath);
+        } catch {
+          // A docs file that became unreadable between readdir and lstat (e.g. a
+          // concurrent docs rebuild) must not abort the whole verification and
+          // leave the output dir with neither a manifest nor a failure.json;
+          // record it and continue. (Parity with the source-truth traversal.)
+          warnings.push(`Skipped unreadable docs file: ${relativePath}`);
+          break;
+        }
 
-      await traverseDocsDirectory({
-        ...options,
-        directoryPath: entryPath,
-        depth: options.depth + 1,
-      });
-      continue;
-    }
+        if (fileBudgetConsumed) {
+          state.truncated = true;
+          warnings.push(`Docs traversal maxFiles reached: ${maxFiles}`);
+          return;
+        }
 
-    if (entry.isFile()) {
-      let stats: Stats;
-      try {
-        stats = await lstat(entryPath);
-      } catch {
-        // A docs file that became unreadable between readdir and lstat (e.g. a
-        // concurrent docs rebuild) must not abort the whole verification and
-        // leave the output dir with neither a manifest nor a failure.json;
-        // record it and continue. (Parity with the source-truth traversal.)
-        options.warnings.push(`Skipped unreadable docs file: ${relativePath}`);
-        continue;
+        await inspectDocsFile({
+          absolutePath: event.absolutePath,
+          relativePath,
+          stats,
+          files,
+          warnings,
+          state,
+          maxFileBytes,
+        });
+        break;
       }
-      await inspectDocsFile({
-        absolutePath: entryPath,
-        relativePath,
-        stats,
-        files: options.files,
-        warnings: options.warnings,
-        state: options.state,
-        maxFiles: options.maxFiles,
-        maxFileBytes: options.maxFileBytes,
-      });
     }
-  }
-
-  if (directoryEntries.reachedLimit) {
-    options.state.truncated = true;
   }
 }
 
@@ -659,23 +648,9 @@ async function inspectDocsFile(options: {
   files: SourceVerificationDocsFileEvidence[];
   warnings: string[];
   state: MutableDocsTraversalState;
-  maxFiles: number;
   maxFileBytes: number;
 }): Promise<void> {
   const pathForReport = normalizePathForReport(options.relativePath);
-
-  if (options.state.visitedFiles >= options.maxFiles) {
-    options.state.truncated = true;
-
-    if (!options.state.emittedMaxFileWarning) {
-      options.warnings.push(`Docs traversal maxFiles reached: ${options.maxFiles}`);
-      options.state.emittedMaxFileWarning = true;
-    }
-
-    return;
-  }
-
-  options.state.visitedFiles++;
 
   if (!isSupportedDocsFile(pathForReport)) {
     options.state.skippedFiles++;
@@ -1223,27 +1198,6 @@ async function assertOutputDirOutsideInputs(options: {
   }
 }
 
-async function assertNoParentSymlinkComponents(options: {
-  label: string;
-  path: string;
-}): Promise<void> {
-  const parsedPath = parse(options.path);
-  const parts = options.path.slice(parsedPath.root.length).split(sep).filter(Boolean);
-  let currentPath = parsedPath.root;
-
-  for (let index = 0; index < parts.length - 1; index++) {
-    currentPath = join(currentPath, parts[index] as string);
-
-    const componentStats = await lstat(currentPath);
-
-    if (componentStats.isSymbolicLink()) {
-      throw new Error(
-        `${options.label} path must not contain a symbolic link component: ${currentPath}`
-      );
-    }
-  }
-}
-
 async function assertNoExistingSymlinkPathComponents(options: {
   label: string;
   path: string;
@@ -1280,96 +1234,6 @@ async function assertNoExistingSymlinkPathComponents(options: {
       throw new Error(`${options.label} path exists and is not a directory: ${currentPath}`);
     }
   }
-}
-
-async function readDirectoryEntries(options: {
-  rootPath: string;
-  directoryPath: string;
-  warnings: string[];
-  state: MutableDocsTraversalState;
-  maxEntries: number;
-}): Promise<DirectoryEntriesResult | undefined> {
-  const remainingEntries = options.maxEntries - options.state.visitedEntries;
-  const entries: Dirent[] = [];
-  let reachedLimit = false;
-
-  if (remainingEntries <= 0) {
-    emitMaxEntryWarning(options.warnings, options.state, options.maxEntries);
-
-    return { entries, reachedLimit: true };
-  }
-
-  const allEntries: Dirent[] = [];
-
-  try {
-    const directory = await opendir(options.directoryPath);
-
-    try {
-      for await (const entry of directory) {
-        allEntries.push(entry);
-      }
-    } catch {
-      options.warnings.push(
-        `Skipped unreadable docs directory: ${normalizePathForReport(relative(options.rootPath, options.directoryPath))}`
-      );
-      return undefined;
-    }
-  } catch {
-    options.warnings.push(
-      `Skipped unreadable docs directory: ${normalizePathForReport(relative(options.rootPath, options.directoryPath))}`
-    );
-    return undefined;
-  }
-
-  // Sort BEFORE applying the entry budget so a truncated directory retains the
-  // lexicographically-first N entries deterministically, rather than whichever
-  // N the filesystem happened to return first (which made the resulting
-  // fileEvidenceIndex.aggregateHash filesystem-order-dependent).
-  allEntries.sort((a, b) => compareStringsByCodeUnit(a.name, b.name));
-
-  if (allEntries.length > remainingEntries) {
-    for (const entry of allEntries.slice(0, remainingEntries)) {
-      entries.push(entry);
-    }
-    emitMaxEntryWarning(options.warnings, options.state, options.maxEntries);
-    reachedLimit = true;
-  } else {
-    entries.push(...allEntries);
-  }
-
-  options.state.visitedEntries += entries.length;
-
-  return { entries, reachedLimit };
-}
-
-function emitMaxEntryWarning(
-  warnings: string[],
-  state: MutableDocsTraversalState,
-  maxEntries: number
-): void {
-  if (state.emittedMaxEntryWarning) {
-    return;
-  }
-
-  warnings.push(`Docs traversal maxEntries reached: ${maxEntries}`);
-  state.emittedMaxEntryWarning = true;
-}
-
-function resolveTraversalBound(
-  value: number | undefined,
-  defaultValue: number,
-  label: string,
-  allowZero: boolean
-): number {
-  if (value === undefined) {
-    return defaultValue;
-  }
-
-  if (!Number.isInteger(value) || value < 0 || (!allowZero && value === 0)) {
-    throw new Error(`${label} must be ${allowZero ? 'a non-negative' : 'a positive'} integer.`);
-  }
-
-  return value;
 }
 
 function linesWithOffsets(content: string): LineEntry[] {

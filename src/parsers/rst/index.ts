@@ -4,10 +4,11 @@
  * Handles explicit local .rst files and directories containing .rst files.
  */
 
-import { lstat, readdir } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { lstat } from 'node:fs/promises';
+import { basename } from 'node:path';
 
 import type { DocNode } from '../../core/models.js';
+import { directoryContainsMatchingFile, findFilesRecursively } from '../../utils/traversal.js';
 import { BaseParser, FormatType, ParserError } from '../base.js';
 import { mergeRstDocuments, rstToDocNode } from './adapter.js';
 import { RstParser } from './parser.js';
@@ -24,7 +25,9 @@ export class RstFormatParser extends BaseParser {
       }
 
       if (stats.isDirectory()) {
-        return await this.directoryContainsRstFiles(sourcePath);
+        return await directoryContainsMatchingFile(sourcePath, (fileName) =>
+          this.isRstFileName(fileName)
+        );
       }
     } catch {
       return false;
@@ -57,7 +60,9 @@ export class RstFormatParser extends BaseParser {
   }
 
   private async parseDirectory(dirPath: string): Promise<DocNode> {
-    const files = (await this.findRstFiles(dirPath)).sort();
+    const files = (
+      await findFilesRecursively(dirPath, (fileName) => this.isRstFileName(fileName))
+    ).sort();
 
     if (files.length === 0) {
       throw new ParserError(`No RST files found in ${dirPath}`, this.name);
@@ -71,43 +76,6 @@ export class RstFormatParser extends BaseParser {
     );
 
     return mergeRstDocuments(docs, basename(dirPath) || 'Documentation', dirPath);
-  }
-
-  private async findRstFiles(dirPath: string): Promise<string[]> {
-    const results: string[] = [];
-    const entries = (await readdir(dirPath, { withFileTypes: true })).sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
-
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        results.push(...(await this.findRstFiles(fullPath)));
-      } else if (entry.isFile() && this.isRstFileName(entry.name)) {
-        results.push(fullPath);
-      }
-    }
-
-    return results;
-  }
-
-  private async directoryContainsRstFiles(dirPath: string): Promise<boolean> {
-    const entries = (await readdir(dirPath, { withFileTypes: true })).sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
-
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-      if (entry.isFile() && this.isRstFileName(entry.name)) {
-        return true;
-      }
-
-      if (entry.isDirectory() && (await this.directoryContainsRstFiles(fullPath))) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   private isRstFileName(fileName: string): boolean {
