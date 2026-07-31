@@ -50,6 +50,19 @@ export interface FormatterGitContext {
 }
 
 /**
+ * Structural description of one generated output file, reported through
+ * `FormatterSourcePack.onOutput` as the file is written. `topLevelSections`
+ * carries the numbered top-level headings exactly as they appear in that file
+ * (root children for the full document, category children for a slice), so a
+ * caller can describe the file without re-reading it from disk.
+ */
+export interface FormatterOutputInfo {
+  path: string;
+  role: 'full' | 'category' | 'toc';
+  topLevelSections: string[];
+}
+
+/**
  * Source-pack rendering context. Its presence switches on the local-source-pack
  * behaviors (header provenance stamp, per-section `[source:]` markers, link
  * rewriting, and the optional table-of-contents output). Absent for the
@@ -62,6 +75,7 @@ export interface FormatterSourcePack {
   packRelpaths: ReadonlySet<string>;
   emitToc: boolean;
   onWarning: (warning: string) => void;
+  onOutput?: (output: FormatterOutputInfo) => void;
 }
 
 export interface FormatterOptions {
@@ -187,8 +201,22 @@ export class UniversalFormatter {
     // symlink-refusing) so a crash mid-write can't truncate the output and a
     // pre-existing symlink at the path is never followed.
     await writeTextFileSafely(filepath, content);
+    this.reportOutput(filepath, 'full', this.root);
 
     return filepath;
+  }
+
+  private reportOutput(filepath: string, role: FormatterOutputInfo['role'], node?: DocNode): void {
+    const onOutput = this.options.sourcePack?.onOutput;
+    if (onOutput === undefined) {
+      return;
+    }
+    const children = node === undefined ? [] : node.children;
+    onOutput({
+      path: filepath,
+      role,
+      topLevelSections: children.map((child, index) => `${index + 1}. ${child.title}`),
+    });
   }
 
   /**
@@ -252,6 +280,7 @@ export class UniversalFormatter {
       parts.push(this.formatNode(category, [], { file: undefined, collectWarnings: false }));
 
       await writeTextFileSafely(filepath, parts.join(''));
+      this.reportOutput(filepath, 'category', category);
       outputPaths.push(filepath);
     }
 
@@ -610,6 +639,7 @@ export class UniversalFormatter {
 
     const content = `${lines.join(NEWLINE)}${NEWLINE}`;
     await writeTextFileSafely(filepath, content);
+    this.reportOutput(filepath, 'toc');
     return filepath;
   }
 

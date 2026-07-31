@@ -3292,6 +3292,7 @@ describe('CLI compatibility behavior', () => {
     expect(implemented.get('generate-source')?.outputFiles).toEqual([
       'manifest.json',
       'llm-docs/*-llms.txt',
+      'llm-docs/index.md (seeded only when absent; agent-owned, unverified)',
       'chunks/semantic-chunks.jsonl',
     ]);
     expect(implemented.get('generate-source')?.options).toEqual([
@@ -3336,7 +3337,11 @@ describe('CLI compatibility behavior', () => {
         '--parser-plugin-manifest <path>',
         '--format <id>',
       ],
-      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt'],
+      outputFiles: [
+        'manifest.json',
+        'llm-docs/*-llms.txt',
+        'llm-docs/index.md (seeded only when absent; agent-owned, unverified)',
+      ],
       summary: expect.stringContaining('explicit parser plugin execution'),
       limitations: expect.arrayContaining([
         'explicit local source files or directories only',
@@ -3534,7 +3539,12 @@ describe('CLI compatibility behavior', () => {
       inputBoundary:
         'existing built-in-parser local-source-docs manifest.json with recorded local source path',
       options: ['--manifest <path>', '--output-dir <dir>', '--accept-drift'],
-      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
+      outputFiles: [
+        'manifest.json',
+        'llm-docs/*-llms.txt',
+        'llm-docs/index.md (seeded only when absent; agent-owned, unverified)',
+        'chunks/semantic-chunks.jsonl',
+      ],
       summary: expect.stringContaining('manifest integrity verification'),
       limitations: expect.arrayContaining([
         'built-in-parser local-source-docs manifests only',
@@ -9764,7 +9774,9 @@ describe('CLI compatibility behavior', () => {
       'Generate failed: generate --preset swift-book requires --source <explicit-local-docs-path>; presets do not select source paths.'
     );
     expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
-    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(false);
+    // The seeded agent-owned index survives stale-artifact cleanup, so llm-docs
+    // remains with only index.md inside.
+    expect(await readdir(join(outputDir, 'llm-docs'))).toEqual(['index.md']);
     expect(await pathExists(join(outputDir, 'chunks'))).toBe(false);
     expect(await readFile(keepPath, 'utf-8')).toBe('keep me\n');
   });
@@ -9993,7 +10005,9 @@ describe('CLI compatibility behavior', () => {
     expect(result.stderr).toContain('authority or official status');
     expect(result.stdout).not.toContain('Local source docs generated');
     expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
-    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(false);
+    // The seeded agent-owned index survives stale-artifact cleanup, so llm-docs
+    // remains with only index.md inside.
+    expect(await readdir(join(outputDir, 'llm-docs'))).toEqual(['index.md']);
     expect(await pathExists(join(outputDir, 'chunks'))).toBe(false);
     expect(await readFile(keepPath, 'utf-8')).toBe('keep me\n');
   });
@@ -10197,10 +10211,11 @@ describe('CLI compatibility behavior', () => {
       'Generate failed: --format asciidoc is not supported for generate --source'
     );
     expect(await pathExists(join(missingOutputDir, 'manifest.json'))).toBe(false);
-    expect(await pathExists(join(missingOutputDir, 'llm-docs'))).toBe(false);
+    // Stale tool outputs are removed; the seeded agent-owned index survives.
+    expect(await readdir(join(missingOutputDir, 'llm-docs'))).toEqual(['index.md']);
     expect(await pathExists(join(missingOutputDir, 'chunks'))).toBe(false);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'manifest.json'))).toBe(false);
-    expect(await pathExists(join(unsupportedFormatOutputDir, 'llm-docs'))).toBe(false);
+    expect(await readdir(join(unsupportedFormatOutputDir, 'llm-docs'))).toEqual(['index.md']);
     expect(await pathExists(join(unsupportedFormatOutputDir, 'chunks'))).toBe(false);
   }, 30000);
 
@@ -10578,7 +10593,8 @@ describe('CLI compatibility behavior', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('OpenAPI / Swagger document must contain a paths object');
     expect(await pathExists(join(outputDir, 'manifest.json'))).toBe(false);
-    expect(await pathExists(join(outputDir, 'llm-docs'))).toBe(false);
+    // Stale tool outputs are removed; the seeded agent-owned index survives.
+    expect(await readdir(join(outputDir, 'llm-docs'))).toEqual(['index.md']);
   });
 
   it('removes a stale manifest for failed generation tasks while continuing later tasks', async () => {
@@ -13407,8 +13423,7 @@ describe('CLI compatibility behavior', () => {
       await readFile(manifestPath, 'utf-8')
     ) as SourceVerificationManifest;
     const fileEvidenceIndex = manifest.sourceVerification.fileEvidenceIndex as
-      | (SourceVerificationFileEvidenceManifestIndex & { content?: string })
-      | undefined;
+      (SourceVerificationFileEvidenceManifestIndex & { content?: string }) | undefined;
     const sourceFile = fileEvidenceIndex?.sourceFiles[0] as
       | (SourceVerificationFileEvidenceManifestIndex['sourceFiles'][number] & {
           rawText?: string;
@@ -14168,8 +14183,7 @@ describe('CLI compatibility behavior', () => {
     const { manifestPath } = await generateSwiftFixture();
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
     const outputFile = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs') as
-      | (ManifestFileEntry & { estimatedTokenCount: unknown })
-      | undefined;
+      (ManifestFileEntry & { estimatedTokenCount: unknown }) | undefined;
 
     if (outputFile === undefined || outputFile.lineCount === undefined) {
       throw new Error('expected configured SDK generated output line metadata');
@@ -14425,8 +14439,7 @@ describe('CLI compatibility behavior', () => {
   it('requires source docs source file line and token metadata before file checks', async () => {
     const { manifestPath, manifest } = await generateSourceDocsFixture();
     const sourceFile = manifest.sourceFiles[0] as
-      | (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>)
-      | undefined;
+      (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>) | undefined;
 
     if (sourceFile === undefined) {
       throw new Error('expected generated source docs fixture source file');
@@ -14451,8 +14464,7 @@ describe('CLI compatibility behavior', () => {
   it('rejects malformed source docs source file line and token metadata before file checks', async () => {
     const { manifestPath, manifest } = await generateSourceDocsFixture();
     const sourceFile = manifest.sourceFiles[0] as
-      | (SourceDocsManifest['sourceFiles'][number] & Record<string, unknown>)
-      | undefined;
+      (SourceDocsManifest['sourceFiles'][number] & Record<string, unknown>) | undefined;
 
     if (sourceFile === undefined) {
       throw new Error('expected generated source docs fixture source file');
@@ -15336,8 +15348,7 @@ describe('CLI compatibility behavior', () => {
   it('rejects source docs manifests without source file format metadata', async () => {
     const { manifestPath, manifest } = await generateSourceDocsFixture();
     const sourceFile = manifest.sourceFiles[0] as
-      | (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>)
-      | undefined;
+      (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>) | undefined;
 
     if (sourceFile === undefined) {
       throw new Error('expected generated source docs fixture source file');
