@@ -6,10 +6,11 @@
  * symlinked entries.
  */
 
-import { lstat, readdir } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { lstat } from 'node:fs/promises';
+import { basename } from 'node:path';
 
 import type { DocNode } from '../../core/models.js';
+import { directoryContainsMatchingFile, findFilesRecursively } from '../../utils/traversal.js';
 import { BaseParser, FormatType, ParserError } from '../base.js';
 import { htmlToDocNode, mergeHtmlDocuments } from './adapter.js';
 import { parseHtmlFile } from './parser.js';
@@ -26,7 +27,9 @@ export class HtmlFormatParser extends BaseParser {
       }
 
       if (stats.isDirectory()) {
-        return await this.directoryContainsHtmlFiles(sourcePath);
+        return await directoryContainsMatchingFile(sourcePath, (fileName) =>
+          this.isHtmlFileName(fileName)
+        );
       }
     } catch {
       return false;
@@ -58,7 +61,9 @@ export class HtmlFormatParser extends BaseParser {
   }
 
   private async parseDirectory(dirPath: string): Promise<DocNode> {
-    const files = (await this.findHtmlFiles(dirPath)).sort();
+    const files = (
+      await findFilesRecursively(dirPath, (fileName) => this.isHtmlFileName(fileName))
+    ).sort();
 
     if (files.length === 0) {
       throw new ParserError(`No HTML files found in ${dirPath}`, this.name);
@@ -66,43 +71,6 @@ export class HtmlFormatParser extends BaseParser {
 
     const docs = await Promise.all(files.map((file) => parseHtmlFile(file)));
     return mergeHtmlDocuments(docs, basename(dirPath) || 'Documentation', dirPath);
-  }
-
-  private async findHtmlFiles(dirPath: string): Promise<string[]> {
-    const results: string[] = [];
-    const entries = (await readdir(dirPath, { withFileTypes: true })).sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
-
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        results.push(...(await this.findHtmlFiles(fullPath)));
-      } else if (entry.isFile() && this.isHtmlFileName(entry.name)) {
-        results.push(fullPath);
-      }
-    }
-
-    return results;
-  }
-
-  private async directoryContainsHtmlFiles(dirPath: string): Promise<boolean> {
-    const entries = (await readdir(dirPath, { withFileTypes: true })).sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
-
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-      if (entry.isFile() && this.isHtmlFileName(entry.name)) {
-        return true;
-      }
-
-      if (entry.isDirectory() && (await this.directoryContainsHtmlFiles(fullPath))) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   private isHtmlFileName(fileName: string): boolean {
