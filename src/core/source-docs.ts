@@ -57,6 +57,9 @@ const DEFAULT_SOURCE_DOCS_MAX_FILES = 5000;
 // Cap the recorded skipped-file roster so a source tree with a large vendored
 // asset set cannot balloon the manifest; a truncation warning records the fact.
 const SOURCE_DOCS_MAX_SKIPPED_FILES = 500;
+// Bound the per-extension breakdown in the unsupported-extension warning so a
+// tree with many exotic extensions cannot turn one warning into a wall.
+const SOURCE_DOCS_MAX_SKIPPED_EXTENSIONS = 10;
 const DRAFT_HEADING_PREFIX = 'DRAFT';
 
 export const SOURCE_DOCS_SCHEMA_VERSION = '0.1.0';
@@ -1014,6 +1017,7 @@ async function prepareSourceDocsInput(
     ...sourceFiles.warnings,
     ...excludeSummaryWarnings(sourceFiles.excluded, excludeGlobs),
     ...skippedSummaryWarnings(skippedFiles, truncationWarning),
+    ...unsupportedExtensionSummaryWarnings(sourceFiles.skippedFiles),
     ...(await collectDraftWarnings(selectedFiles)),
   ];
 
@@ -2160,6 +2164,51 @@ function skippedSummaryWarnings(
   }
 
   return warnings;
+}
+
+/**
+ * Aggregate warning for real skipped content: regular files whose extension no
+ * built-in parser supports (for example .pdf). Hidden files (basename starting
+ * with '.') are left out of this warning because dotfiles are tooling metadata,
+ * not documentation content, and counting them would bury the signal; they are
+ * still listed in source.skippedFiles. Aggregated per extension with a bounded,
+ * code-unit-sorted breakdown, never per file.
+ */
+function unsupportedExtensionSummaryWarnings(skippedFiles: SourceDocsSkippedFile[]): string[] {
+  const counts = new Map<string, number>();
+  let total = 0;
+
+  for (const skipped of skippedFiles) {
+    if (skipped.reason !== 'unsupported-file-type') {
+      continue;
+    }
+
+    const fileName = skipped.path.split('/').at(-1) ?? skipped.path;
+
+    if (fileName.startsWith('.')) {
+      continue;
+    }
+
+    const extension = extname(fileName).toLowerCase();
+    const key = extension.length === 0 ? '(no extension)' : extension;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    total++;
+  }
+
+  if (total === 0) {
+    return [];
+  }
+
+  const entries = [...counts.entries()].sort((a, b) => compareStringsByCodeUnit(a[0], b[0]));
+  const shown = entries
+    .slice(0, SOURCE_DOCS_MAX_SKIPPED_EXTENSIONS)
+    .map(([extension, count]) => `${extension}: ${count}`);
+  const remainder = entries.length - shown.length;
+  const suffix = remainder > 0 ? `, +${remainder} more extension(s)` : '';
+
+  return [
+    `Skipped ${total} file(s) with unsupported extensions (${shown.join(', ')}${suffix}); see source.skippedFiles.`,
+  ];
 }
 
 function cloneSourceDocsCategoriesConfig(

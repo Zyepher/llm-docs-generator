@@ -839,7 +839,6 @@ describe('split configuration recording and replay (refresh fidelity)', () => {
   });
 });
 
-
 describe('verify source-tier added-file rescan (source drift)', () => {
   it('fails the source tier when a file is added to the recorded source directory', async () => {
     const source = await makeTempDir('llm-docs-drift-');
@@ -892,9 +891,9 @@ describe('verify source-tier added-file rescan (source drift)', () => {
     const result = await verifyGenerationManifest({ manifestPath });
 
     expect(result.source?.status).toBe('passed');
-    expect(
-      result.notes?.some((note) => note.includes('source added-file rescan skipped'))
-    ).toBe(true);
+    expect(result.notes?.some((note) => note.includes('source added-file rescan skipped'))).toBe(
+      true
+    );
   });
 
   it('lists at most 20 added paths and reports the remainder as a count', async () => {
@@ -935,9 +934,41 @@ describe('verify recorded filename prefix cross-check', () => {
 
     const result = await verifyGenerationManifest({ manifestPath });
 
-    expect(result.failures.some((failure) => failure.includes('output.filenamePrefix'))).toBe(
-      true
-    );
+    expect(result.failures.some((failure) => failure.includes('output.filenamePrefix'))).toBe(true);
   });
 });
 
+describe('generate --source unsupported-extension warning', () => {
+  it('aggregates skipped unsupported extensions and excludes hidden files', async () => {
+    const source = await makeTempDir('llm-docs-skipext-');
+    await writeSourceFile(source, 'a.md', '# a\n');
+    await writeSourceFile(source, 'one.pdf', 'PDFDATA');
+    await writeSourceFile(source, 'two.pdf', 'PDFDATA');
+    await writeSourceFile(source, 'notes.docx', 'DOCXDATA');
+    await writeSourceFile(source, '.env', 'SECRET=1');
+    const outputDir = await makeTempDir('llm-docs-skipext-out-');
+
+    const { manifest } = await generate({ source, outputDir, format: 'markdown' });
+
+    const warning = manifest.warnings.find((entry) =>
+      entry.startsWith('Skipped 3 file(s) with unsupported extensions')
+    );
+    expect(warning).toBe(
+      'Skipped 3 file(s) with unsupported extensions (.docx: 1, .pdf: 2); see source.skippedFiles.'
+    );
+    expect(warning).not.toContain('.env');
+    // The hidden file is still a recorded fact in the roster.
+    expect(manifest.source.skippedFiles?.some((entry) => entry.path === '.env')).toBe(true);
+  });
+
+  it('emits no unsupported-extension warning when only hidden files are skipped', async () => {
+    const source = await makeTempDir('llm-docs-skipext-hidden-');
+    await writeSourceFile(source, 'a.md', '# a\n');
+    await writeSourceFile(source, '.npmrc', 'registry=x\n');
+    const outputDir = await makeTempDir('llm-docs-skipext-hidden-out-');
+
+    const { manifest } = await generate({ source, outputDir, format: 'markdown' });
+
+    expect(manifest.warnings.some((entry) => entry.includes('unsupported extensions'))).toBe(false);
+  });
+});
