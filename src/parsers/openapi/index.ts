@@ -65,6 +65,14 @@ interface ValueOmissions {
   notRepresentable: number;
 }
 
+// Shared per-document state threaded through the summarizers: the document is
+// needed to dereference local schema $refs, the omissions tally backs the
+// manifest warnings emitted by Wave 1.
+interface SummaryContext {
+  document: ApiDocument;
+  omissions: ValueOmissions;
+}
+
 /**
  * OpenAPI / Swagger format parser.
  */
@@ -223,7 +231,18 @@ export class OpenApiFormatParser extends BaseParser {
     const tagDescriptions = collectTagDescriptions(document);
     const omissions: ValueOmissions = { overCap: 0, notRepresentable: 0 };
     const operations = collectOperationEntries(document, paths, versionInfo, omissions);
-    root.children = groupOperationsByCategory(operations, tagDescriptions, versionInfo);
+    // The authentication category claims its id first so a real tag named
+    // "Authentication" is disambiguated by the shared uniqueId guard.
+    const usedCategoryIds = new Map<string, number>();
+    const authenticationNode = buildAuthenticationNode(document, versionInfo, usedCategoryIds);
+    const categories = groupOperationsByCategory(
+      operations,
+      tagDescriptions,
+      versionInfo,
+      usedCategoryIds
+    );
+    root.children =
+      authenticationNode !== undefined ? [authenticationNode, ...categories] : categories;
 
     const omissionWarnings = summarizeValueOmissions(omissions);
     if (omissionWarnings.length > 0) {
@@ -343,7 +362,9 @@ function convertOperation(
   const operationId = readTrimmedString(operation.operationId);
   const summary = readTrimmedString(operation.summary);
   const description = readTrimmedString(operation.description);
-  const title = summary ?? operationId ?? `${method.toUpperCase()} ${path}`;
+  const deprecated = operation.deprecated === true;
+  const baseTitle = summary ?? operationId ?? `${method.toUpperCase()} ${path}`;
+  const title = deprecated ? `${baseTitle} (deprecated)` : baseTitle;
   const nodeDescription = description ?? summary ?? '';
 
   const metadata = new Map<string, unknown>();
@@ -353,6 +374,9 @@ function convertOperation(
   metadata.set('specVersion', versionInfo.specVersion);
   if (operationId !== undefined) {
     metadata.set('operationId', operationId);
+  }
+  if (deprecated) {
+    metadata.set('deprecated', true);
   }
 
   const content = buildOperationContent(
@@ -394,14 +418,17 @@ function buildOperationContent(
   }
 ): ContentBlock[] {
   const blocks: ContentBlock[] = [];
+  const ctx: SummaryContext = { document, omissions: context.omissions };
 
-  blocks.push(
-    createDetailBlock('Endpoint', [
-      `Method: ${method.toUpperCase()}`,
-      `Path: ${path}`,
-      `Source kind: ${context.sourceKind}`,
-    ])
-  );
+  const endpointLines = [
+    `Method: ${method.toUpperCase()}`,
+    `Path: ${path}`,
+    `Source kind: ${context.sourceKind}`,
+  ];
+  if (operation.deprecated === true) {
+    endpointLines.push('Deprecated: yes');
+  }
+  blocks.push(createDetailBlock('Endpoint', endpointLines));
 
   if (context.summary !== undefined) {
     blocks.push(createDetailBlock('Summary', [context.summary]));
@@ -410,24 +437,34 @@ function buildOperationContent(
     blocks.push(createDetailBlock('Description', [context.description]));
   }
 
-  const parameterLines = summarizeParameters(parameters, context.omissions);
+  // Operation-level security overrides the document default; an explicit empty
+  // array means the operation is public.
+  const effectiveSecurity = Array.isArray(operation.security)
+    ? operation.security
+    : Array.isArray(document.security)
+      ? document.security
+      : undefined;
+  if (effectiveSecurity !== undefined) {
+    const securityLines = summarizeSecurityRequirements(effectiveSecurity);
+    if (securityLines.length > 0) {
+      blocks.push(createDetailBlock('Security', securityLines));
+    }
+  }
+
+  const parameterLines = summarizeParameters(parameters, ctx);
   if (parameterLines.length > 0) {
     blocks.push(createDetailBlock('Parameters', parameterLines));
   }
 
   const requestBodyLines =
     context.sourceKind === 'openapi'
-      ? summarizeOpenApiRequestBody(requestBody, context.omissions)
-      : summarizeSwaggerRequestBody(document, operation, parameters, context.omissions);
+      ? summarizeOpenApiRequestBody(requestBody, ctx)
+      : summarizeSwaggerRequestBody(operation, parameters, ctx);
   if (requestBodyLines.length > 0) {
     blocks.push(createDetailBlock('Request Body', requestBodyLines));
   }
 
-  const responseLines = summarizeResponses(
-    context.responses,
-    context.sourceKind,
-    context.omissions
-  );
+  const responseLines = summarizeResponses(context.responses, context.sourceKind, ctx);
   if (responseLines.length > 0) {
     blocks.push(createDetailBlock('Responses', responseLines));
   }
@@ -445,14 +482,14 @@ function createDetailBlock(title: string, lines: string[]): ContentBlock {
   );
 }
 
-function summarizeParameters(parameters: unknown[], omissions: ValueOmissions): string[] {
+function summarizeParameters(parameters: unknown[], ctx: SummaryContext): string[] {
   return parameters
-    .map((parameter) => summarizeParameter(parameter, omissions))
+    .map((parameter) => summarizeParameter(parameter, ctx))
     .filter((line): line is string => line !== undefined)
     .sort(compareParameterLines);
 }
 
-function summarizeParameter(parameter: unknown, omissions: ValueOmissions): string | undefined {
+function summarizeParameter(parameter: unknown, ctx: SummaryContext): string | undefined {
   const ref = readRef(parameter);
   if (ref !== undefined) {
     return `$ref: ${ref}`;
@@ -465,9 +502,8 @@ function summarizeParameter(parameter: unknown, omissions: ValueOmissions): stri
   const location = readTrimmedString(parameter.in) ?? 'unknown';
   const required = parameter.required === true ? 'required' : 'optional';
   const description = readTrimmedString(parameter.description);
-  const schema =
-    summarizeSchema(parameter.schema, omissions) ?? summarizeSchema(parameter, omissions);
-  const example = stringifySimpleExample(parameter.example, omissions);
+  const schema = summarizeSchema(parameter.schema, ctx) ?? summarizeSchema(parameter, ctx);
+  const example = stringifySimpleExample(parameter.example, ctx.omissions);
   const parts = [`${name} (${location}, ${required})`];
 
   if (schema !== undefined) {
@@ -485,7 +521,7 @@ function summarizeParameter(parameter: unknown, omissions: ValueOmissions): stri
 
 function summarizeOpenApiRequestBody(
   requestBody: Record<string, unknown> | undefined,
-  omissions: ValueOmissions
+  ctx: SummaryContext
 ): string[] {
   if (requestBody === undefined) {
     return [];
@@ -506,16 +542,15 @@ function summarizeOpenApiRequestBody(
   }
 
   const content = requestBody.content as Record<string, unknown>;
-  lines.push(...summarizeMediaTypeMap(content, omissions));
+  lines.push(...summarizeMediaTypeMap(content, ctx));
 
   return lines;
 }
 
 function summarizeSwaggerRequestBody(
-  document: ApiDocument,
   operation: Record<string, unknown>,
   parameters: unknown[],
-  omissions: ValueOmissions
+  ctx: SummaryContext
 ): string[] {
   const bodyParameters = parameters.filter((parameter) => {
     if (!isRecord(parameter)) {
@@ -530,7 +565,7 @@ function summarizeSwaggerRequestBody(
   }
 
   const contentTypes = readStringArray(operation.consumes);
-  const fallbackContentTypes = readStringArray(document.consumes);
+  const fallbackContentTypes = readStringArray(ctx.document.consumes);
   const effectiveContentTypes =
     contentTypes.length > 0
       ? contentTypes
@@ -545,8 +580,7 @@ function summarizeSwaggerRequestBody(
       continue;
     }
     const name = readTrimmedString(parameter.name) ?? '(unnamed)';
-    const schema =
-      summarizeSchema(parameter.schema, omissions) ?? summarizeSchema(parameter, omissions);
+    const schema = summarizeSchema(parameter.schema, ctx) ?? summarizeSchema(parameter, ctx);
     const description = readTrimmedString(parameter.description);
     const parts = [`${name} (${readTrimmedString(parameter.in) ?? 'body'})`];
     if (schema !== undefined) {
@@ -564,12 +598,12 @@ function summarizeSwaggerRequestBody(
 function summarizeResponses(
   responses: Record<string, unknown>,
   sourceKind: ApiSourceKind,
-  omissions: ValueOmissions
+  ctx: SummaryContext
 ): string[] {
   return Object.keys(responses)
     .filter((status) => !status.toLowerCase().startsWith('x-'))
     .sort(compareResponseStatus)
-    .map((status) => summarizeResponse(status, responses[status], sourceKind, omissions))
+    .map((status) => summarizeResponse(status, responses[status], sourceKind, ctx))
     .filter((line): line is string => line !== undefined);
 }
 
@@ -577,7 +611,7 @@ function summarizeResponse(
   status: string,
   response: unknown,
   sourceKind: ApiSourceKind,
-  omissions: ValueOmissions
+  ctx: SummaryContext
 ): string | undefined {
   const ref = readRef(response);
   if (ref !== undefined) {
@@ -591,18 +625,18 @@ function summarizeResponse(
   const parts = [`${status}: ${description}`];
 
   if (sourceKind === 'swagger') {
-    const schema = summarizeSchema(response.schema, omissions);
+    const schema = summarizeSchema(response.schema, ctx);
     if (schema !== undefined) {
       parts.push(`schema ${schema}`);
     }
-    const swaggerExamples = summarizeSwaggerExamples(response.examples, omissions);
+    const swaggerExamples = summarizeSwaggerExamples(response.examples, ctx.omissions);
     if (swaggerExamples.length > 0) {
       parts.push(`examples ${swaggerExamples.join('; ')}`);
     }
   }
 
   const content = isRecord(response.content) ? response.content : {};
-  const mediaTypes = summarizeMediaTypeMap(content, omissions);
+  const mediaTypes = summarizeMediaTypeMap(content, ctx);
   if (mediaTypes.length > 0) {
     parts.push(mediaTypes.join('; '));
   }
@@ -610,29 +644,26 @@ function summarizeResponse(
   return parts.join('; ');
 }
 
-function summarizeMediaTypeMap(
-  content: Record<string, unknown>,
-  omissions: ValueOmissions
-): string[] {
+function summarizeMediaTypeMap(content: Record<string, unknown>, ctx: SummaryContext): string[] {
   return Object.keys(content)
     .sort(compareText)
-    .map((contentType) => summarizeMediaType(contentType, content[contentType], omissions))
+    .map((contentType) => summarizeMediaType(contentType, content[contentType], ctx))
     .filter((line): line is string => line !== undefined);
 }
 
 function summarizeMediaType(
   contentType: string,
   mediaType: unknown,
-  omissions: ValueOmissions
+  ctx: SummaryContext
 ): string | undefined {
   if (!isRecord(mediaType)) {
     return `${contentType}: no schema declared`;
   }
 
   const parts = [
-    `${contentType}: ${summarizeSchema(mediaType.schema, omissions) ?? 'no schema declared'}`,
+    `${contentType}: ${summarizeSchema(mediaType.schema, ctx) ?? 'no schema declared'}`,
   ];
-  const examples = summarizeMediaExamples(mediaType, omissions);
+  const examples = summarizeMediaExamples(mediaType, ctx.omissions);
   if (examples.length > 0) {
     parts.push(`examples ${examples.join('; ')}`);
   }
@@ -695,14 +726,10 @@ function summarizeSwaggerExamples(examples: unknown, omissions: ValueOmissions):
 
 function summarizeSchema(
   schema: unknown,
-  omissions: ValueOmissions,
+  ctx: SummaryContext,
   seen = new WeakSet<object>(),
   memo = new WeakMap<object, string | undefined>()
 ): string | undefined {
-  const ref = readRef(schema);
-  if (ref !== undefined) {
-    return ref;
-  }
   if (!isRecord(schema)) {
     return undefined;
   }
@@ -722,11 +749,28 @@ function summarizeSchema(
   let result: string | undefined;
   try {
     result = ((): string | undefined => {
+      const ref = readRef(schema);
+      if (ref !== undefined) {
+        // Dereference only document-local schema refs; external or unknown
+        // pointers stay verbatim (never fetched). The resolved target flows
+        // through the same seen/memo guards, so self-referential schemas
+        // collapse to "circular schema" instead of recursing forever.
+        const resolved = resolveLocalSchemaRef(ref, ctx.document);
+        if (resolved === undefined) {
+          return ref;
+        }
+        const target = summarizeSchema(resolved.schema, ctx, seen, memo);
+        if (target === undefined) {
+          return ref;
+        }
+        return target.startsWith('{') ? `${resolved.name}${target}` : `${resolved.name}(${target})`;
+      }
+
       for (const compositionKey of ['oneOf', 'anyOf', 'allOf'] as const) {
         const values = schema[compositionKey];
         if (Array.isArray(values) && values.length > 0) {
           const summaries = values
-            .map((value) => summarizeSchema(value, omissions, seen, memo))
+            .map((value) => summarizeSchema(value, ctx, seen, memo))
             .filter((summary): summary is string => summary !== undefined);
           if (summaries.length > 0) {
             return `${compositionKey}<${summaries.join(' | ')}>`;
@@ -736,7 +780,7 @@ function summarizeSchema(
 
       const enumValues = Array.isArray(schema.enum)
         ? schema.enum
-            .map((value) => stringifySimpleExample(value, omissions))
+            .map((value) => stringifySimpleExample(value, ctx.omissions))
             .filter((value): value is string => value !== undefined)
         : [];
       if (enumValues.length > 0) {
@@ -746,13 +790,14 @@ function summarizeSchema(
       const type = readTrimmedString(schema.type);
       const format = readTrimmedString(schema.format);
       if (type === 'array') {
-        return `array<${summarizeSchema(schema.items, omissions, seen, memo) ?? 'unknown'}>`;
+        return `array<${summarizeSchema(schema.items, ctx, seen, memo) ?? 'unknown'}>`;
+      }
+      const propertySummary = summarizeObjectProperties(schema, ctx, seen, memo);
+      if (propertySummary !== undefined && (type === undefined || type === 'object')) {
+        return propertySummary;
       }
       if (type !== undefined) {
         return format !== undefined ? `${type}(${format})` : type;
-      }
-      if (isRecord(schema.properties)) {
-        return 'object';
       }
 
       return 'inline schema';
@@ -768,6 +813,221 @@ function summarizeSchema(
 
   memo.set(schema, result);
   return result;
+}
+
+function summarizeObjectProperties(
+  schema: Record<string, unknown>,
+  ctx: SummaryContext,
+  seen: WeakSet<object>,
+  memo: WeakMap<object, string | undefined>
+): string | undefined {
+  const properties = schema.properties;
+  if (!isRecord(properties)) {
+    return undefined;
+  }
+
+  const names = Object.keys(properties).sort(compareText);
+  if (names.length === 0) {
+    return undefined;
+  }
+
+  const required = new Set(readStringArray(schema.required));
+  const parts = names.map((name) => {
+    const summary = summarizeSchema(properties[name], ctx, seen, memo) ?? 'unknown';
+    return `${name}${required.has(name) ? '' : '?'}: ${summary}`;
+  });
+
+  return `{${parts.join(', ')}}`;
+}
+
+// Resolves #/components/schemas/<name> (OpenAPI 3.x) and #/definitions/<name>
+// (Swagger 2.0) against the loaded document. Anything else (external files,
+// URLs, non-schema pointers, deeper paths) is left to the caller verbatim.
+function resolveLocalSchemaRef(
+  ref: string,
+  document: ApiDocument
+): { name: string; schema: Record<string, unknown> } | undefined {
+  const match = /^#\/(components\/schemas|definitions)\/([^/]+)$/.exec(ref);
+  const rawName = match?.[2];
+  if (match === null || rawName === undefined) {
+    return undefined;
+  }
+
+  // JSON pointer segments escape "/" as "~1" and "~" as "~0" (in that order).
+  const name = rawName.replaceAll('~1', '/').replaceAll('~0', '~');
+  const container =
+    match[1] === 'definitions'
+      ? document.definitions
+      : isRecord(document.components)
+        ? document.components.schemas
+        : undefined;
+  if (!isRecord(container) || !hasOwn(container, name)) {
+    return undefined;
+  }
+
+  const schema = container[name];
+  return isRecord(schema) ? { name, schema } : undefined;
+}
+
+// Renders the effective security requirements of an operation. The outer array
+// lists alternatives (any one line suffices); entries within a line are all
+// required together. An empty array or an empty requirement object means the
+// operation is callable without credentials.
+function summarizeSecurityRequirements(security: unknown[]): string[] {
+  if (security.length === 0) {
+    return ['none (no authentication required)'];
+  }
+
+  return security
+    .map((requirement) => {
+      if (!isRecord(requirement)) {
+        return undefined;
+      }
+      const names = Object.keys(requirement).sort(compareText);
+      if (names.length === 0) {
+        return 'none (no authentication required)';
+      }
+      return names
+        .map((name) => {
+          const scopes = readStringArray(requirement[name]);
+          return scopes.length > 0 ? `${name} (scopes: ${scopes.join(', ')})` : name;
+        })
+        .join(' + ');
+    })
+    .filter((line): line is string => line !== undefined);
+}
+
+// Builds the synthetic Authentication category summarizing the document's
+// security schemes and default requirements, so a pack states how to
+// authenticate. Structural fields only (type, scheme, location); never secrets.
+function buildAuthenticationNode(
+  document: ApiDocument,
+  versionInfo: ApiVersionInfo,
+  usedCategoryIds: Map<string, number>
+): DocNode | undefined {
+  const schemes =
+    versionInfo.sourceKind === 'swagger'
+      ? document.securityDefinitions
+      : isRecord(document.components)
+        ? document.components.securitySchemes
+        : undefined;
+
+  const schemeLines: string[] = [];
+  if (isRecord(schemes)) {
+    for (const name of Object.keys(schemes).sort(compareText)) {
+      const line = summarizeSecurityScheme(name, schemes[name]);
+      if (line !== undefined) {
+        schemeLines.push(line);
+      }
+    }
+  }
+
+  const defaultSecurityLines = Array.isArray(document.security)
+    ? summarizeSecurityRequirements(document.security)
+    : [];
+
+  if (schemeLines.length === 0 && defaultSecurityLines.length === 0) {
+    return undefined;
+  }
+
+  const blocks: ContentBlock[] = [];
+  if (schemeLines.length > 0) {
+    blocks.push(createDetailBlock('Security Schemes', schemeLines));
+  }
+  if (defaultSecurityLines.length > 0) {
+    blocks.push(createDetailBlock('Default Security', defaultSecurityLines));
+  }
+
+  const metadata = new Map<string, unknown>();
+  metadata.set('sourceKind', versionInfo.sourceKind);
+  metadata.set('synthetic', 'authentication');
+
+  return createDocNode(
+    DocNodeType.CATEGORY,
+    uniqueSlug('Authentication', usedCategoryIds),
+    'Authentication',
+    {
+      description: 'Authentication and authorization requirements declared by this API document.',
+      content: blocks,
+      metadata,
+    }
+  );
+}
+
+function summarizeSecurityScheme(name: string, scheme: unknown): string | undefined {
+  const ref = readRef(scheme);
+  if (ref !== undefined) {
+    return `${name}: $ref ${ref}`;
+  }
+  if (!isRecord(scheme)) {
+    return undefined;
+  }
+
+  const type = readTrimmedString(scheme.type) ?? 'unknown';
+  const details: string[] = [];
+
+  if (type === 'apiKey') {
+    const location = readTrimmedString(scheme.in);
+    const keyName = readTrimmedString(scheme.name);
+    if (location !== undefined) {
+      details.push(`in ${location}`);
+    }
+    if (keyName !== undefined) {
+      details.push(`name: ${keyName}`);
+    }
+  } else if (type === 'http') {
+    const httpScheme = readTrimmedString(scheme.scheme);
+    const bearerFormat = readTrimmedString(scheme.bearerFormat);
+    if (httpScheme !== undefined) {
+      details.push(`scheme: ${httpScheme}`);
+    }
+    if (bearerFormat !== undefined) {
+      details.push(`bearerFormat: ${bearerFormat}`);
+    }
+  } else if (type === 'oauth2') {
+    // OpenAPI 3.x nests flow objects under `flows`; Swagger 2.0 uses a single
+    // top-level `flow` string with a flat `scopes` map.
+    const flowNames: string[] = [];
+    const scopeNames = new Set<string>();
+    if (isRecord(scheme.flows)) {
+      for (const flowName of Object.keys(scheme.flows).sort(compareText)) {
+        flowNames.push(flowName);
+        const flow = scheme.flows[flowName];
+        if (isRecord(flow) && isRecord(flow.scopes)) {
+          for (const scope of Object.keys(flow.scopes)) {
+            scopeNames.add(scope);
+          }
+        }
+      }
+    }
+    const swaggerFlow = readTrimmedString(scheme.flow);
+    if (swaggerFlow !== undefined) {
+      flowNames.push(swaggerFlow);
+    }
+    if (isRecord(scheme.scopes)) {
+      for (const scope of Object.keys(scheme.scopes)) {
+        scopeNames.add(scope);
+      }
+    }
+    if (flowNames.length > 0) {
+      details.push(`flows: ${flowNames.join(', ')}`);
+    }
+    if (scopeNames.size > 0) {
+      details.push(`scopes: ${[...scopeNames].sort(compareText).join(', ')}`);
+    }
+  } else if (type === 'openIdConnect') {
+    const url = readTrimmedString(scheme.openIdConnectUrl);
+    if (url !== undefined) {
+      details.push(`url: ${url}`);
+    }
+  }
+
+  const description = readTrimmedString(scheme.description);
+  const parts = [`${name}: ${type}${details.length > 0 ? ` (${details.join(', ')})` : ''}`];
+  if (description !== undefined) {
+    parts.push(description);
+  }
+  return parts.join('; ');
 }
 
 function readParameterArray(value: unknown, context: string): unknown[] {
@@ -1054,7 +1314,8 @@ function getFirstTag(operation: Record<string, unknown>): string | undefined {
 function groupOperationsByCategory(
   operations: OperationEntry[],
   tagDescriptions: Map<string, string>,
-  versionInfo: ApiVersionInfo
+  versionInfo: ApiVersionInfo,
+  usedCategoryIds: Map<string, number>
 ): DocNode[] {
   const grouped = new Map<string, OperationEntry[]>();
 
@@ -1067,7 +1328,6 @@ function groupOperationsByCategory(
     }
   }
 
-  const usedCategoryIds = new Map<string, number>();
   return [...grouped.keys()].sort(compareText).map((categoryTitle) => {
     const categoryOperations = grouped.get(categoryTitle) ?? [];
     const metadata = new Map<string, unknown>();

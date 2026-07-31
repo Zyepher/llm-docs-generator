@@ -1299,4 +1299,335 @@ describe('OpenAPI / Swagger parser', () => {
     expect(full).toContain('example 10');
     expect(full).not.toContain(big);
   });
+
+  it('marks deprecated operations in the title, endpoint block, and metadata', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'deprecated.openapi.json');
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Deprecation API', version: '1.0.0' },
+      paths: {
+        '/old': {
+          get: {
+            operationId: 'oldOp',
+            summary: 'Old operation',
+            deprecated: true,
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+        '/new': {
+          get: {
+            operationId: 'newOp',
+            summary: 'New operation',
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+    const oldOp = findNode(root, 'oldOp');
+    const newOp = findNode(root, 'newOp');
+
+    expect(oldOp?.title).toBe('Old operation (deprecated)');
+    expect(oldOp?.metadata.get('deprecated')).toBe(true);
+    expect(collectContent(oldOp as DocNode)).toContain('Deprecated: yes');
+
+    expect(newOp?.title).toBe('New operation');
+    expect(newOp?.metadata.get('deprecated')).toBeUndefined();
+    expect(collectContent(newOp as DocNode)).not.toContain('Deprecated: yes');
+  });
+
+  it('summarizes OpenAPI security schemes and per-operation security requirements', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'secure.openapi.json');
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Secure API', version: '1.0.0' },
+      security: [{ api_key: [] }],
+      components: {
+        securitySchemes: {
+          api_key: {
+            type: 'apiKey',
+            in: 'header',
+            name: 'X-API-Key',
+            description: 'Static key issued per account.',
+          },
+          bearer_auth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+          oauth: {
+            type: 'oauth2',
+            flows: {
+              authorizationCode: {
+                authorizationUrl: 'https://example.com/oauth/authorize',
+                tokenUrl: 'https://example.com/oauth/token',
+                scopes: { 'read:pets': 'Read pets', 'write:pets': 'Write pets' },
+              },
+            },
+          },
+          oidc: {
+            type: 'openIdConnect',
+            openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+          },
+        },
+      },
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            responses: { '200': { description: 'ok' } },
+          },
+          post: {
+            operationId: 'createPet',
+            security: [{ oauth: ['write:pets'] }, { api_key: [] }],
+            responses: { '201': { description: 'created' } },
+          },
+        },
+        '/health': {
+          get: {
+            operationId: 'health',
+            security: [],
+            responses: { '204': { description: 'ok' } },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+
+    const authentication = findNode(root, 'authentication');
+    expect(root.children[0]?.id).toBe('authentication');
+    expect(authentication).toMatchObject({
+      type: DocNodeType.CATEGORY,
+      title: 'Authentication',
+    });
+    const authContent = collectContent(authentication as DocNode);
+    expect(authContent).toContain(
+      'api_key: apiKey (in header, name: X-API-Key); Static key issued per account.'
+    );
+    expect(authContent).toContain('bearer_auth: http (scheme: bearer, bearerFormat: JWT)');
+    expect(authContent).toContain(
+      'oauth: oauth2 (flows: authorizationCode, scopes: read:pets, write:pets)'
+    );
+    expect(authContent).toContain(
+      'oidc: openIdConnect (url: https://example.com/.well-known/openid-configuration)'
+    );
+    expect(authContent).toContain('Default Security');
+    expect(authContent).toContain('api_key');
+
+    // Document-level security applies when the operation declares none.
+    const listPetsContent = collectContent(findNode(root, 'listPets') as DocNode);
+    expect(listPetsContent).toContain('Security');
+    expect(listPetsContent).toContain('- api_key');
+
+    // Operation-level security overrides the document default; alternatives
+    // render as separate lines.
+    const createPetContent = collectContent(findNode(root, 'createPet') as DocNode);
+    expect(createPetContent).toContain('oauth (scopes: write:pets)');
+    expect(createPetContent).toContain('- api_key');
+
+    // An explicit empty security array marks the operation as public.
+    const healthContent = collectContent(findNode(root, 'health') as DocNode);
+    expect(healthContent).toContain('none (no authentication required)');
+  });
+
+  it('summarizes Swagger securityDefinitions and keeps tag collisions unambiguous', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'secure.swagger.json');
+
+    await writeJson(sourcePath, {
+      swagger: '2.0',
+      info: { title: 'Secure Store', version: '1.0.0' },
+      securityDefinitions: {
+        basic_auth: { type: 'basic' },
+        petstore_auth: {
+          type: 'oauth2',
+          flow: 'implicit',
+          authorizationUrl: 'https://example.com/oauth',
+          scopes: { 'read:store': 'Read store' },
+        },
+      },
+      tags: [{ name: 'Authentication', description: 'Login endpoints.' }],
+      paths: {
+        '/login': {
+          post: {
+            operationId: 'login',
+            tags: ['Authentication'],
+            security: [{ basic_auth: [] }],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+
+    const synthetic = findNode(root, 'authentication');
+    expect(synthetic?.metadata.get('synthetic')).toBe('authentication');
+    const authContent = collectContent(synthetic as DocNode);
+    expect(authContent).toContain('basic_auth: basic');
+    expect(authContent).toContain('petstore_auth: oauth2 (flows: implicit, scopes: read:store)');
+
+    // The real "Authentication" tag keeps its own disambiguated category id.
+    const tagCategory = findNode(root, 'authentication-2');
+    expect(tagCategory).toMatchObject({
+      type: DocNodeType.CATEGORY,
+      title: 'Authentication',
+      description: 'Login endpoints.',
+    });
+    expect(collectContent(findNode(root, 'login') as DocNode)).toContain('- basic_auth');
+  });
+
+  it('dereferences local schema refs into bounded field summaries', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'refs.openapi.json');
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Ref API', version: '1.0.0' },
+      components: {
+        schemas: {
+          Widget: {
+            type: 'object',
+            required: ['id'],
+            properties: {
+              id: { type: 'string' },
+              kind: { type: 'string', enum: ['gear', 'lever'] },
+              parts: { type: 'array', items: { $ref: '#/components/schemas/Widget' } },
+            },
+          },
+        },
+      },
+      paths: {
+        '/widgets': {
+          get: {
+            operationId: 'listWidgets',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Widget' },
+                  },
+                  'application/xml': {
+                    schema: { $ref: 'https://example.com/remote.yaml#/Widget' },
+                  },
+                  'text/plain': {
+                    schema: { $ref: '#/components/schemas/Missing' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+    const content = collectContent(findNode(root, 'listWidgets') as DocNode);
+
+    // Local ref resolves to a named field summary; the self reference through
+    // the array items collapses via the cycle guard instead of recursing.
+    expect(content).toContain(
+      'application/json: Widget{id: string, kind?: enum<"gear" | "lever">, parts?: array<Widget(circular schema)>}'
+    );
+    // External and unresolvable refs stay verbatim and are never fetched.
+    expect(content).toContain('application/xml: https://example.com/remote.yaml#/Widget');
+    expect(content).toContain('text/plain: #/components/schemas/Missing');
+  });
+
+  it('dereferences Swagger definitions and renders inline object properties', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'refs.swagger.json');
+
+    await writeJson(sourcePath, {
+      swagger: '2.0',
+      info: { title: 'Ref Store', version: '1.0.0' },
+      definitions: {
+        Pet: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: { type: 'string' },
+            age: { type: 'integer', format: 'int32' },
+          },
+        },
+      },
+      paths: {
+        '/pets': {
+          post: {
+            operationId: 'createPet',
+            parameters: [
+              {
+                name: 'pet',
+                in: 'body',
+                required: true,
+                schema: { $ref: '#/definitions/Pet' },
+              },
+              {
+                name: 'filter',
+                in: 'query',
+                schema: {
+                  type: 'object',
+                  properties: { q: { type: 'string' } },
+                },
+              },
+            ],
+            responses: { '201': { description: 'created' } },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+    const content = collectContent(findNode(root, 'createPet') as DocNode);
+
+    expect(content).toContain('schema Pet{age?: integer(int32), name: string}');
+    expect(content).toContain('schema {q?: string}');
+  });
+
+  it('keeps dereferenced schema summaries bounded by the summary cap', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'refs-cap.openapi.json');
+
+    const properties: Record<string, unknown> = {};
+    for (let index = 0; index < 40; index++) {
+      properties[`field_${String(index).padStart(2, '0')}`] = { type: 'string' };
+    }
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Cap API', version: '1.0.0' },
+      components: {
+        schemas: {
+          Big: { type: 'object', properties },
+        },
+      },
+      paths: {
+        '/big': {
+          get: {
+            operationId: 'getBig',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': { schema: { $ref: '#/components/schemas/Big' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+    const content = collectContent(findNode(root, 'getBig') as DocNode);
+    const summary = /application\/json: (Big\{[^\n]*)/.exec(content)?.[1];
+
+    expect(summary).toBeDefined();
+    // MAX_SCHEMA_SUMMARY_LENGTH bounds the dereferenced summary.
+    expect((summary ?? '').length).toBeLessThanOrEqual(200);
+    expect(summary?.endsWith('…')).toBe(true);
+  });
 });
