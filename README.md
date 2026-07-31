@@ -95,7 +95,7 @@ llm-docs verify  --output-dir ./agent-docs/tailwind-v3   # confirm the pack stil
 
 `verify` re-hashes every file the manifest lists, reports any file in the pack it does not cover, and tells you, deterministically, whether the pack still matches what was generated. It checks in both directions: an unlisted file that imitates the tool's own output naming fails verification, and files added to the pinned source directory since generation fail the source tier with the exact paths named. Anything else unlisted (the agent-owned `llm-docs/index.md`, a stray `.DS_Store`) is listed informationally and never fails the pack. Two commands keep a pack trustworthy: `verify` catches drift or corruption, and `llm-docs refresh` rebuilds the pack from the exact source and options recorded in its manifest, same filenames, same splits, same exclusions, byte-identical when nothing upstream changed. When the upstream docs do change, your agent re-fetches that source and regenerates.
 
-That is the general path, and it works for almost any library with real docs: your agent finds the right version's source and converts it. A few popular SDKs (Supabase's clients) are wired in as a single `--sdk` command, with no source hunting at all.
+That is the general path, and it works for almost any library with real docs: your agent finds the right version's source and converts it. One vendor ships built in: the Supabase client SDKs, the tool's original use case, are wired up as a single `--sdk` command with no source hunting at all.
 
 ---
 
@@ -115,7 +115,7 @@ That is the general path, and it works for almost any library with real docs: yo
 
 ## What else you can do with it
 
-- **A Supabase client SDK? Even simpler.** If you use one (JavaScript/TypeScript, Swift, Kotlin, Dart/Flutter, Python, C#), skip the source hunting: it's a single built-in command. _(`llm-docs generate --sdk javascript --sdk-version v2 --output-dir ./agent-docs`)_ Pass `--output-dir`; without it, `--sdk` writes to its legacy monorepo default (`../../public/llms-openref`, outside your project).
+- **A Supabase client SDK? Even simpler.** The tool cut its teeth on Supabase's docs, so those clients (JavaScript/TypeScript, Swift, Kotlin, Dart/Flutter, Python, C#) are the one built-in catalog: skip the source hunting, it's a single command. Every other library goes through the general `--source` path above, by design; the engine stays neutral about whose docs are authoritative. _(`llm-docs generate --sdk javascript --sdk-version v2 --output-dir ./agent-docs`)_ Pass `--output-dir`; without it, `--sdk` writes to its legacy monorepo default (`../../public/llms-openref`, outside your project).
 - **Turn your own docs into a pack.** Point it at a local OpenAPI/Swagger spec, a Markdown/MDX/DocC folder, reStructuredText, or HTML, and get the same clean, manifest-backed output. _(`llm-docs generate --source ./docs --output-dir ./agent-docs`)_
 - **Teach it a format it doesn't know.** Docs in a custom or proprietary shape? Write a small parser plugin and it reads your own. (See [`index.md`](index.md) for the plugin manifest format and [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md) for the plugin workflow.)
 - **Teach it a private marker syntax.** Docs that embed tab switchers or other directive comments in an explicit marker syntax? Add a small markdown _directive dialect_ — a deterministic transform keyed to that exact marker. (See [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md), _Adding a markdown directive dialect_.)
@@ -154,7 +154,7 @@ PDFs are deliberately absent from that list. Extracting a PDF is judgment work, 
 
 ## Getting started
 
-While packaging is being finalized, run it straight from the repo:
+Publishing to npm is planned; until that lands, run it straight from the repo:
 
 ```bash
 git clone https://github.com/Zyepher/llm-docs-generator
