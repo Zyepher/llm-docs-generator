@@ -26,8 +26,9 @@ interface SourceHintCatalog {
 }
 
 async function readSourceHintCatalog(): Promise<SourceHintCatalog> {
-  return JSON.parse(await readFile(join(repoRoot, 'config/known-sources.json'), 'utf-8')) as
-    SourceHintCatalog;
+  return JSON.parse(
+    await readFile(join(repoRoot, 'config/known-sources.json'), 'utf-8')
+  ) as SourceHintCatalog;
 }
 
 describe('source hint catalog', () => {

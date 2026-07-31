@@ -130,18 +130,22 @@ async function gitLines(cwd: string, args: string[]): Promise<string[]> {
 }
 
 async function git(cwd: string, args: string[]): Promise<GitCommandResult> {
-  const result = await execFileAsync('git', ['-c', 'protocol.ext.allow=never', '-C', cwd, ...args], {
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: GIT_COMMAND_TIMEOUT_MS,
-    env: {
-      ...process.env,
-      // Keep git non-interactive and scriptable: never block on a terminal
-      // credential prompt (fail fast instead) and never spawn an askpass helper.
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_ASKPASS: '',
-      GCM_INTERACTIVE: 'never',
-    },
-  });
+  const result = await execFileAsync(
+    'git',
+    ['-c', 'protocol.ext.allow=never', '-C', cwd, ...args],
+    {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: GIT_COMMAND_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        // Keep git non-interactive and scriptable: never block on a terminal
+        // credential prompt (fail fast instead) and never spawn an askpass helper.
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_ASKPASS: '',
+        GCM_INTERACTIVE: 'never',
+      },
+    }
+  );
 
   return {
     stdout: result.stdout.toString(),

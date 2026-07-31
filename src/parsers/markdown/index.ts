@@ -10,10 +10,7 @@ import { DocNodeType, type DocNode } from '../../core/models.js';
 import { MarkdownParser } from './parser.js';
 import { markdownToDocNode } from './adapter.js';
 
-import {
-  directoryContainsMatchingFile,
-  findFilesRecursively,
-} from '../../utils/traversal.js';
+import { directoryContainsMatchingFile, findFilesRecursively } from '../../utils/traversal.js';
 
 /**
  * Markdown format parser
@@ -68,7 +65,8 @@ export class MarkdownFormatParser extends BaseParser {
     if (stats.isFile()) {
       // Parse single file
       return await this.parseSingleFile(sourcePath);
-    }if (stats.isDirectory()) {
+    }
+    if (stats.isDirectory()) {
       // Parse directory
       return await this.parseDirectory(sourcePath);
     }

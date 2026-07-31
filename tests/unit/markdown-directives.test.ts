@@ -15,14 +15,18 @@ describe('markdown directive registry', () => {
 
 describe('comment-directive tabs: deterministic marker detection', () => {
   it('does not apply to a document without the exact start marker', () => {
-    expect(commentDirectiveTabsExtension.appliesTo('# Heading\n\nprose without markers\n')).toBe(false);
+    expect(commentDirectiveTabsExtension.appliesTo('# Heading\n\nprose without markers\n')).toBe(
+      false
+    );
     // A stray end marker with no start marker is not an activation signal.
     expect(commentDirectiveTabsExtension.appliesTo('<!-- ::end:tabs -->\n')).toBe(false);
   });
 
   it('applies only when the exact start-marker syntax is present', () => {
     expect(
-      commentDirectiveTabsExtension.appliesTo('<!-- ::start:framework -->\n# React\n<!-- ::end:framework -->\n')
+      commentDirectiveTabsExtension.appliesTo(
+        '<!-- ::start:framework -->\n# React\n<!-- ::end:framework -->\n'
+      )
     ).toBe(true);
     expect(
       commentDirectiveTabsExtension.appliesTo('<!--   ::start:tabs variant="bundler"  -->\n')
@@ -32,12 +36,14 @@ describe('comment-directive tabs: deterministic marker detection', () => {
 
 describe('applyMarkdownDirectives: no-op guarantee (structural)', () => {
   it('returns marker-free markdown byte-for-byte unchanged', () => {
-    const plain = '# Title\n\nSome prose.\n\n## Section\n\n```ts\nconst x = 1;\n```\n\nMore text.\n';
+    const plain =
+      '# Title\n\nSome prose.\n\n## Section\n\n```ts\nconst x = 1;\n```\n\nMore text.\n';
     expect(applyMarkdownDirectives(plain)).toBe(plain);
   });
 
   it('leaves content whose only marker is inside a fenced code block unchanged', () => {
-    const fenced = '# Title\n\n```md\n<!-- ::start:tabs -->\n# Item\n<!-- ::end:tabs -->\n```\n\nafter\n';
+    const fenced =
+      '# Title\n\n```md\n<!-- ::start:tabs -->\n# Item\n<!-- ::end:tabs -->\n```\n\nafter\n';
     // Activation fires (the literal marker is present), but the fence-aware
     // transform touches nothing inside the fence, so the round-trip is exact.
     expect(applyMarkdownDirectives(fenced)).toBe(fenced);
@@ -78,9 +84,13 @@ describe('applyMarkdownDirectives: comment-directive tabs transform', () => {
   });
 
   it('uses the directive kind as the axis when no variant attribute is present', () => {
-    const input = ['# React', '<!-- ::start:framework -->', '## Solid', '<!-- ::end:framework -->', ''].join(
-      '\n'
-    );
+    const input = [
+      '# React',
+      '<!-- ::start:framework -->',
+      '## Solid',
+      '<!-- ::end:framework -->',
+      '',
+    ].join('\n');
     const output = applyMarkdownDirectives(input);
     expect(output).toContain('Solid (framework)');
   });

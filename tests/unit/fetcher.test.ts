@@ -80,7 +80,11 @@ async function createTestConfig(
     'utf-8'
   );
 
-  await writeFile(join(dir, 'categories.json'), JSON.stringify(categoriesFixture, null, 2), 'utf-8');
+  await writeFile(
+    join(dir, 'categories.json'),
+    JSON.stringify(categoriesFixture, null, 2),
+    'utf-8'
+  );
 
   const config = new ConfigLoader(dir);
   await config.load();
@@ -111,10 +115,18 @@ async function createVersionsConfig(sdkName: string, versionKeys: string[]): Pro
 
   await writeFile(
     join(dir, 'sdks.json'),
-    JSON.stringify({ sdks: { [sdkName]: { name: 'Swift', language: 'swift', versions } } }, null, 2),
+    JSON.stringify(
+      { sdks: { [sdkName]: { name: 'Swift', language: 'swift', versions } } },
+      null,
+      2
+    ),
     'utf-8'
   );
-  await writeFile(join(dir, 'categories.json'), JSON.stringify(categoriesFixture, null, 2), 'utf-8');
+  await writeFile(
+    join(dir, 'categories.json'),
+    JSON.stringify(categoriesFixture, null, 2),
+    'utf-8'
+  );
 
   const config = new ConfigLoader(dir);
   await config.load();

@@ -1019,8 +1019,9 @@ sourceTruthCommand
       console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
       console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
     } catch (error) {
-      const { SourceVerificationNoDocsEvidenceError } =
-        await import('./core/source-verification.js');
+      const { SourceVerificationNoDocsEvidenceError } = await import(
+        './core/source-verification.js'
+      );
       const errorMsg = errorMessage(error);
 
       if (error instanceof SourceVerificationNoDocsEvidenceError) {

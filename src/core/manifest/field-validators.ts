@@ -20,7 +20,11 @@ export function requiredObjectField(
   return fieldValue;
 }
 
-export function requiredStringField(value: Record<string, unknown>, field: string, label: string): string {
+export function requiredStringField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): string {
   const fieldValue = value[field];
 
   if (!isNonEmptyString(fieldValue)) {
@@ -112,7 +116,11 @@ export function optionalBooleanOrNullField(
   return fieldValue;
 }
 
-export function requiredFalseField(value: Record<string, unknown>, field: string, label: string): false {
+export function requiredFalseField(
+  value: Record<string, unknown>,
+  field: string,
+  label: string
+): false {
   const fieldValue = value[field];
 
   if (fieldValue !== false) {

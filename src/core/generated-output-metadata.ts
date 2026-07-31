@@ -37,9 +37,7 @@ export async function describeGeneratedTextOutput(
  * clean. Every manifest writer runs this before serializing, so the corruption
  * fails loudly at generation instead of shipping a masked pack.
  */
-export function assertUniqueGeneratedOutputPaths(
-  outputs: ReadonlyArray<{ path: string }>
-): void {
+export function assertUniqueGeneratedOutputPaths(outputs: ReadonlyArray<{ path: string }>): void {
   const seen = new Set<string>();
   for (const output of outputs) {
     if (seen.has(output.path)) {

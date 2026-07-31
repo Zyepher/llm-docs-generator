@@ -173,9 +173,13 @@ describe('Markdown/DocC parser and universal formatter acceptance', () => {
     expect(fullOutput).toContain('Authentication');
     expect(fullOutput).toContain('Storage');
     expect(fullOutput).toContain('Use SignInWithOTP when you need passwordless access.');
-    expect(fullOutput).toContain('Call the auth client and keep the session returned by AuthSession.');
+    expect(fullOutput).toContain(
+      'Call the auth client and keep the session returned by AuthSession.'
+    );
     expect(fullOutput).toContain('```swift\n');
-    expect(fullOutput).toContain('try await supabase.auth.signInWithOTP(email: "person@example.com")');
+    expect(fullOutput).toContain(
+      'try await supabase.auth.signInWithOTP(email: "person@example.com")'
+    );
     expect(fullOutput).toContain('```json\n');
     expect(fullOutput).toContain('{ "email": "person@example.com" }');
     expect(fullOutput).not.toContain('@Metadata');

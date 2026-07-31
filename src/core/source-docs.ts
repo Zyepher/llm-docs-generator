@@ -93,7 +93,11 @@ const DISCOVERY_REPORT_MODES = new Set([
 type SourceDocsSourceType = 'file' | 'directory';
 export type SourceDocsChunksFormat = 'jsonl';
 type BuiltInSourceDocsResolvedFormat =
-  FormatType.MARKDOWN | FormatType.OPENAPI | FormatType.OPENREF | FormatType.RST | FormatType.HTML;
+  | FormatType.MARKDOWN
+  | FormatType.OPENAPI
+  | FormatType.OPENREF
+  | FormatType.RST
+  | FormatType.HTML;
 type SourceDocsResolvedFormat = BuiltInSourceDocsResolvedFormat | string;
 
 export type SourceDocsGeneratorMetadata = GeneratorMetadata;

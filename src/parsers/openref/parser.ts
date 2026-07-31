@@ -261,8 +261,7 @@ export function getParserStats(data: SpecData): {
 } {
   const operationCount = data.operations.length;
   const exampleCount = data._totalExamples ?? 0;
-  const avgExamplesPerOperation =
-    operationCount > 0 ? exampleCount / operationCount : 0;
+  const avgExamplesPerOperation = operationCount > 0 ? exampleCount / operationCount : 0;
 
   return {
     operationCount,

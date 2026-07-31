@@ -10,11 +10,7 @@ import {
   countTextLines,
   describeGeneratedTextOutput,
 } from './generated-output-metadata.js';
-import {
-  isObjectRecord,
-  errorMessage,
-  isFileNotFoundError,
-} from '../utils/guards.js';
+import { isObjectRecord, errorMessage, isFileNotFoundError } from '../utils/guards.js';
 import { sha256Prefixed } from '../utils/hash.js';
 import { compareStringsByCodeUnit } from '../utils/sort.js';
 import { readJsonFile, writeJsonFileSafely } from '../utils/json.js';

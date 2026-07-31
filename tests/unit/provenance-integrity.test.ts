@@ -207,7 +207,11 @@ describe('generate --source --label (task 2)', () => {
     await writeSourceFile(source, 'a.md', '# A\n');
     const outputDir = await makeTempDir('llm-docs-nolabel-out-');
 
-    const { manifest } = await generate({ source: join(source, 'a.md'), outputDir, format: 'markdown' });
+    const { manifest } = await generate({
+      source: join(source, 'a.md'),
+      outputDir,
+      format: 'markdown',
+    });
 
     expect(manifest.source.label).toBeUndefined();
   });
@@ -481,9 +485,9 @@ describe('generate --source manifest.output.filenamePrefix (P1: prefix recording
     });
 
     expect(manifest.output.filenamePrefix).toBe('react-router');
-    expect(
-      manifest.generatedOutputs.every((output) => output.path.includes('react-router-'))
-    ).toBe(true);
+    expect(manifest.generatedOutputs.every((output) => output.path.includes('react-router-'))).toBe(
+      true
+    );
   });
 
   it('lets two same-basename sources produce non-colliding output filenames', async () => {
@@ -530,9 +534,7 @@ describe('generate --source manifest.output.filenamePrefix (P1: prefix recording
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
 
     const result = await verifyGenerationManifest({ manifestPath });
-    expect(
-      result.failures.some((failure) => failure.includes('output.filenamePrefix'))
-    ).toBe(true);
+    expect(result.failures.some((failure) => failure.includes('output.filenamePrefix'))).toBe(true);
   });
 
   it('still verifies a legacy manifest that omits the output block', async () => {
@@ -588,9 +590,7 @@ describe('verify provenance cross-check (P3: manifest git/label vs hash-bound he
     const result = await verifyGenerationManifest({ manifestPath });
 
     expect(result.outputs?.status).toBe('passed');
-    expect(
-      result.failures.some((failure) => failure.includes('manifest provenance'))
-    ).toBe(false);
+    expect(result.failures.some((failure) => failure.includes('manifest provenance'))).toBe(false);
     expect(result.notes).toBeUndefined();
   });
 
@@ -673,9 +673,7 @@ describe('verify provenance cross-check (P3: manifest git/label vs hash-bound he
     const result = await verifyGenerationManifest({ manifestPath });
 
     expect(result.outputs?.status).toBe('passed');
-    expect(
-      result.failures.some((failure) => failure.includes('manifest provenance'))
-    ).toBe(false);
+    expect(result.failures.some((failure) => failure.includes('manifest provenance'))).toBe(false);
     expect(result.notes?.some((note) => note.includes('provenance cross-check skipped'))).toBe(
       true
     );

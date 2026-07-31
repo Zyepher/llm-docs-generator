@@ -107,10 +107,7 @@ describe('candidate extraction decodes exactly once per boundary', () => {
   });
 
   it('never decodes llms.txt content', () => {
-    const { urls } = collectCandidateUrls(
-      'llms-txt',
-      'Docs: https://example.com/docs?a=1&amp;b=2'
-    );
+    const { urls } = collectCandidateUrls('llms-txt', 'Docs: https://example.com/docs?a=1&amp;b=2');
 
     expect(urls).toEqual(['https://example.com/docs?a=1&amp;b=2']);
   });
@@ -118,9 +115,9 @@ describe('candidate extraction decodes exactly once per boundary', () => {
 
 describe('extractMarkdownLinkUrls', () => {
   it('keeps balanced parens inside the URL', () => {
-    expect(extractMarkdownLinkUrls('[Chunking](https://en.wikipedia.org/wiki/Chunking_(writing))')).toEqual([
-      'https://en.wikipedia.org/wiki/Chunking_(writing)',
-    ]);
+    expect(
+      extractMarkdownLinkUrls('[Chunking](https://en.wikipedia.org/wiki/Chunking_(writing))')
+    ).toEqual(['https://en.wikipedia.org/wiki/Chunking_(writing)']);
   });
 
   it('stops at the whitespace before a link title', () => {

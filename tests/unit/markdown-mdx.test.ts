@@ -417,13 +417,9 @@ describe('Markdown parser structure preservation', () => {
 
     await writeFile(
       sourcePath,
-      [
-        'Intro paragraph before any heading.',
-        '',
-        '# Title',
-        '',
-        'Body under the title.',
-      ].join('\n'),
+      ['Intro paragraph before any heading.', '', '# Title', '', 'Body under the title.'].join(
+        '\n'
+      ),
       'utf-8'
     );
 

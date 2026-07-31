@@ -322,9 +322,17 @@ describe('source verification evidence', () => {
     // (not harvested) and the real `realExport` prose reference is still found.
     await writeFile(
       join(docsDir, 'guide.md'),
-      ['# Guide', '', '```', '```js', 'const a = `fakeRef`;', '```', '', 'Use `realExport` here.', ''].join(
-        '\n'
-      ),
+      [
+        '# Guide',
+        '',
+        '```',
+        '```js',
+        'const a = `fakeRef`;',
+        '```',
+        '',
+        'Use `realExport` here.',
+        '',
+      ].join('\n'),
       'utf-8'
     );
 
@@ -347,7 +355,11 @@ describe('source verification evidence', () => {
     const outputDir = join(dir, 'out');
     await mkdir(sourceDir, { recursive: true });
     await mkdir(docsDir, { recursive: true });
-    await writeFile(join(sourceDir, 'index.ts'), 'export function realExport() {\n  return 1;\n}\n', 'utf-8');
+    await writeFile(
+      join(sourceDir, 'index.ts'),
+      'export function realExport() {\n  return 1;\n}\n',
+      'utf-8'
+    );
     // A stray single backtick earlier on the line must not drop the later
     // ``realExport`` span (the code used to `break` out of the whole line).
     await writeFile(

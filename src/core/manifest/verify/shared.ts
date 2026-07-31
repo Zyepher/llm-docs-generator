@@ -9,7 +9,10 @@ import { isSha256Hash } from '../../../utils/hash.js';
 import { formatAllowedOutputKinds, isAllowedOutputKind, isInsideDirectory } from '../predicates.js';
 import type { FileCheck } from '../fs-verify.js';
 
-export function validateGeneratorMetadata(generator: Record<string, unknown>, failures: string[]): void {
+export function validateGeneratorMetadata(
+  generator: Record<string, unknown>,
+  failures: string[]
+): void {
   if (!isNonEmptyString(generator.name)) {
     failures.push('malformed manifest: generator.name must be a non-empty string');
   }

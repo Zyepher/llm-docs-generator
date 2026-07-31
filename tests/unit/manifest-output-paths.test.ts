@@ -5,10 +5,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { assertUniqueGeneratedOutputPaths } from '../../src/core/generated-output-metadata.js';
-import {
-  generateSourceDocs,
-  type SourceDocsManifest,
-} from '../../src/core/source-docs.js';
+import { generateSourceDocs, type SourceDocsManifest } from '../../src/core/source-docs.js';
 import { verifyGenerationManifest } from '../../src/core/manifest.js';
 
 const GENERATOR = { name: 'llm-docs-generator', version: '2.0.0', cliName: 'llm-docs' } as const;
@@ -88,7 +85,9 @@ describe('verify: duplicate generatedOutputs path detection', () => {
     // duplicate-path guard can catch it.
     const first = manifest.generatedOutputs[0];
     expect(first).toBeDefined();
-    manifest.generatedOutputs.push({ ...(first as SourceDocsManifest['generatedOutputs'][number]) });
+    manifest.generatedOutputs.push({
+      ...(first as SourceDocsManifest['generatedOutputs'][number]),
+    });
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
 
     const result = await verifyGenerationManifest({ manifestPath });

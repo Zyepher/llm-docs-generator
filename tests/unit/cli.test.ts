@@ -13434,7 +13434,8 @@ describe('CLI compatibility behavior', () => {
       await readFile(manifestPath, 'utf-8')
     ) as SourceVerificationManifest;
     const fileEvidenceIndex = manifest.sourceVerification.fileEvidenceIndex as
-      (SourceVerificationFileEvidenceManifestIndex & { content?: string }) | undefined;
+      | (SourceVerificationFileEvidenceManifestIndex & { content?: string })
+      | undefined;
     const sourceFile = fileEvidenceIndex?.sourceFiles[0] as
       | (SourceVerificationFileEvidenceManifestIndex['sourceFiles'][number] & {
           rawText?: string;
@@ -14194,7 +14195,8 @@ describe('CLI compatibility behavior', () => {
     const { manifestPath } = await generateSwiftFixture();
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as GenerationManifest;
     const outputFile = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs') as
-      (ManifestFileEntry & { estimatedTokenCount: unknown }) | undefined;
+      | (ManifestFileEntry & { estimatedTokenCount: unknown })
+      | undefined;
 
     if (outputFile === undefined || outputFile.lineCount === undefined) {
       throw new Error('expected configured SDK generated output line metadata');
@@ -14450,7 +14452,8 @@ describe('CLI compatibility behavior', () => {
   it('requires source docs source file line and token metadata before file checks', async () => {
     const { manifestPath, manifest } = await generateSourceDocsFixture();
     const sourceFile = manifest.sourceFiles[0] as
-      (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>) | undefined;
+      | (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>)
+      | undefined;
 
     if (sourceFile === undefined) {
       throw new Error('expected generated source docs fixture source file');
@@ -14475,7 +14478,8 @@ describe('CLI compatibility behavior', () => {
   it('rejects malformed source docs source file line and token metadata before file checks', async () => {
     const { manifestPath, manifest } = await generateSourceDocsFixture();
     const sourceFile = manifest.sourceFiles[0] as
-      (SourceDocsManifest['sourceFiles'][number] & Record<string, unknown>) | undefined;
+      | (SourceDocsManifest['sourceFiles'][number] & Record<string, unknown>)
+      | undefined;
 
     if (sourceFile === undefined) {
       throw new Error('expected generated source docs fixture source file');
@@ -15359,7 +15363,8 @@ describe('CLI compatibility behavior', () => {
   it('rejects source docs manifests without source file format metadata', async () => {
     const { manifestPath, manifest } = await generateSourceDocsFixture();
     const sourceFile = manifest.sourceFiles[0] as
-      (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>) | undefined;
+      | (Partial<SourceDocsManifest['sourceFiles'][number]> & Record<string, unknown>)
+      | undefined;
 
     if (sourceFile === undefined) {
       throw new Error('expected generated source docs fixture source file');
