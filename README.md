@@ -2,7 +2,7 @@
 
 **Give your AI coding agent the real docs for the exact library version you use, not its best guess.**
 
-Your coding agent is sharp until it hits a library that has moved on without it. It reaches for the newest API it has seen, or blends three versions together, and writes code that doesn't compile against the version you actually run. `llm-docs-generator` fixes that: it turns a library's real documentation, at the version you choose, into a clean local pack your agent reads, so it codes against the API you actually have. You stay in plain English, your agent drives the tool, and every claim in the pack traces back to where it came from.
+Your coding agent is sharp until it hits a library that has moved on without it. It reaches for the newest API it has seen, or blends three versions together, and writes code that doesn't compile against the version you actually run. `llm-docs-generator` fixes that: it turns a library's real documentation, at the version you choose, into a clean local pack your agent reads, so it codes against the API you actually have. You stay in plain English, your agent drives the tool, and every claim in the pack traces back to where it came from. Library docs are the headline use, not the boundary: the same engine packs any body of text you need an agent to read faithfully, from internal runbooks and API specs to a shelf of textbooks your agent converted from PDF.
 
 You don't run commands or memorize workflows. You talk to your agent. It does the rest.
 
@@ -123,6 +123,16 @@ That is the general path, and it works for almost any library with real docs: yo
 - **Power a search / RAG tool.** Add `--chunks jsonl` to emit semantic chunks with stable IDs, content hashes, root-relative source paths, and (for markdown-family sources) original-file line ranges.
 
 In every case the shape is the same: **you describe the goal, your agent picks the source and version, the CLI does the deterministic conversion and writes the provenance.**
+
+---
+
+## Beyond library docs: anything an agent should quote instead of half-remember
+
+The engine doesn't know it's reading a changelog. It knows structure, hashes, and provenance, which means the same loop works for any long text where "roughly what the model remembers" isn't good enough: internal runbooks, compliance policies, hardware manuals, course notes, textbooks.
+
+Say you have ten textbooks as PDFs and want a study partner that argues from the actual text. Your agent converts each book to Markdown, embedding page markers as it goes so page numbers survive into the pack, and the engine packs the conversions exactly like a docs folder: one manifest hashing every file, a seeded index mapping every book, and chunks that carry file and line ranges. From there the agent teaches from the book, cites `thermodynamics.md` lines 840 to 872 with a hash that proves those lines are what you packed, and `verify` will tell you if the material ever drifts.
+
+Two limits worth knowing before you commit an evening to it. The pack is only as faithful as the conversion: dense math and complex layouts are the hard part, and that quality question belongs to the agent, not the engine. And a pack is navigation, not search: your agent finds things through the index, the headings, and grep, which works well at this scale; if you want semantic retrieval, the chunks JSONL is the clean handoff to a real retrieval system.
 
 ---
 
