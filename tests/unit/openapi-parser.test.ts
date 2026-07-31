@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { FormatDetector } from '../../src/core/detector.js';
 import { DocNodeType, type DocNode } from '../../src/core/models.js';
+import { generateSourceDocs } from '../../src/core/source-docs.js';
 import { FormatType } from '../../src/parsers/base.js';
 import { OpenApiFormatParser, parseOpenApiFile } from '../../src/parsers/openapi/index.js';
 import { openRefParser } from '../../src/parsers/openref/index.js';
@@ -1048,5 +1049,254 @@ describe('OpenAPI / Swagger parser', () => {
 
     expect(root.children.length).toBeGreaterThan(0);
     expect(elapsedMs).toBeLessThan(2000);
+  });
+
+  it('marks oversized example values inline and records a bounded omission warning', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'oversized-examples.openapi.json');
+    const big = 'x'.repeat(400);
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Oversized API', version: '1.0.0' },
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            parameters: [
+              {
+                name: 'q',
+                in: 'query',
+                schema: { type: 'string' },
+                example: big,
+              },
+              {
+                name: 'limit',
+                in: 'query',
+                schema: { type: 'integer' },
+                example: 10,
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object' },
+                    example: { data: big },
+                    examples: {
+                      huge: { value: [big] },
+                      linked: { $ref: '#/components/examples/Pet' },
+                      remote: { summary: 'hosted', externalValue: 'https://example.com/pet.json' },
+                      small: { value: { ok: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+    const content = collectContent(root);
+
+    expect(content).toContain('example (value omitted: exceeds inline cap)');
+    expect(content).toContain('default (value omitted: exceeds inline cap)');
+    expect(content).toContain('huge (value omitted: exceeds inline cap)');
+    expect(content).toContain('linked $ref #/components/examples/Pet');
+    expect(content).toContain('remote externalValue https://example.com/pet.json');
+    expect(content).toContain('small {"ok":true}');
+    expect(content).toContain('example 10');
+    expect(content).not.toContain(big);
+
+    expect(root.metadata.get('warnings')).toEqual([
+      'Omitted 3 example or enum value(s) exceeding the inline cap; each omission is marked "(value omitted: exceeds inline cap)" in place.',
+    ]);
+  });
+
+  it('marks oversized enum values inline instead of dropping them silently', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'oversized-enum.openapi.json');
+    const big = 'y'.repeat(400);
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Enum API', version: '1.0.0' },
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'listThings',
+            parameters: [
+              {
+                name: 'kind',
+                in: 'query',
+                schema: { enum: ['small', big] },
+              },
+            ],
+            responses: {
+              '200': { description: 'ok' },
+            },
+          },
+        },
+      },
+    });
+
+    const root = await parseOpenApiFile(sourcePath);
+    const content = collectContent(root);
+
+    expect(content).toContain('schema enum<"small" | (value omitted: exceeds inline cap)>');
+    expect(root.metadata.get('warnings')).toEqual([
+      'Omitted 1 example or enum value(s) exceeding the inline cap; each omission is marked "(value omitted: exceeds inline cap)" in place.',
+    ]);
+  });
+
+  it('marks examples that are not JSON-representable and leaves clean documents warning-free', async () => {
+    const dir = await createTempDir();
+    const infPath = join(dir, 'inf-example.yaml');
+    const cleanPath = join(dir, 'clean.openapi.json');
+
+    await writeFile(
+      infPath,
+      [
+        'openapi: 3.0.0',
+        'info:',
+        '  title: Inf API',
+        '  version: 1.0.0',
+        'paths:',
+        '  /x:',
+        '    get:',
+        '      operationId: getX',
+        '      parameters:',
+        '        - name: rate',
+        '          in: query',
+        '          schema:',
+        '            type: number',
+        '          example: .inf',
+        '      responses:',
+        "        '200':",
+        '          description: ok',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    await writeJson(cleanPath, {
+      openapi: '3.0.0',
+      info: { title: 'Clean API', version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'getX',
+            parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer' }, example: 7 }],
+            responses: {
+              '200': { description: 'ok' },
+            },
+          },
+        },
+      },
+    });
+
+    const infRoot = await parseOpenApiFile(infPath);
+    const infContent = collectContent(infRoot);
+    expect(infContent).toContain('example (value omitted: not JSON-representable)');
+    expect(infRoot.metadata.get('warnings')).toEqual([
+      'Omitted 1 example or enum value(s) not representable as JSON; each omission is marked "(value omitted: not JSON-representable)" in place.',
+    ]);
+
+    const cleanRoot = await parseOpenApiFile(cleanPath);
+    expect(collectContent(cleanRoot)).toContain('example 7');
+    expect(cleanRoot.metadata.get('warnings')).toBeUndefined();
+  });
+
+  it('caps omission warnings at one summary line per reason regardless of omission count', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'many-omissions.yaml');
+    const big = 'z'.repeat(400);
+
+    const lines = [
+      'openapi: 3.0.0',
+      'info:',
+      '  title: Many Omissions API',
+      '  version: 1.0.0',
+      'paths:',
+    ];
+    for (let index = 0; index < 25; index += 1) {
+      lines.push(
+        `  /path-${index}:`,
+        '    get:',
+        `      operationId: op${index}`,
+        '      parameters:',
+        '        - name: q',
+        '          in: query',
+        '          schema:',
+        '            type: string',
+        `          example: ${big}`,
+        '        - name: rate',
+        '          in: query',
+        '          schema:',
+        '            type: number',
+        '          example: .inf',
+        '      responses:',
+        "        '200':",
+        '          description: ok'
+      );
+    }
+    lines.push('');
+
+    await writeFile(sourcePath, lines.join('\n'), 'utf-8');
+
+    const root = await parseOpenApiFile(sourcePath);
+    const warnings = root.metadata.get('warnings');
+
+    expect(Array.isArray(warnings)).toBe(true);
+    expect(warnings).toHaveLength(2);
+    expect(warnings).toEqual([
+      'Omitted 25 example or enum value(s) exceeding the inline cap; each omission is marked "(value omitted: exceeds inline cap)" in place.',
+      'Omitted 25 example or enum value(s) not representable as JSON; each omission is marked "(value omitted: not JSON-representable)" in place.',
+    ]);
+  });
+
+  it('propagates omission warnings into the manifest via generateSourceDocs', async () => {
+    const dir = await createTempDir();
+    const outputDir = await createTempDir();
+    const sourcePath = join(dir, 'manifest-omission.openapi.json');
+    const big = 'w'.repeat(400);
+
+    await writeJson(sourcePath, {
+      openapi: '3.0.0',
+      info: { title: 'Manifest API', version: '1.0.0' },
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            parameters: [
+              { name: 'q', in: 'query', schema: { type: 'string' }, example: big },
+              { name: 'limit', in: 'query', schema: { type: 'integer' }, example: 10 },
+            ],
+            responses: {
+              '200': { description: 'ok' },
+            },
+          },
+        },
+      },
+    });
+
+    const result = await generateSourceDocs({
+      source: sourcePath,
+      outputDir,
+      format: 'openapi',
+      generator: { name: 'llm-docs', version: '0.0.0-test', cliName: 'llm-docs' },
+      output: { filenamePrefix: 'pack' },
+    });
+
+    expect(result.manifest.warnings).toContain(
+      'Omitted 1 example or enum value(s) exceeding the inline cap; each omission is marked "(value omitted: exceeds inline cap)" in place.'
+    );
+
+    const full = await readFile(join(result.llmDocsDir, 'pack-full-llms.txt'), 'utf-8');
+    expect(full).toContain('example (value omitted: exceeds inline cap)');
+    expect(full).toContain('example 10');
+    expect(full).not.toContain(big);
   });
 });

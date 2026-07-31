@@ -27,6 +27,13 @@ const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch'
 const PARAMETER_LOCATION_ORDER = ['path', 'query', 'header', 'cookie', 'formData', 'body'] as const;
 const FALLBACK_CATEGORY_TITLE = 'Untagged';
 const MAX_EXAMPLE_LENGTH = 300;
+// Inline markers emitted where an example or enum value cannot be shown, so the
+// omission is visible in the pack instead of the value silently vanishing. The
+// parenthetical wording keeps them from reading as real example values, and the
+// text is deterministic (no sizes, no timestamps). A matching per-document
+// summary warning reaches the manifest via the root node's 'warnings' metadata.
+const OMITTED_VALUE_OVER_CAP = '(value omitted: exceeds inline cap)';
+const OMITTED_VALUE_NOT_REPRESENTABLE = '(value omitted: not JSON-representable)';
 // Cap each schema summary. Composition keywords (allOf/oneOf/anyOf) nest their
 // child summaries, so a YAML-anchor doubling DAG would otherwise produce an
 // O(2^depth)-length string (V8 throws "Invalid string length") even with
@@ -48,6 +55,14 @@ interface OperationEntry {
   node: DocNode;
   path: string;
   method: HttpMethod;
+}
+
+// Per-document tally of omitted example/enum values. Counters, not per-site
+// messages, so a spec with thousands of oversized examples yields at most two
+// bounded summary warnings in the manifest.
+interface ValueOmissions {
+  overCap: number;
+  notRepresentable: number;
 }
 
 /**
@@ -206,8 +221,14 @@ export class OpenApiFormatParser extends BaseParser {
     );
 
     const tagDescriptions = collectTagDescriptions(document);
-    const operations = collectOperationEntries(document, paths, versionInfo);
+    const omissions: ValueOmissions = { overCap: 0, notRepresentable: 0 };
+    const operations = collectOperationEntries(document, paths, versionInfo, omissions);
     root.children = groupOperationsByCategory(operations, tagDescriptions, versionInfo);
+
+    const omissionWarnings = summarizeValueOmissions(omissions);
+    if (omissionWarnings.length > 0) {
+      metadata.set('warnings', omissionWarnings);
+    }
 
     return root;
   }
@@ -222,7 +243,8 @@ export async function parseOpenApiFile(sourcePath: string): Promise<DocNode> {
 function collectOperationEntries(
   document: ApiDocument,
   paths: Record<string, unknown>,
-  versionInfo: ApiVersionInfo
+  versionInfo: ApiVersionInfo,
+  omissions: ValueOmissions
 ): OperationEntry[] {
   const entries: OperationEntry[] = [];
   const usedOperationIds = new Map<string, number>();
@@ -290,7 +312,8 @@ function collectOperationEntries(
         responses,
         method,
         path,
-        versionInfo
+        versionInfo,
+        omissions
       );
 
       entries.push({
@@ -314,7 +337,8 @@ function convertOperation(
   responses: Record<string, unknown>,
   method: HttpMethod,
   path: string,
-  versionInfo: ApiVersionInfo
+  versionInfo: ApiVersionInfo,
+  omissions: ValueOmissions
 ): DocNode {
   const operationId = readTrimmedString(operation.operationId);
   const summary = readTrimmedString(operation.summary);
@@ -343,6 +367,7 @@ function convertOperation(
       description,
       responses,
       sourceKind: versionInfo.sourceKind,
+      omissions,
     }
   );
 
@@ -365,6 +390,7 @@ function buildOperationContent(
     description: string | undefined;
     responses: Record<string, unknown>;
     sourceKind: ApiSourceKind;
+    omissions: ValueOmissions;
   }
 ): ContentBlock[] {
   const blocks: ContentBlock[] = [];
@@ -384,20 +410,24 @@ function buildOperationContent(
     blocks.push(createDetailBlock('Description', [context.description]));
   }
 
-  const parameterLines = summarizeParameters(parameters);
+  const parameterLines = summarizeParameters(parameters, context.omissions);
   if (parameterLines.length > 0) {
     blocks.push(createDetailBlock('Parameters', parameterLines));
   }
 
   const requestBodyLines =
     context.sourceKind === 'openapi'
-      ? summarizeOpenApiRequestBody(requestBody)
-      : summarizeSwaggerRequestBody(document, operation, parameters);
+      ? summarizeOpenApiRequestBody(requestBody, context.omissions)
+      : summarizeSwaggerRequestBody(document, operation, parameters, context.omissions);
   if (requestBodyLines.length > 0) {
     blocks.push(createDetailBlock('Request Body', requestBodyLines));
   }
 
-  const responseLines = summarizeResponses(context.responses, context.sourceKind);
+  const responseLines = summarizeResponses(
+    context.responses,
+    context.sourceKind,
+    context.omissions
+  );
   if (responseLines.length > 0) {
     blocks.push(createDetailBlock('Responses', responseLines));
   }
@@ -415,14 +445,14 @@ function createDetailBlock(title: string, lines: string[]): ContentBlock {
   );
 }
 
-function summarizeParameters(parameters: unknown[]): string[] {
+function summarizeParameters(parameters: unknown[], omissions: ValueOmissions): string[] {
   return parameters
-    .map((parameter) => summarizeParameter(parameter))
+    .map((parameter) => summarizeParameter(parameter, omissions))
     .filter((line): line is string => line !== undefined)
     .sort(compareParameterLines);
 }
 
-function summarizeParameter(parameter: unknown): string | undefined {
+function summarizeParameter(parameter: unknown, omissions: ValueOmissions): string | undefined {
   const ref = readRef(parameter);
   if (ref !== undefined) {
     return `$ref: ${ref}`;
@@ -435,8 +465,9 @@ function summarizeParameter(parameter: unknown): string | undefined {
   const location = readTrimmedString(parameter.in) ?? 'unknown';
   const required = parameter.required === true ? 'required' : 'optional';
   const description = readTrimmedString(parameter.description);
-  const schema = summarizeSchema(parameter.schema) ?? summarizeSchema(parameter);
-  const example = stringifySimpleExample(parameter.example);
+  const schema =
+    summarizeSchema(parameter.schema, omissions) ?? summarizeSchema(parameter, omissions);
+  const example = stringifySimpleExample(parameter.example, omissions);
   const parts = [`${name} (${location}, ${required})`];
 
   if (schema !== undefined) {
@@ -452,7 +483,10 @@ function summarizeParameter(parameter: unknown): string | undefined {
   return parts.join('; ');
 }
 
-function summarizeOpenApiRequestBody(requestBody: Record<string, unknown> | undefined): string[] {
+function summarizeOpenApiRequestBody(
+  requestBody: Record<string, unknown> | undefined,
+  omissions: ValueOmissions
+): string[] {
   if (requestBody === undefined) {
     return [];
   }
@@ -472,7 +506,7 @@ function summarizeOpenApiRequestBody(requestBody: Record<string, unknown> | unde
   }
 
   const content = requestBody.content as Record<string, unknown>;
-  lines.push(...summarizeMediaTypeMap(content));
+  lines.push(...summarizeMediaTypeMap(content, omissions));
 
   return lines;
 }
@@ -480,7 +514,8 @@ function summarizeOpenApiRequestBody(requestBody: Record<string, unknown> | unde
 function summarizeSwaggerRequestBody(
   document: ApiDocument,
   operation: Record<string, unknown>,
-  parameters: unknown[]
+  parameters: unknown[],
+  omissions: ValueOmissions
 ): string[] {
   const bodyParameters = parameters.filter((parameter) => {
     if (!isRecord(parameter)) {
@@ -510,7 +545,8 @@ function summarizeSwaggerRequestBody(
       continue;
     }
     const name = readTrimmedString(parameter.name) ?? '(unnamed)';
-    const schema = summarizeSchema(parameter.schema) ?? summarizeSchema(parameter);
+    const schema =
+      summarizeSchema(parameter.schema, omissions) ?? summarizeSchema(parameter, omissions);
     const description = readTrimmedString(parameter.description);
     const parts = [`${name} (${readTrimmedString(parameter.in) ?? 'body'})`];
     if (schema !== undefined) {
@@ -527,19 +563,21 @@ function summarizeSwaggerRequestBody(
 
 function summarizeResponses(
   responses: Record<string, unknown>,
-  sourceKind: ApiSourceKind
+  sourceKind: ApiSourceKind,
+  omissions: ValueOmissions
 ): string[] {
   return Object.keys(responses)
     .filter((status) => !status.toLowerCase().startsWith('x-'))
     .sort(compareResponseStatus)
-    .map((status) => summarizeResponse(status, responses[status], sourceKind))
+    .map((status) => summarizeResponse(status, responses[status], sourceKind, omissions))
     .filter((line): line is string => line !== undefined);
 }
 
 function summarizeResponse(
   status: string,
   response: unknown,
-  sourceKind: ApiSourceKind
+  sourceKind: ApiSourceKind,
+  omissions: ValueOmissions
 ): string | undefined {
   const ref = readRef(response);
   if (ref !== undefined) {
@@ -553,18 +591,18 @@ function summarizeResponse(
   const parts = [`${status}: ${description}`];
 
   if (sourceKind === 'swagger') {
-    const schema = summarizeSchema(response.schema);
+    const schema = summarizeSchema(response.schema, omissions);
     if (schema !== undefined) {
       parts.push(`schema ${schema}`);
     }
-    const swaggerExamples = summarizeSwaggerExamples(response.examples);
+    const swaggerExamples = summarizeSwaggerExamples(response.examples, omissions);
     if (swaggerExamples.length > 0) {
       parts.push(`examples ${swaggerExamples.join('; ')}`);
     }
   }
 
   const content = isRecord(response.content) ? response.content : {};
-  const mediaTypes = summarizeMediaTypeMap(content);
+  const mediaTypes = summarizeMediaTypeMap(content, omissions);
   if (mediaTypes.length > 0) {
     parts.push(mediaTypes.join('; '));
   }
@@ -572,20 +610,29 @@ function summarizeResponse(
   return parts.join('; ');
 }
 
-function summarizeMediaTypeMap(content: Record<string, unknown>): string[] {
+function summarizeMediaTypeMap(
+  content: Record<string, unknown>,
+  omissions: ValueOmissions
+): string[] {
   return Object.keys(content)
     .sort(compareText)
-    .map((contentType) => summarizeMediaType(contentType, content[contentType]))
+    .map((contentType) => summarizeMediaType(contentType, content[contentType], omissions))
     .filter((line): line is string => line !== undefined);
 }
 
-function summarizeMediaType(contentType: string, mediaType: unknown): string | undefined {
+function summarizeMediaType(
+  contentType: string,
+  mediaType: unknown,
+  omissions: ValueOmissions
+): string | undefined {
   if (!isRecord(mediaType)) {
     return `${contentType}: no schema declared`;
   }
 
-  const parts = [`${contentType}: ${summarizeSchema(mediaType.schema) ?? 'no schema declared'}`];
-  const examples = summarizeMediaExamples(mediaType);
+  const parts = [
+    `${contentType}: ${summarizeSchema(mediaType.schema, omissions) ?? 'no schema declared'}`,
+  ];
+  const examples = summarizeMediaExamples(mediaType, omissions);
   if (examples.length > 0) {
     parts.push(`examples ${examples.join('; ')}`);
   }
@@ -593,9 +640,12 @@ function summarizeMediaType(contentType: string, mediaType: unknown): string | u
   return parts.join('; ');
 }
 
-function summarizeMediaExamples(mediaType: Record<string, unknown>): string[] {
+function summarizeMediaExamples(
+  mediaType: Record<string, unknown>,
+  omissions: ValueOmissions
+): string[] {
   const examples: string[] = [];
-  const directExample = stringifySimpleExample(mediaType.example);
+  const directExample = stringifySimpleExample(mediaType.example, omissions);
   if (directExample !== undefined) {
     examples.push(`default ${directExample}`);
   }
@@ -603,12 +653,23 @@ function summarizeMediaExamples(mediaType: Record<string, unknown>): string[] {
   const namedExamples = isRecord(mediaType.examples) ? mediaType.examples : {};
   for (const name of Object.keys(namedExamples).sort(compareText)) {
     const rawExample = namedExamples[name];
-    const exampleValue = isRecord(rawExample)
-      ? 'value' in rawExample
-        ? rawExample.value
-        : undefined
-      : rawExample;
-    const example = stringifySimpleExample(exampleValue);
+    // Example Objects carry their payload in `value`, but reference objects and
+    // externalValue-only examples have no inline value; surface those instead
+    // of dropping the entry silently.
+    const ref = readRef(rawExample);
+    if (ref !== undefined) {
+      examples.push(`${name} $ref ${ref}`);
+      continue;
+    }
+    if (isRecord(rawExample) && !('value' in rawExample)) {
+      const externalValue = readTrimmedString(rawExample.externalValue);
+      if (externalValue !== undefined) {
+        examples.push(`${name} externalValue ${externalValue}`);
+      }
+      continue;
+    }
+    const exampleValue = isRecord(rawExample) ? rawExample.value : rawExample;
+    const example = stringifySimpleExample(exampleValue, omissions);
     if (example !== undefined) {
       examples.push(`${name} ${example}`);
     }
@@ -617,14 +678,14 @@ function summarizeMediaExamples(mediaType: Record<string, unknown>): string[] {
   return examples;
 }
 
-function summarizeSwaggerExamples(examples: unknown): string[] {
+function summarizeSwaggerExamples(examples: unknown, omissions: ValueOmissions): string[] {
   if (!isRecord(examples)) {
     return [];
   }
 
   const lines: string[] = [];
   for (const contentType of Object.keys(examples).sort(compareText)) {
-    const example = stringifySimpleExample(examples[contentType]);
+    const example = stringifySimpleExample(examples[contentType], omissions);
     if (example !== undefined) {
       lines.push(`${contentType} ${example}`);
     }
@@ -634,6 +695,7 @@ function summarizeSwaggerExamples(examples: unknown): string[] {
 
 function summarizeSchema(
   schema: unknown,
+  omissions: ValueOmissions,
   seen = new WeakSet<object>(),
   memo = new WeakMap<object, string | undefined>()
 ): string | undefined {
@@ -664,7 +726,7 @@ function summarizeSchema(
         const values = schema[compositionKey];
         if (Array.isArray(values) && values.length > 0) {
           const summaries = values
-            .map((value) => summarizeSchema(value, seen, memo))
+            .map((value) => summarizeSchema(value, omissions, seen, memo))
             .filter((summary): summary is string => summary !== undefined);
           if (summaries.length > 0) {
             return `${compositionKey}<${summaries.join(' | ')}>`;
@@ -674,7 +736,7 @@ function summarizeSchema(
 
       const enumValues = Array.isArray(schema.enum)
         ? schema.enum
-            .map((value) => stringifySimpleExample(value))
+            .map((value) => stringifySimpleExample(value, omissions))
             .filter((value): value is string => value !== undefined)
         : [];
       if (enumValues.length > 0) {
@@ -684,7 +746,7 @@ function summarizeSchema(
       const type = readTrimmedString(schema.type);
       const format = readTrimmedString(schema.format);
       if (type === 'array') {
-        return `array<${summarizeSchema(schema.items, seen, memo) ?? 'unknown'}>`;
+        return `array<${summarizeSchema(schema.items, omissions, seen, memo) ?? 'unknown'}>`;
       }
       if (type !== undefined) {
         return format !== undefined ? `${type}(${format})` : type;
@@ -1070,34 +1132,77 @@ function readTrimmedString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function stringifySimpleExample(value: unknown): string | undefined {
+/**
+ * Serialize an example or enum value for inline display. Returns undefined only
+ * when the value is absent; a value that is present but cannot be shown (over
+ * the inline cap, circular, or otherwise not JSON-representable) yields a
+ * visible omission marker and is tallied for the manifest warning, so content
+ * never vanishes silently.
+ */
+function stringifySimpleExample(value: unknown, omissions: ValueOmissions): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const state = { overCap: false };
   const json = stableJsonStringify(
     value,
     new WeakSet<object>(),
-    new WeakMap<object, string | undefined>()
+    new WeakMap<object, string | undefined>(),
+    MAX_EXAMPLE_LENGTH,
+    state
   );
-  if (json === undefined || json.length > MAX_EXAMPLE_LENGTH) {
-    return undefined;
+  if (json !== undefined && json.length <= MAX_EXAMPLE_LENGTH) {
+    return json;
   }
-  return json;
+  if (json !== undefined || state.overCap) {
+    omissions.overCap += 1;
+    return OMITTED_VALUE_OVER_CAP;
+  }
+  omissions.notRepresentable += 1;
+  return OMITTED_VALUE_NOT_REPRESENTABLE;
+}
+
+function summarizeValueOmissions(omissions: ValueOmissions): string[] {
+  const warnings: string[] = [];
+  if (omissions.overCap > 0) {
+    warnings.push(
+      `Omitted ${omissions.overCap} example or enum value(s) exceeding the inline cap; each omission is marked "${OMITTED_VALUE_OVER_CAP}" in place.`
+    );
+  }
+  if (omissions.notRepresentable > 0) {
+    warnings.push(
+      `Omitted ${omissions.notRepresentable} example or enum value(s) not representable as JSON; each omission is marked "${OMITTED_VALUE_NOT_REPRESENTABLE}" in place.`
+    );
+  }
+  return warnings;
 }
 
 function stableJsonStringify(
   value: unknown,
   seen: WeakSet<object>,
   memo: WeakMap<object, string | undefined>,
-  maxLength = MAX_EXAMPLE_LENGTH
+  maxLength: number,
+  state: { overCap: boolean }
 ): string | undefined {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     const serialized = JSON.stringify(value);
-    return serialized.length > maxLength ? undefined : serialized;
+    if (serialized.length > maxLength) {
+      state.overCap = true;
+      return undefined;
+    }
+    return serialized;
   }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
       return undefined;
     }
     const serialized = JSON.stringify(value);
-    return serialized.length > maxLength ? undefined : serialized;
+    if (serialized.length > maxLength) {
+      state.overCap = true;
+      return undefined;
+    }
+    return serialized;
   }
   if (!Array.isArray(value) && !isRecord(value)) {
     return undefined;
@@ -1107,8 +1212,8 @@ function stableJsonStringify(
   // once (the previous `seen.delete` made shared nodes re-serialize O(2^depth)
   // times), and bail as soon as the accumulated output exceeds the cap so a
   // doubling structure cannot build an O(2^depth)-length string before the
-  // length check at the call site. The result is discarded anyway when it
-  // exceeds MAX_EXAMPLE_LENGTH.
+  // length check at the call site. Every length bail records `state.overCap` so
+  // the caller can distinguish an oversized value from an unrepresentable one.
   if (memo.has(value)) {
     return memo.get(value);
   }
@@ -1122,16 +1227,16 @@ function stableJsonStringify(
     if (Array.isArray(value)) {
       const items: string[] = [];
       let accumulated = 2; // surrounding []
-      result = '[]';
       let bailed = false;
       for (const item of value) {
-        const serialized = stableJsonStringify(item, seen, memo, maxLength);
+        const serialized = stableJsonStringify(item, seen, memo, maxLength, state);
         if (serialized === undefined) {
           bailed = true;
           break;
         }
         accumulated += serialized.length + 1;
         if (accumulated > maxLength) {
+          state.overCap = true;
           bailed = true;
           break;
         }
@@ -1143,7 +1248,7 @@ function stableJsonStringify(
       let accumulated = 2; // surrounding {}
       let bailed = false;
       for (const key of Object.keys(value).sort(compareText)) {
-        const serialized = stableJsonStringify(value[key], seen, memo, maxLength);
+        const serialized = stableJsonStringify(value[key], seen, memo, maxLength, state);
         if (serialized === undefined) {
           bailed = true;
           break;
@@ -1151,6 +1256,7 @@ function stableJsonStringify(
         const keyJson = JSON.stringify(key);
         accumulated += keyJson.length + serialized.length + 2;
         if (accumulated > maxLength) {
+          state.overCap = true;
           bailed = true;
           break;
         }
