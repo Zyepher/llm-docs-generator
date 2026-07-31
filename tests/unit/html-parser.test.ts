@@ -484,7 +484,11 @@ describe('static HTML parser foundation', () => {
     // ~400KB of unclosed <script openings; the previous global lazy regex
     // rescanned to end-of-input from every opening. The linear indexOf scan must
     // finish promptly and leak no script text.
-    await writeFile(sourcePath, `<title>Doc</title><p>Keep this.</p>${'<script '.repeat(50_000)}`, 'utf-8');
+    await writeFile(
+      sourcePath,
+      `<title>Doc</title><p>Keep this.</p>${'<script '.repeat(50_000)}`,
+      'utf-8'
+    );
 
     const start = Date.now();
     const doc = await parseHtmlFile(sourcePath);
@@ -604,7 +608,143 @@ describe('static HTML parser foundation', () => {
     const root = await new HtmlFormatParser().parse(sourcePath);
     const text = collectText(root);
 
-    expect(text).toContain('The getter and renamed');
+    // Inline <code> is backtick-wrapped, still with no injected spaces.
+    expect(text).toContain('The `get`ter and renamed');
     expect(text).not.toContain('get ter');
+  });
+
+  it('keeps non-title h1 headings as top-level sections', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'chapters.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<title>Manual</title>',
+        '<h1>Chapter One</h1>',
+        '<p>First chapter prose.</p>',
+        '<h2>Basics</h2>',
+        '<p>Basics prose.</p>',
+        '<h1>Chapter Two</h1>',
+        '<p>Second chapter prose.</p>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+
+    expect(root.title).toBe('Manual');
+    expect(root.children.map((child) => child.title)).toEqual(['Chapter One', 'Chapter Two']);
+    expect(root.children[0]).toMatchObject({ type: DocNodeType.SECTION, id: 'chapter-one' });
+    expect(root.children[0]?.metadata.get('level')).toBe(1);
+    expect(root.children[0]?.children[0]).toMatchObject({
+      type: DocNodeType.CATEGORY,
+      title: 'Basics',
+    });
+    expect(collectText(root.children[1] ?? root)).toContain('Second chapter prose.');
+  });
+
+  it('dedups only the h1 that matches the document title, keeping later duplicates', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'dedup.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<title>Widgets</title>',
+        '<h1>Widgets</h1>',
+        '<p>Overview prose.</p>',
+        '<h1>Widgets</h1>',
+        '<p>Second occurrence prose.</p>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+
+    expect(root.title).toBe('Widgets');
+    // First h1 equals the extracted title and is not re-nested; the second one
+    // is a real section.
+    expect(root.content.map((block) => block.content)).toContain('Overview prose.');
+    expect(root.children.map((child) => child.title)).toEqual(['Widgets']);
+    expect(collectText(root.children[0] ?? root)).toContain('Second occurrence prose.');
+  });
+
+  it('dedups the first h1 when it is the title fallback (no <title> tag)', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'fallback-title.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<h1>Getting Started</h1>',
+        '<p>Intro prose.</p>',
+        '<h1>Appendix</h1>',
+        '<p>Appendix prose.</p>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+
+    expect(root.title).toBe('Getting Started');
+    expect(root.content.map((block) => block.content)).toContain('Intro prose.');
+    expect(root.children.map((child) => child.title)).toEqual(['Appendix']);
+  });
+
+  it('excludes nav, header, footer, and aside chrome from extracted content', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'chrome.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<title>Chrome</title>',
+        '<header><h1>Site Name</h1><nav><a href="/home">Home</a></nav></header>',
+        '<nav><ul><li>Docs</li><li>Blog</li></ul></nav>',
+        '<main>',
+        '<p>Real content prose.</p>',
+        '<aside>Related links sidebar.</aside>',
+        '</main>',
+        '<footer>Copyright chrome.</footer>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('Real content prose.');
+    expect(text).not.toContain('Site Name');
+    expect(text).not.toContain('Home');
+    expect(text).not.toContain('Blog');
+    expect(text).not.toContain('Related links sidebar.');
+    expect(text).not.toContain('Copyright chrome.');
+  });
+
+  it('renders inline code spans with backticks and other inline markup as plain text', async () => {
+    const dir = await createTempDir();
+    const sourcePath = join(dir, 'inline-code.html');
+
+    await writeFile(
+      sourcePath,
+      [
+        '<!doctype html>',
+        '<title>Inline Code</title>',
+        '<p>Call <code>fetch()</code> with a <strong>required</strong> <em>url</em> argument.</p>',
+        '<ul><li>Set <code>timeout</code> in options.</li></ul>',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    const root = await new HtmlFormatParser().parse(sourcePath);
+    const text = collectText(root);
+
+    expect(text).toContain('Call `fetch()` with a required url argument.');
+    expect(text).toContain('- Set `timeout` in options.');
   });
 });
