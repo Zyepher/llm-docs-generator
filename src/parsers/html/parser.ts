@@ -37,6 +37,9 @@ const VOID_ELEMENTS = new Set([
   'track',
   'wbr',
 ]);
+// nav/header/footer/aside is a site-chrome heuristic for this best-effort,
+// lower-confidence parser: a docs site that puts real content in <aside> loses
+// it, which the parser's self-described confidence already accounts for.
 const NON_CONTENT_ELEMENTS = new Set([
   'head',
   'title',
@@ -46,6 +49,10 @@ const NON_CONTENT_ELEMENTS = new Set([
   'script',
   'style',
   'template',
+  'nav',
+  'header',
+  'footer',
+  'aside',
 ]);
 const BLOCK_ELEMENTS = new Set([
   'article',
@@ -199,7 +206,7 @@ export class HtmlParser {
     const h1Title = extractFirstElementText(body, 'h1') ?? extractFirstElementText(tree, 'h1');
     const title = htmlTitle || h1Title || basenameWithoutHtmlExtension(this.filePath);
 
-    const extractor = new HtmlContentExtractor();
+    const extractor = new HtmlContentExtractor(title);
     const extracted = extractor.extract(body);
     const warnings: HtmlParserWarning[] = [
       {
@@ -235,6 +242,9 @@ class HtmlContentExtractor {
   private readonly sectionStack: HtmlSection[] = [];
   private readonly usedIds = new Map<string, number>();
   private readonly links: HtmlLink[] = [];
+  private titleH1Deduped = false;
+
+  constructor(private readonly documentTitle: string) {}
 
   extract(root: HtmlNode): { content: ContentBlock[]; sections: HtmlSection[]; links: HtmlLink[] } {
     this.visitChildren(root);
@@ -269,14 +279,22 @@ class HtmlContentExtractor {
       return;
     }
 
-    if (node.tag === 'h1') {
-      return;
-    }
-
     if (isHeadingTag(node.tag)) {
+      const level = Number(node.tag.slice(1));
+      // The document title may itself be the page's first <h1>; do not re-nest
+      // that one occurrence as a section. Every other <h1> is a real section.
+      // Compare plain text (no link/code decoration) against the title, which
+      // was extracted the same way.
+      if (level === 1 && !this.titleH1Deduped) {
+        const plain = normalizeInlineWhitespace(collectText(node, { preserveWhitespace: false }));
+        if (plain !== '' && plain === this.documentTitle) {
+          this.titleH1Deduped = true;
+          return;
+        }
+      }
       const title = this.extractInlineText(node);
       if (title !== '') {
-        this.startSection(Number(node.tag.slice(1)), title);
+        this.startSection(level, title);
       }
       return;
     }
@@ -516,6 +534,13 @@ class HtmlContentExtractor {
 
     if (node.tag === 'img') {
       return normalizeInlineWhitespace(node.attrs.get('alt') ?? '');
+    }
+
+    // Backtick-wrap inline code so identifiers stay distinguishable from prose.
+    // Other inline markup (strong/em) stays plain text.
+    if (node.tag === 'code') {
+      const text = node.children.map((child) => this.extractInlineText(child, shouldSkip)).join('');
+      return text === '' ? '' : `\`${text}\``;
     }
 
     // No separator: inline markup can split a word (<code>get</code>ter), and
@@ -961,7 +986,7 @@ function hasDirectBlockChild(node: HtmlElementNode): boolean {
 }
 
 function isHeadingTag(tagName: string): boolean {
-  return /^h[2-6]$/.test(tagName);
+  return /^h[1-6]$/.test(tagName);
 }
 
 function sectionToDocNode(section: HtmlSection): DocNode {
@@ -1056,7 +1081,7 @@ function basenameWithoutHtmlExtension(path: string): string {
 export function getParserDetails(): Record<string, string | boolean> {
   return {
     subset:
-      'document title/H1 fallback, H2-H6 hierarchy, paragraphs, simple lists, pre/code blocks, and simple tables',
+      'document title, H1-H6 section hierarchy (a title-matching H1 is not re-nested), paragraphs, simple lists, pre/code blocks, and simple tables; nav/header/footer/aside chrome is excluded',
     renderedHtmlFallback: true,
     confidence: 'lower',
     javascript: 'not rendered or executed',
