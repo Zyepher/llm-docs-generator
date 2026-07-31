@@ -42,6 +42,9 @@ export function markdownToDocNode(
   const metadata = new Map(doc.metadata);
   metadata.set('format', 'markdown');
   metadata.set('path', doc.path);
+  if (doc.sourceLines !== undefined) {
+    metadata.set('sourceLines', doc.sourceLines);
+  }
 
   const root = createDocNode(docType, extractIdFromPath(doc.path), doc.title, {
     // Preserve document-level (headingless / leading) content on the root node
@@ -105,6 +108,9 @@ export function convertSection(section: MarkdownSection, mapH2ToCategory: boolea
 
   const metadata = new Map<string, unknown>();
   metadata.set('level', section.level);
+  if (section.sourceLines !== undefined) {
+    metadata.set('sourceLines', section.sourceLines);
+  }
 
   return createDocNode(nodeType, section.id, section.title, {
     content,

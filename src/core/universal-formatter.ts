@@ -19,6 +19,7 @@ import type { DocNode, ContentBlock } from './models.js';
 import { DocNodeType, ContentBlockType } from './models.js';
 import {
   rewriteProseLinks,
+  type LinkRewriteContext,
   type MarkdownLinkGitContext,
   type UnrewrittenLinkClass,
 } from './markdown-links.js';
@@ -430,21 +431,17 @@ export class UniversalFormatter {
   }
 
   private sourceRelpathOf(node: DocNode): string | undefined {
-    const relpath = node.metadata.get('sourceRelPath');
-    return typeof relpath === 'string' && relpath.length > 0 ? relpath : undefined;
+    return sourceRelpathOfNode(node);
   }
 
   private enterFileContext(node: DocNode, ctx: RenderContext): RenderContext {
-    const relpath = this.sourceRelpathOf(node);
-    if (relpath === undefined) {
+    const file = fileContextOfNode(node);
+    if (file === undefined) {
       return ctx;
     }
     return {
       collectWarnings: ctx.collectWarnings,
-      file: {
-        relpath,
-        linkDefinitions: readLinkDefinitions(node),
-      },
+      file,
     };
   }
 
@@ -454,68 +451,26 @@ export class UniversalFormatter {
       return text;
     }
     const collect = ctx.collectWarnings;
-    return rewriteProseLinks(text, {
-      currentRelpath: ctx.file.relpath,
-      packRelpaths: sourcePack.packRelpaths,
-      linkDefinitions: ctx.file.linkDefinitions,
-      ...(sourcePack.gitContext === undefined
-        ? {}
-        : { gitContext: toLinkGitContext(sourcePack.gitContext) }),
-      fileExistsInRepo: (relpath) => this.repoFileExists(sourcePack, relpath),
-      onUnresolvedReference: (label) => {
-        if (collect) {
-          this.unresolvedReferenceLabels.add(label);
-        }
-      },
-      onUnrewrittenLink: (kind) => {
-        if (collect) {
-          this.unrewrittenLinkCounts[kind] += 1;
-        }
-      },
-      onNonGithubRemote: () => {
-        if (collect) {
-          this.nonGithubRemoteCount += 1;
-        }
-      },
-    });
-  }
-
-  /**
-   * Existence oracle for out-of-pack resolution, covering every doc target
-   * shape (explicit `.md` and extension-less alike). Resolves a source-root-
-   * relative candidate to an absolute path and reports whether a regular file
-   * lives there, constrained to within the repo (or, absent git context, within
-   * the source root) so a `../`-escaping target can never probe arbitrary disk
-   * locations. Only targets this oracle proves to exist are pinned; the link
-   * rewriter additionally refuses to build a blob URL for any path that
-   * escapes the repo root, independent of this containment.
-   */
-  private repoFileExists(sourcePack: FormatterSourcePack, relpath: string): boolean {
-    const containmentRoot = this.diskContainmentRoot(sourcePack);
-    const absolute = resolve(sourcePack.resolvedPath, relpath);
-    if (absolute !== containmentRoot && !absolute.startsWith(`${containmentRoot}${sep}`)) {
-      return false;
-    }
-    try {
-      return statSync(absolute).isFile();
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * The directory that on-disk extension-less resolution is confined to: the
-   * repo root when git context pins the source root within a repo, otherwise the
-   * source root itself.
-   */
-  private diskContainmentRoot(sourcePack: FormatterSourcePack): string {
-    const git = sourcePack.gitContext;
-    if (git === undefined) {
-      return resolve(sourcePack.resolvedPath);
-    }
-    const depth = git.sourceRootFromRepo.split('/').filter((s) => s.length > 0 && s !== '.');
-    const upFromSource = depth.length === 0 ? '.' : depth.map(() => '..').join('/');
-    return resolve(sourcePack.resolvedPath, upFromSource);
+    return rewriteProseLinks(
+      text,
+      buildLinkRewriteContext(sourcePack, ctx.file, {
+        onUnresolvedReference: (label) => {
+          if (collect) {
+            this.unresolvedReferenceLabels.add(label);
+          }
+        },
+        onUnrewrittenLink: (kind) => {
+          if (collect) {
+            this.unrewrittenLinkCounts[kind] += 1;
+          }
+        },
+        onNonGithubRemote: () => {
+          if (collect) {
+            this.nonGithubRemoteCount += 1;
+          }
+        },
+      })
+    );
   }
 
   /**
@@ -653,6 +608,133 @@ function toLinkGitContext(git: FormatterGitContext): MarkdownLinkGitContext {
     commit: git.commit,
     sourceRootFromRepo: git.sourceRootFromRepo,
   };
+}
+
+function sourceRelpathOfNode(node: DocNode): string | undefined {
+  const relpath = node.metadata.get('sourceRelPath');
+  return typeof relpath === 'string' && relpath.length > 0 ? relpath : undefined;
+}
+
+/**
+ * The file context a node opens (its `[source:]` relpath plus captured
+ * reference definitions), or undefined when the node opens none and its
+ * ancestors' context continues to apply.
+ */
+function fileContextOfNode(node: DocNode): FileRenderContext | undefined {
+  const relpath = sourceRelpathOfNode(node);
+  if (relpath === undefined) {
+    return undefined;
+  }
+  return {
+    relpath,
+    linkDefinitions: readLinkDefinitions(node),
+  };
+}
+
+interface LinkWarningSinks {
+  onUnresolvedReference: (label: string) => void;
+  onUnrewrittenLink: (kind: UnrewrittenLinkClass) => void;
+  onNonGithubRemote: () => void;
+}
+
+/**
+ * The single construction of the link-rewrite context (pack file set, git
+ * context, disk oracle) shared by the formatter's render passes and the
+ * chunk-export prose rewrite, so both apply identical rewrite rules.
+ */
+function buildLinkRewriteContext(
+  sourcePack: FormatterSourcePack,
+  file: FileRenderContext,
+  sinks: LinkWarningSinks
+): LinkRewriteContext {
+  return {
+    currentRelpath: file.relpath,
+    packRelpaths: sourcePack.packRelpaths,
+    linkDefinitions: file.linkDefinitions,
+    ...(sourcePack.gitContext === undefined
+      ? {}
+      : { gitContext: toLinkGitContext(sourcePack.gitContext) }),
+    fileExistsInRepo: (relpath) => repoFileExists(sourcePack, relpath),
+    onUnresolvedReference: sinks.onUnresolvedReference,
+    onUnrewrittenLink: sinks.onUnrewrittenLink,
+    onNonGithubRemote: sinks.onNonGithubRemote,
+  };
+}
+
+/**
+ * Existence oracle for out-of-pack resolution, covering every doc target
+ * shape (explicit `.md` and extension-less alike). Resolves a source-root-
+ * relative candidate to an absolute path and reports whether a regular file
+ * lives there, constrained to within the repo (or, absent git context, within
+ * the source root) so a `../`-escaping target can never probe arbitrary disk
+ * locations. Only targets this oracle proves to exist are pinned; the link
+ * rewriter additionally refuses to build a blob URL for any path that
+ * escapes the repo root, independent of this containment.
+ */
+function repoFileExists(sourcePack: FormatterSourcePack, relpath: string): boolean {
+  const containmentRoot = diskContainmentRoot(sourcePack);
+  const absolute = resolve(sourcePack.resolvedPath, relpath);
+  if (absolute !== containmentRoot && !absolute.startsWith(`${containmentRoot}${sep}`)) {
+    return false;
+  }
+  try {
+    return statSync(absolute).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The directory that on-disk extension-less resolution is confined to: the
+ * repo root when git context pins the source root within a repo, otherwise the
+ * source root itself.
+ */
+function diskContainmentRoot(sourcePack: FormatterSourcePack): string {
+  const git = sourcePack.gitContext;
+  if (git === undefined) {
+    return resolve(sourcePack.resolvedPath);
+  }
+  const depth = git.sourceRootFromRepo.split('/').filter((s) => s.length > 0 && s !== '.');
+  const upFromSource = depth.length === 0 ? '.' : depth.map(() => '..').join('/');
+  return resolve(sourcePack.resolvedPath, upFromSource);
+}
+
+/**
+ * Rewrite every prose string in a DocNode tree IN PLACE with the exact link
+ * rules and context the formatter's render passes use, so a chunk export built
+ * from the same tree carries the pack's rewritten links (`pack:` targets,
+ * inlined references, pinned blob URLs) instead of the source repo's dead
+ * relative links. Warning sinks are no-ops: the canonical full-doc render has
+ * already reported every link warning, exactly like the category/TOC passes.
+ * Call only after the pack outputs are written.
+ */
+export function rewriteDocNodeProseInPlace(root: DocNode, sourcePack: FormatterSourcePack): void {
+  const noop = (): void => {};
+  const sinks: LinkWarningSinks = {
+    onUnresolvedReference: noop,
+    onUnrewrittenLink: noop,
+    onNonGithubRemote: noop,
+  };
+
+  const walk = (node: DocNode, inherited: FileRenderContext | undefined): void => {
+    const file = fileContextOfNode(node) ?? inherited;
+    if (file !== undefined) {
+      const context = buildLinkRewriteContext(sourcePack, file, sinks);
+      if (node.description.length > 0) {
+        node.description = rewriteProseLinks(node.description, context);
+      }
+      for (const block of node.content) {
+        if (block.type === ContentBlockType.PROSE) {
+          block.content = rewriteProseLinks(block.content, context);
+        }
+      }
+    }
+    for (const child of node.children) {
+      walk(child, file);
+    }
+  };
+
+  walk(root, undefined);
 }
 
 /**

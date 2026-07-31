@@ -8,6 +8,11 @@ const SEMANTIC_CHUNK_INDEX_HASH_CONTEXT =
   'llm-docs-generator:source-docs-semantic-chunks-jsonl-index:v1';
 const SEMANTIC_CHUNK_JSONL_FORMAT = 'jsonl';
 
+export interface SemanticChunkManifestIndexChunkSourceLines {
+  start: number;
+  end: number;
+}
+
 export interface SemanticChunkManifestIndexChunk {
   id: string;
   order: number;
@@ -19,6 +24,8 @@ export interface SemanticChunkManifestIndexChunk {
   estimatedTokenCount: number;
   sourceFormat?: string;
   sourcePath?: string;
+  /** 1-indexed inclusive line range into the original file at sourcePath. */
+  sourceLines?: SemanticChunkManifestIndexChunkSourceLines;
   warningCount: number;
 }
 
@@ -101,6 +108,13 @@ function canonicalSemanticChunkManifestIndexForHash(
 
       if (chunk.sourcePath !== undefined) {
         canonicalChunk.sourcePath = chunk.sourcePath;
+      }
+
+      if (chunk.sourceLines !== undefined) {
+        canonicalChunk.sourceLines = {
+          start: chunk.sourceLines.start,
+          end: chunk.sourceLines.end,
+        };
       }
 
       return canonicalChunk;
@@ -198,6 +212,7 @@ function parseSemanticChunkJsonlLine(
     estimatedTokenCount,
     ...optionalStringField(record, 'sourceFormat', outputPath, lineNumber),
     ...optionalStringField(record, 'sourcePath', outputPath, lineNumber),
+    ...optionalSourceLinesField(record, outputPath, lineNumber),
     warningCount: warnings.length,
   };
 }
@@ -291,6 +306,42 @@ function requiredSha256Hex(
   }
 
   return value;
+}
+
+/**
+ * Optional per-chunk source line range. Old records without the field pass
+ * untouched; when present the shape is enforced (1-indexed integers with
+ * start <= end) so a tampered or fabricated range fails re-verification.
+ */
+function optionalSourceLinesField(
+  record: Record<string, unknown>,
+  outputPath: string,
+  lineNumber: number
+): Partial<Pick<SemanticChunkManifestIndexChunk, 'sourceLines'>> {
+  if (!('sourceLines' in record)) {
+    return {};
+  }
+
+  const value = record.sourceLines;
+
+  if (isObjectRecord(value)) {
+    const start = value.start;
+    const end = value.end;
+    if (
+      typeof start === 'number' &&
+      typeof end === 'number' &&
+      Number.isInteger(start) &&
+      Number.isInteger(end) &&
+      start >= 1 &&
+      end >= start
+    ) {
+      return { sourceLines: { start, end } };
+    }
+  }
+
+  throw new Error(
+    `${outputPath}: line ${lineNumber} sourceLines must be an object with 1-indexed integer start <= end`
+  );
 }
 
 function optionalStringField(

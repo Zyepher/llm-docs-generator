@@ -118,7 +118,7 @@ That is the general path, and it works for almost any library with real docs: yo
 - **Teach it a format it doesn't know.** Docs in a custom or proprietary shape? Write a small parser plugin and it reads your own. (See [`index.md`](index.md) for the plugin manifest format and [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md) for the plugin workflow.)
 - **Teach it a private marker syntax.** Docs that embed tab switchers or other directive comments in an explicit marker syntax? Add a small markdown *directive dialect* — a deterministic transform keyed to that exact marker. (See [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md), *Adding a markdown directive dialect*.)
 - **Document a codebase that has no docs.** The source-truth mode extracts conservative, code-derived facts (exported names, signatures, member rosters, package/config) with file-level provenance: observations for your agent to build on, never invented behavior.
-- **Power a search / RAG tool.** Add `--chunks jsonl` to emit semantic chunks with stable IDs and content hashes.
+- **Power a search / RAG tool.** Add `--chunks jsonl` to emit semantic chunks with stable IDs, content hashes, root-relative source paths, and (for markdown-family sources) original-file line ranges.
 
 In every case the shape is the same: **you describe the goal, your agent picks the source and version, the CLI does the deterministic conversion and writes the provenance.**
 

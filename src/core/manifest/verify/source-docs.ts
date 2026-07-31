@@ -409,9 +409,7 @@ export async function verifySourceDocsManifest(
   let sourceCheckedFiles = 0;
   let sourceStatus: VerifyTierResult['status'];
   const sourceAvailable =
-    isNonEmptyString(sourcePath) && isAbsolute(sourcePath)
-      ? await pathExists(sourcePath)
-      : false;
+    isNonEmptyString(sourcePath) && isAbsolute(sourcePath) ? await pathExists(sourcePath) : false;
 
   if (!sourceAvailable) {
     sourceStatus = 'unavailable';
@@ -654,8 +652,7 @@ async function crossCheckManifestProvenanceAgainstOutputHeader(options: {
   const label = source.label;
   const git = source.git;
   const hasLabel = isNonEmptyString(label);
-  const gitCommit =
-    isObjectRecord(git) && isNonEmptyString(git.commit) ? git.commit : undefined;
+  const gitCommit = isObjectRecord(git) && isNonEmptyString(git.commit) ? git.commit : undefined;
 
   // Nothing self-reported to bind: no cross-check.
   if (!hasLabel && gitCommit === undefined) {
@@ -782,9 +779,7 @@ function parseOutputHeaderProvenance(firstLine: string): OutputHeaderProvenance 
   }
 
   const gitSegmentText =
-    gitMarker === undefined
-      ? undefined
-      : systemContent.slice(gitMarker.index + ' | '.length);
+    gitMarker === undefined ? undefined : systemContent.slice(gitMarker.index + ' | '.length);
 
   return {
     hasProvenanceSegments: hasLabelSegment || hasGitSegment,
@@ -1475,6 +1470,7 @@ function validateSourceDocsSemanticChunkIndexChunk(options: {
   const estimatedTokenCount = chunkEntry.estimatedTokenCount;
   const sourceFormat = chunkEntry.sourceFormat;
   const sourcePath = chunkEntry.sourcePath;
+  const sourceLines = chunkEntry.sourceLines;
   const warningCount = chunkEntry.warningCount;
 
   if (!isNonEmptyString(id)) {
@@ -1521,6 +1517,12 @@ function validateSourceDocsSemanticChunkIndexChunk(options: {
     failures.push(`malformed manifest: ${label}.sourcePath must be a non-empty string`);
   }
 
+  if ('sourceLines' in chunkEntry && !isValidSemanticChunkSourceLines(sourceLines)) {
+    failures.push(
+      `malformed manifest: ${label}.sourceLines must be an object with 1-indexed integer start <= end`
+    );
+  }
+
   if (!isNonNegativeInteger(warningCount)) {
     failures.push(`malformed manifest: ${label}.warningCount must be a non-negative integer`);
   }
@@ -1536,6 +1538,7 @@ function validateSourceDocsSemanticChunkIndexChunk(options: {
     !isNonNegativeInteger(estimatedTokenCount) ||
     ('sourceFormat' in chunkEntry && !isNonEmptyString(sourceFormat)) ||
     ('sourcePath' in chunkEntry && !isNonEmptyString(sourcePath)) ||
+    ('sourceLines' in chunkEntry && !isValidSemanticChunkSourceLines(sourceLines)) ||
     !isNonNegativeInteger(warningCount)
   ) {
     return undefined;
@@ -1561,7 +1564,29 @@ function validateSourceDocsSemanticChunkIndexChunk(options: {
     normalizedChunk.sourcePath = sourcePath;
   }
 
+  if (isValidSemanticChunkSourceLines(sourceLines)) {
+    normalizedChunk.sourceLines = { start: sourceLines.start, end: sourceLines.end };
+  }
+
   return normalizedChunk;
+}
+
+function isValidSemanticChunkSourceLines(value: unknown): value is { start: number; end: number } {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  const start = value.start;
+  const end = value.end;
+
+  return (
+    typeof start === 'number' &&
+    typeof end === 'number' &&
+    Number.isInteger(start) &&
+    Number.isInteger(end) &&
+    start >= 1 &&
+    end >= start
+  );
 }
 async function verifySourceDocsSemanticChunkIndexes(options: {
   manifestDir: string;
