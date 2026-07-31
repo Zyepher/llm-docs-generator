@@ -36,5 +36,13 @@ OPUS_REVIEW.md
 FABLE_REVIEW.md
 HANDOFF.md
 GPT_PROMPT.md
+CLAUDE_REVIEW_PROMPT.md
 IMPLEMENTATION.md
 NEXT_GEN_PLAN.html
+
+# Local agent configuration
+/CLAUDE.md
+/AGENTS.md
+
+# Local SDK spec caches
+/config/supabase_dart_v2.yml
