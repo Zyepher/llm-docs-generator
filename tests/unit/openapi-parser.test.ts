@@ -982,9 +982,19 @@ describe('OpenAPI / Swagger parser', () => {
       info: { title: 'Slug Collision', version: '1.0.0' },
       tags: [{ name: 'Foo Bar' }, { name: 'Foo-Bar' }, { name: 'Foo Bar 2' }],
       paths: {
-        '/a': { get: { operationId: 'a', tags: ['Foo Bar'], responses: { '200': { description: 'ok' } } } },
-        '/b': { get: { operationId: 'b', tags: ['Foo-Bar'], responses: { '200': { description: 'ok' } } } },
-        '/c': { get: { operationId: 'c', tags: ['Foo Bar 2'], responses: { '200': { description: 'ok' } } } },
+        '/a': {
+          get: { operationId: 'a', tags: ['Foo Bar'], responses: { '200': { description: 'ok' } } },
+        },
+        '/b': {
+          get: { operationId: 'b', tags: ['Foo-Bar'], responses: { '200': { description: 'ok' } } },
+        },
+        '/c': {
+          get: {
+            operationId: 'c',
+            tags: ['Foo Bar 2'],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
       },
     });
 
