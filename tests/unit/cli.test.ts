@@ -9115,11 +9115,15 @@ describe('CLI compatibility behavior', () => {
     const llmOutput = manifest.generatedOutputs.find((output) => output.kind === 'llm-docs');
 
     expect(stdout).toContain('Local source docs generated');
-    expect(stdout).toContain('Generated files: 3');
+    expect(stdout).toContain('Generated files: 5');
     expect(stdout).toContain('Chunk export: chunks/semantic-chunks.jsonl');
+    // The lone H1 matches the document title, so the H2 sections are top-level
+    // categories and each gets a per-topic slice (duplicate titles dedupe).
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'chunks/semantic-chunks.jsonl',
       'llm-docs/chunk-docs-full-llms.txt',
+      'llm-docs/chunk-docs-install-2-llms.txt',
+      'llm-docs/chunk-docs-install-llms.txt',
       'llm-docs/chunk-docs-toc-llms.txt',
     ]);
     expect(chunkOutput).toMatchObject({
@@ -9150,9 +9154,9 @@ describe('CLI compatibility behavior', () => {
     expect(chunkJsonl).toBe(secondChunkJsonl);
     expect(chunkJsonl.endsWith('\n')).toBe(true);
     expect(records.map((record) => record.id)).toEqual([
-      'chunk-docs/chunk-docs',
-      'chunk-docs/chunk-docs/install',
-      'chunk-docs/chunk-docs/install~2',
+      'chunk-docs',
+      'chunk-docs/install',
+      'chunk-docs/install~2',
     ]);
     expect(records.map((record) => record.ordinal)).toEqual([1, 2, 3]);
 
@@ -9185,9 +9189,9 @@ describe('CLI compatibility behavior', () => {
     expect(records[2]?.warnings).toEqual([
       {
         code: 'duplicate_node_id',
-        nodePath: ['chunk-docs', 'chunk-docs', 'install~2'],
+        nodePath: ['chunk-docs', 'install~2'],
         message: 'Duplicate sibling node id "install" was disambiguated as "install~2".',
-        chunkId: 'chunk-docs/chunk-docs/install~2',
+        chunkId: 'chunk-docs/install~2',
       },
     ]);
     expect(chunkOutput.byteSize).toBe(await byteSize(chunkPath));
@@ -9204,11 +9208,11 @@ describe('CLI compatibility behavior', () => {
     });
     expect(semanticChunkIndex?.chunks).toEqual([
       {
-        id: 'chunk-docs/chunk-docs',
+        id: 'chunk-docs',
         order: 1,
         title: 'Chunk Docs',
-        path: ['Chunk Docs', 'Chunk Docs'],
-        nodePath: ['chunk-docs', 'chunk-docs'],
+        path: ['Chunk Docs'],
+        nodePath: ['chunk-docs'],
         contentHash: records[0]?.contentHash,
         characterCount: records[0]?.characterCount,
         estimatedTokenCount: records[0]?.estimatedTokenCount,
@@ -9217,11 +9221,11 @@ describe('CLI compatibility behavior', () => {
         warningCount: 0,
       },
       {
-        id: 'chunk-docs/chunk-docs/install',
+        id: 'chunk-docs/install',
         order: 2,
         title: 'Install',
-        path: ['Chunk Docs', 'Chunk Docs', 'Install'],
-        nodePath: ['chunk-docs', 'chunk-docs', 'install'],
+        path: ['Chunk Docs', 'Install'],
+        nodePath: ['chunk-docs', 'install'],
         contentHash: records[1]?.contentHash,
         characterCount: records[1]?.characterCount,
         estimatedTokenCount: records[1]?.estimatedTokenCount,
@@ -9230,11 +9234,11 @@ describe('CLI compatibility behavior', () => {
         warningCount: 0,
       },
       {
-        id: 'chunk-docs/chunk-docs/install~2',
+        id: 'chunk-docs/install~2',
         order: 3,
         title: 'Install',
-        path: ['Chunk Docs', 'Chunk Docs', 'Install'],
-        nodePath: ['chunk-docs', 'chunk-docs', 'install~2'],
+        path: ['Chunk Docs', 'Install'],
+        nodePath: ['chunk-docs', 'install~2'],
         contentHash: records[2]?.contentHash,
         characterCount: records[2]?.characterCount,
         estimatedTokenCount: records[2]?.estimatedTokenCount,
@@ -9475,8 +9479,11 @@ describe('CLI compatibility behavior', () => {
       lineCount: countTextLines(sourceText),
       estimatedTokenCount: estimateTextTokens(sourceText),
     });
+    // The lone H1 matches the title, so the Steps H2 is a top-level category
+    // with its own slice.
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'llm-docs/guide-notes-full-llms.txt',
+      'llm-docs/guide-notes-steps-llms.txt',
       'llm-docs/guide-notes-toc-llms.txt',
     ]);
   });
@@ -10871,8 +10878,11 @@ describe('CLI compatibility behavior', () => {
     const verifyResult = await runCli(['verify', '--output-dir', outputDir]);
 
     expect(refreshResult.stdout).toContain('Chunk export: chunks/semantic-chunks.jsonl');
+    // The refreshed source's Added H2 is a top-level category (its lone H1
+    // matches the title), so the refresh emits a per-topic slice for it.
     expect(manifest.generatedOutputs.map((output) => output.path)).toEqual([
       'chunks/semantic-chunks.jsonl',
+      'llm-docs/chunk-docs-added-llms.txt',
       'llm-docs/chunk-docs-full-llms.txt',
       'llm-docs/chunk-docs-toc-llms.txt',
     ]);
