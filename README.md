@@ -2,7 +2,7 @@
 
 **Give your AI coding agent the real docs for the exact library version you use, not its best guess.**
 
-Your coding agent is sharp until it hits a library that has moved on without it. It reaches for the newest API it has seen, or blends three versions together, and writes code that doesn't compile against the version you actually run. `llm-docs-generator` fixes that: it turns a library's real documentation, at the version you choose, into a clean local pack your agent reads, so it codes against the API you actually have. You stay in plain English, your agent drives the tool, and every claim in the pack traces back to where it came from.
+Your coding agent is sharp until it hits a library that has moved on without it. It reaches for the newest API it has seen, or blends three versions together, and writes code that doesn't compile against the version you actually run. `llm-docs-generator` fixes that: it turns a library's real documentation, at the version you choose, into a clean local pack your agent reads, so it codes against the API you actually have. You stay in plain English, your agent drives the tool, and every claim in the pack traces back to where it came from. Library docs are the headline use, not the boundary: the same engine packs any body of text you need an agent to read faithfully, from internal runbooks and API specs to a shelf of textbooks your agent converted from PDF.
 
 You don't run commands or memorize workflows. You talk to your agent. It does the rest.
 
@@ -93,7 +93,7 @@ Now your agent reads the v3 pack from disk and writes a real v3 `tailwind.config
 llm-docs verify  --output-dir ./agent-docs/tailwind-v3   # confirm the pack still matches its manifest
 ```
 
-`verify` re-hashes every file the manifest lists, reports any file in the pack it does not cover, and tells you, deterministically, whether the pack still matches what was generated. An unlisted file that imitates the tool's own output naming fails verification; anything else unlisted (the agent-owned `llm-docs/index.md`, a stray `.DS_Store`) is listed informationally and never fails the pack. Two commands keep a pack trustworthy: `verify` catches drift or corruption, and `llm-docs refresh` rebuilds a pack from the exact source recorded in its manifest. When the upstream docs change, your agent re-fetches that source and regenerates; `refresh` on its own is a deterministic rebuild from what's already recorded.
+`verify` re-hashes every file the manifest lists, reports any file in the pack it does not cover, and tells you, deterministically, whether the pack still matches what was generated. It checks in both directions: an unlisted file that imitates the tool's own output naming fails verification, and files added to the pinned source directory since generation fail the source tier with the exact paths named. Anything else unlisted (the agent-owned `llm-docs/index.md`, a stray `.DS_Store`) is listed informationally and never fails the pack. Two commands keep a pack trustworthy: `verify` catches drift or corruption, and `llm-docs refresh` rebuilds the pack from the exact source and options recorded in its manifest, same filenames, same splits, same exclusions, byte-identical when nothing upstream changed. When the upstream docs do change, your agent re-fetches that source and regenerates.
 
 That is the general path, and it works for almost any library with real docs: your agent finds the right version's source and converts it. A few popular SDKs (Supabase's clients) are wired in as a single `--sdk` command, with no source hunting at all.
 
@@ -107,6 +107,7 @@ That is the general path, and it works for almost any library with real docs: yo
 | Reaches for the newest syntax (v4) in your v3 project | Pinned to the exact version you named                               |
 | Docs pasted in, or the whole repo dumped into context | One clean local pack, read from disk on demand                      |
 | No way to tell where it came from                     | Every file traces to a source hash in `manifest.json`               |
+| Claims float free of the text                         | Every chunk cites its source file and line range, hash-bound        |
 | Docs silently rot                                     | `verify` catches drift; `refresh` rebuilds from the recorded source |
 | Web browsing: slow, noisy, non-repeatable             | Local, clean, structured, deterministic                             |
 
@@ -125,15 +126,28 @@ In every case the shape is the same: **you describe the goal, your agent picks t
 
 ---
 
+## Beyond library docs: anything an agent should quote instead of half-remember
+
+The engine doesn't know it's reading a changelog. It knows structure, hashes, and provenance, which means the same loop works for any long text where "roughly what the model remembers" isn't good enough: internal runbooks, compliance policies, hardware manuals, course notes, textbooks.
+
+Say you have ten textbooks as PDFs and want a study partner that argues from the actual text. Your agent converts each book to Markdown, embedding page markers as it goes so page numbers survive into the pack, and the engine packs the conversions exactly like a docs folder: one manifest hashing every file, a seeded index mapping every book, and chunks that carry file and line ranges. From there the agent teaches from the book, cites `thermodynamics.md` lines 840 to 872 with a hash that proves those lines are what you packed, and `verify` will tell you if the material ever drifts.
+
+Two limits worth knowing before you commit an evening to it. The pack is only as faithful as the conversion: dense math and complex layouts are the hard part, and that quality question belongs to the agent, not the engine. And a pack is navigation, not search: your agent finds things through the index, the headings, and grep, which works well at this scale; if you want semantic retrieval, the chunks JSONL is the clean handoff to a real retrieval system.
+
+---
+
 ## What it reads, and what it gives back
 
 **Reads:** OpenRef YAML (Supabase specs) · OpenAPI 3.x & Swagger 2.0 · Markdown / MDX / DocC · reStructuredText · HTML (best-effort fallback).
 
+PDFs are deliberately absent from that list. Extracting a PDF is judgment work, so your agent does the conversion to Markdown, and the engine packs, hashes, and verifies the conversion like any other source.
+
 **Writes:**
 
-- `llm-docs/*.txt`: the clean docs your agent reads, a single combined file, plus one file per topic when the source carries its own categories (built-in `--sdk` packs, tagged OpenAPI specs)
-- `manifest.json`: the paper trail of source paths and URLs, content hashes, versions, and the exact parser and formatter used
-- `chunks/semantic-chunks.jsonl`: optional, for retrieval
+- `llm-docs/*.txt`: the clean docs your agent reads, a single combined file, plus per-topic slices when the source declares structure to cut along (directory layout via `--split-by dirs`, an explicit `--categories` taxonomy from your agent, spec tags, built-in `--sdk` catalogs)
+- `llm-docs/index.md`: a seeded starter map (each file, its token estimate, its main sections), written only when absent; from then on it belongs to your agent and is never overwritten
+- `manifest.json`: the paper trail of source paths and URLs, content hashes, versions, the exact parser and formatter used, and every generation option needed to rebuild the same pack
+- `chunks/semantic-chunks.jsonl`: optional, for retrieval; stable IDs, content hashes, root-relative source paths, and original-file line ranges for markdown-family sources
 - `discovery-report.json`: bounded evidence from `discover`; and `failure.json`, the honest failure record `source-truth generate` / `verify-docs` write when a source yields no usable evidence (rather than a misleading empty pack)
 
 ---
@@ -172,6 +186,8 @@ The trust comes from what it refuses to do:
 - **It won't pick your source for you.** It reports evidence; you and your agent decide what's authoritative.
 - **It won't invent docs.** If a source can't be used, it fails out loud and says what it checked, and never fabricates low-confidence text to look successful.
 - **It won't silently change your version.** Ask for v3, get v3, even when v4 is what everyone's talking about.
+- **It won't fabricate a citation.** A cross-reference is rewritten only to a file proven to exist, in the pack or in the repository; anything unprovable is left as written and counted, and no rewritten link can point outside the repository it claims to cite.
+- **It won't lose content silently.** A value too large to inline is visibly marked as omitted, a skipped file (say, a `.pdf` in the source folder) is counted in the manifest warnings, and every unrewritten link is tallied by reason.
 - **It tells you what it didn't do.** Provenance and limitations are written into every manifest.
 
 Good agent documentation isn't just shorter documentation. It's structured, refreshable, verifiable, and honest about where every claim came from.
