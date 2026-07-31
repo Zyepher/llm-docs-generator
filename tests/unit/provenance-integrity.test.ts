@@ -840,6 +840,83 @@ describe('split configuration recording and replay (refresh fidelity)', () => {
 });
 
 
+describe('verify source-tier added-file rescan (source drift)', () => {
+  it('fails the source tier when a file is added to the recorded source directory', async () => {
+    const source = await makeTempDir('llm-docs-drift-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-drift-out-');
+    const { manifestPath } = await generate({ source, outputDir, format: 'markdown' });
+
+    await writeSourceFile(source, 'added.md', '# Added\n');
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.source?.status).toBe('failed');
+    expect(
+      result.source?.failures.some(
+        (failure) =>
+          failure.includes('source drift: 1 file(s) added since generation') &&
+          failure.includes('added.md')
+      )
+    ).toBe(true);
+  });
+
+  it('does not flag files the recorded exclude globs would drop', async () => {
+    const source = await makeTempDir('llm-docs-drift-excl-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-drift-excl-out-');
+    const { manifestPath } = await generate({
+      source,
+      outputDir,
+      format: 'markdown',
+      exclude: ['tmp/**'],
+    });
+
+    await writeSourceFile(source, 'tmp/scratch.md', '# scratch\n');
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.source?.status).toBe('passed');
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('skips the rescan with a note for manifests without recorded excludeGlobs', async () => {
+    const source = await makeTempDir('llm-docs-drift-legacy-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-drift-legacy-out-');
+    const { manifestPath } = await generate({ source, outputDir, format: 'markdown' });
+
+    const manifest = await readManifest(manifestPath);
+    delete (manifest.source as { excludeGlobs?: string[] }).excludeGlobs;
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    await writeSourceFile(source, 'added.md', '# Added\n');
+
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.source?.status).toBe('passed');
+    expect(
+      result.notes?.some((note) => note.includes('source added-file rescan skipped'))
+    ).toBe(true);
+  });
+
+  it('lists at most 20 added paths and reports the remainder as a count', async () => {
+    const source = await makeTempDir('llm-docs-drift-many-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-drift-many-out-');
+    const { manifestPath } = await generate({ source, outputDir, format: 'markdown' });
+
+    for (let index = 0; index < 25; index++) {
+      await writeSourceFile(source, `added-${String(index).padStart(2, '0')}.md`, '# x\n');
+    }
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    const drift = result.source?.failures.find((failure) => failure.startsWith('source drift'));
+    expect(drift).toBeDefined();
+    expect(drift).toContain('25 file(s) added since generation');
+    expect(drift).toContain('added-19.md');
+    expect(drift).not.toContain('added-20.md');
+    expect(drift).toContain('(+5 more)');
+  });
+});
+
 describe('verify recorded filename prefix cross-check', () => {
   it('fails when generated outputs do not carry the recorded prefix', async () => {
     const source = await makeTempDir('llm-docs-prefix-check-');

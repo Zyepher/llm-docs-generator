@@ -14,7 +14,9 @@ import {
 } from '../../../utils/guards.js';
 import { isSha256Hash, isUnprefixedSha256Hash } from '../../../utils/hash.js';
 import { isSanitizedFilenameSegment } from '../../../utils/filename-prefix.js';
+import { compareStringsByCodeUnit } from '../../../utils/sort.js';
 import { aggregateSourceFilesHash } from '../../../utils/source-files-hash.js';
+import { scanSourceDocsDirectorySelection } from '../../source-docs.js';
 import {
   buildSemanticChunkJsonlManifestIndex,
   hashSemanticChunkManifestIndex,
@@ -420,6 +422,26 @@ export async function verifySourceDocsManifest(
       await verifyFile(check, sourceFailures);
     }
 
+    // Added-file rescan: manifest-listed sourceFiles only prove the recorded
+    // files are intact; a file added to the source directory would otherwise
+    // pass silently. Re-walk the directory with the recorded traversal inputs
+    // and fail on files generation would include today but the manifest lacks.
+    if (
+      !hasParserPluginMetadata &&
+      sourceType === 'directory' &&
+      isNonEmptyString(sourcePath) &&
+      isNonEmptyString(sourceResolvedFormat)
+    ) {
+      await rescanSourceDirectoryForAddedFiles({
+        sourcePath,
+        resolvedFormat: sourceResolvedFormat,
+        excludeGlobs: sourceRecord.excludeGlobs,
+        recordedPaths: sourceFileEntries.map((entry) => entry.path),
+        failures: sourceFailures,
+        notes,
+      });
+    }
+
     sourceCheckedFiles = sourceChecks.length;
     sourceStatus = sourceFailures.length === 0 ? 'passed' : 'failed';
   }
@@ -771,6 +793,65 @@ function firstGitSegmentMarker(systemContent: string): { index: number } | undef
   }
 
   return { index: Math.min(...candidates) };
+}
+
+const SOURCE_DRIFT_MAX_LISTED_PATHS = 20;
+
+async function rescanSourceDirectoryForAddedFiles(options: {
+  sourcePath: string;
+  resolvedFormat: string;
+  excludeGlobs: unknown;
+  recordedPaths: string[];
+  failures: string[];
+  notes: string[];
+}): Promise<void> {
+  const { sourcePath, resolvedFormat, excludeGlobs, recordedPaths, failures, notes } = options;
+
+  // Without the recorded exclude set the expected file set cannot be soundly
+  // recomputed: a file the original --exclude would have dropped is
+  // indistinguishable from real drift. Old manifests skip with a note.
+  if (excludeGlobs === undefined) {
+    notes.push(
+      'source added-file rescan skipped: this manifest predates recorded exclude globs (source.excludeGlobs), so the expected source file set cannot be soundly recomputed; regenerate to enable added-file detection'
+    );
+    return;
+  }
+
+  if (!Array.isArray(excludeGlobs) || !excludeGlobs.every((glob) => isNonEmptyString(glob))) {
+    // Structural validation already failed the manifest in this case.
+    return;
+  }
+
+  let discoveredPaths: string[];
+
+  try {
+    discoveredPaths = await scanSourceDocsDirectorySelection({
+      sourcePath,
+      resolvedFormat,
+      exclude: excludeGlobs,
+    });
+  } catch (error) {
+    failures.push(`source: added-file rescan of ${sourcePath} failed: ${errorMessage(error)}`);
+    return;
+  }
+
+  const recorded = new Set(recordedPaths);
+  const added = discoveredPaths
+    .filter((path) => !recorded.has(path))
+    .sort(compareStringsByCodeUnit);
+
+  if (added.length === 0) {
+    return;
+  }
+
+  const shown = added.slice(0, SOURCE_DRIFT_MAX_LISTED_PATHS);
+  const remainder = added.length - shown.length;
+
+  failures.push(
+    `source drift: ${added.length} file(s) added since generation: ${shown.join(', ')}${
+      remainder > 0 ? ` (+${remainder} more)` : ''
+    }`
+  );
 }
 
 async function pathExists(path: string): Promise<boolean> {

@@ -1088,6 +1088,27 @@ async function describeDirectorySourceFiles(
   };
 }
 
+/**
+ * Recompute the relative paths a built-in directory generation would select
+ * today, using the exact traversal the generator uses (same bounds, symlink and
+ * vendored-directory skips, exclude globs, and format selection). Exists so the
+ * verifier's source-tier rescan can never drift from generation behavior; the
+ * cost of re-describing (hashing) each candidate file is accepted for that
+ * parity. Throws the same traversal-bound errors generation would.
+ */
+export async function scanSourceDocsDirectorySelection(options: {
+  sourcePath: string;
+  resolvedFormat: string;
+  exclude: string[];
+}): Promise<string[]> {
+  const excludeGlobs = compileExcludeGlobs(options.exclude);
+  const collection = await describeDirectorySourceFiles(resolve(options.sourcePath), excludeGlobs);
+
+  return collection.files
+    .filter((file) => file.format === options.resolvedFormat)
+    .map((file) => file.path);
+}
+
 async function describeParserPluginDirectorySourceFiles(
   source: ResolvedSourceDocsInput,
   format: string,
