@@ -76,6 +76,16 @@ function collectLinkDefinitions(
 }
 
 /**
+ * 1-indexed inclusive line range in the ORIGINAL source file (before
+ * frontmatter stripping and directive cleaning). Assigned only when the owning
+ * heading was deterministically located in the original text; never estimated.
+ */
+export interface MarkdownSourceLineRange {
+  start: number;
+  end: number;
+}
+
+/**
  * Parsed markdown document structure
  */
 export interface MarkdownDocument {
@@ -89,6 +99,12 @@ export interface MarkdownDocument {
   content: MarkdownContent[];
   sections: MarkdownSection[];
   metadata: Map<string, unknown>;
+  /**
+   * Original-file line range covering the document-level content (and, when a
+   * single title H1 was hoisted, that H1's own content region). Absent when no
+   * deterministic region exists.
+   */
+  sourceLines?: MarkdownSourceLineRange;
 }
 
 /**
@@ -100,6 +116,14 @@ export interface MarkdownSection {
   id: string;
   content: MarkdownContent[];
   children: MarkdownSection[];
+  /**
+   * Original-file line range of this section's OWN content: its heading line
+   * through the line before the next heading of any level (children live in
+   * their own ranges). Absent when the heading could not be located in the
+   * original text (for example a heading synthesized from a DocC @Tab or MDX
+   * component, or a title altered by cleaning).
+   */
+  sourceLines?: MarkdownSourceLineRange;
 }
 
 /**
@@ -154,21 +178,30 @@ export class MarkdownParser {
       // Build hierarchical sections plus any document-level (headingless) content
       const { content: documentContent, sections } = this.buildSections(tokens);
 
+      // Locate each section's heading in the ORIGINAL file text before the
+      // single-H1 hoist below rearranges the tree, so hoisted children keep
+      // the line ranges of their real source headings.
+      const lineIndex = this.locateSectionSourceLines(content, sections);
+
       // When the document's only H1 is the title extractTitle already promoted,
       // re-nesting it would repeat the title as a section and push every real
       // section one numbering level deeper. Hoist its content and children to
       // the document level instead. Multiple H1s or a non-matching first H1
       // keep the nested structure untouched.
       const firstSection = sections[0];
+      let hoistedSection: MarkdownSection | undefined;
       if (
         firstSection !== undefined &&
         firstSection.level === 1 &&
         firstSection.title === title &&
         !sections.some((section, index) => index > 0 && section.level === 1)
       ) {
+        hoistedSection = firstSection;
         documentContent.push(...firstSection.content);
         sections.splice(0, 1, ...firstSection.children);
       }
+
+      const documentSourceLines = this.documentSourceLines(lineIndex, hoistedSection);
 
       return {
         path: this.filePath,
@@ -176,6 +209,7 @@ export class MarkdownParser {
         content: documentContent,
         sections,
         metadata,
+        ...(documentSourceLines === undefined ? {} : { sourceLines: documentSourceLines }),
       };
     } catch (error) {
       // Pathologically deep MDX component nesting overflows the recursive
@@ -607,7 +641,7 @@ export class MarkdownParser {
 
   private readYamlFrontmatter(
     content: string
-  ): { frontmatter: string; contentAfter: string } | null {
+  ): { frontmatter: string; contentAfter: string; bodyStartLineIndex: number } | null {
     const withoutBom = content.replace(/^\uFEFF/, '');
     const lines = withoutBom.split('\n');
 
@@ -626,6 +660,7 @@ export class MarkdownParser {
         return {
           frontmatter,
           contentAfter: lines.slice(index + 1).join('\n'),
+          bodyStartLineIndex: index + 1,
         };
       }
     }
@@ -650,6 +685,168 @@ export class MarkdownParser {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Locate each parsed section's heading line in the ORIGINAL file text and
+   * assign its own-content line range (heading line through the line before the
+   * next heading of any level, or end of file).
+   *
+   * Candidates are collected with a line-oriented pass over the original text
+   * that skips YAML frontmatter and fenced code: ATX headings (`## Title`,
+   * optionally closed) and single-line setext headings (a line preceded by a
+   * blank line whose next line is a `===`/`---` underline). Sections are then
+   * matched to candidates in document order by level and title, so duplicate
+   * titles resolve by position and a heading the cleaning pipeline synthesized
+   * or altered simply stays unlocated (its range is absent, never guessed).
+   */
+  private locateSectionSourceLines(
+    content: string,
+    sections: MarkdownSection[]
+  ): { firstCandidateLine: number | undefined; totalLines: number } {
+    const withoutBom = content.replace(/^\uFEFF/, '');
+    const lines = withoutBom.split('\n');
+    const totalLines = withoutBom.endsWith('\n') ? lines.length - 1 : lines.length;
+    const bodyStartLineIndex = this.readYamlFrontmatter(content)?.bodyStartLineIndex ?? 0;
+
+    interface HeadingCandidate {
+      line: number;
+      level: number;
+      text: string;
+    }
+
+    const candidates: HeadingCandidate[] = [];
+    let fence: FenceState | null = null;
+
+    for (let index = bodyStartLineIndex; index < totalLines; index += 1) {
+      const line = lines[index] ?? '';
+
+      if (fence !== null) {
+        if (isClosingFence(line, fence)) {
+          fence = null;
+        }
+        continue;
+      }
+
+      const openingFence = getOpeningFence(line);
+      if (openingFence !== null) {
+        fence = openingFence;
+        continue;
+      }
+
+      const atx = /^ {0,3}(#{1,6})\s+(.*)$/.exec(line);
+      if (atx?.[1] !== undefined) {
+        const text = (atx[2] ?? '').replace(/\s+#+\s*$/, '').trim();
+        if (text.length > 0) {
+          candidates.push({ line: index + 1, level: atx[1].length, text });
+        }
+        continue;
+      }
+
+      // Single-line setext heading: requires a blank (or absent) previous line
+      // so a multi-line paragraph, list, or blockquote is never misread as a
+      // heading, and an underline after prose is never misread when it is a
+      // thematic break in context.
+      const underline = /^ {0,3}(=+|-+)\s*$/.exec(lines[index + 1] ?? '');
+      const previousLine = index === bodyStartLineIndex ? '' : (lines[index - 1] ?? '');
+      if (
+        underline?.[1] !== undefined &&
+        index + 1 < totalLines &&
+        line.trim().length > 0 &&
+        previousLine.trim().length === 0 &&
+        !/^ {0,3}(?:[-*+]|\d+[.)])[ \t]/.test(line) &&
+        !/^ {0,3}>/.test(line)
+      ) {
+        candidates.push({
+          line: index + 1,
+          level: underline[1].startsWith('=') ? 1 : 2,
+          text: line.trim(),
+        });
+        index += 1;
+      }
+    }
+
+    let cursor = 0;
+    const assignments: { section: MarkdownSection; candidateIndex: number }[] = [];
+    const visit = (section: MarkdownSection): void => {
+      for (let index = cursor; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        if (
+          candidate !== undefined &&
+          candidate.level === section.level &&
+          this.headingTitlesMatch(candidate.text, section.title)
+        ) {
+          assignments.push({ section, candidateIndex: index });
+          cursor = index + 1;
+          break;
+        }
+      }
+      for (const child of section.children) {
+        visit(child);
+      }
+    };
+    for (const section of sections) {
+      visit(section);
+    }
+
+    for (const { section, candidateIndex } of assignments) {
+      const candidate = candidates[candidateIndex];
+      if (candidate === undefined) {
+        continue;
+      }
+      const nextCandidate = candidates[candidateIndex + 1];
+      const end = nextCandidate === undefined ? totalLines : nextCandidate.line - 1;
+      if (end >= candidate.line) {
+        section.sourceLines = { start: candidate.line, end };
+      }
+    }
+
+    return { firstCandidateLine: candidates[0]?.line, totalLines };
+  }
+
+  /**
+   * Compare an original-text heading against a parsed section title. The parsed
+   * title comes from the CLEANED document, so the original is normalized with
+   * the same inline transforms (DocC cross-reference unwrap, comment removal)
+   * before whitespace-insensitive comparison.
+   */
+  private headingTitlesMatch(sourceText: string, sectionTitle: string): boolean {
+    if (sourceText === sectionTitle) {
+      return true;
+    }
+    const normalize = (value: string): string =>
+      value
+        .replace(/<doc:([^>]+)>/g, '$1')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return normalize(sourceText) === normalize(sectionTitle);
+  }
+
+  /**
+   * Line range for the document-level content node. When the single title H1
+   * was hoisted, the document content absorbed that H1's own content, so the
+   * range extends through the H1's own extent (absent when the H1 itself could
+   * not be located, rather than claiming a range that excludes real content).
+   * Otherwise it covers the leading region before the first heading, or the
+   * whole file when there are no headings at all.
+   */
+  private documentSourceLines(
+    lineIndex: { firstCandidateLine: number | undefined; totalLines: number },
+    hoistedSection: MarkdownSection | undefined
+  ): MarkdownSourceLineRange | undefined {
+    if (hoistedSection !== undefined) {
+      return hoistedSection.sourceLines === undefined
+        ? undefined
+        : { start: 1, end: hoistedSection.sourceLines.end };
+    }
+    if (lineIndex.firstCandidateLine === undefined) {
+      return lineIndex.totalLines >= 1 ? { start: 1, end: lineIndex.totalLines } : undefined;
+    }
+    if (lineIndex.firstCandidateLine > 1) {
+      return { start: 1, end: lineIndex.firstCandidateLine - 1 };
+    }
+    return undefined;
   }
 
   private compressBlankLines(content: string): string {
