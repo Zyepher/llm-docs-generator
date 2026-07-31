@@ -17,7 +17,7 @@ import {
   type ContentBlock,
   type DocNode,
 } from '../../core/models.js';
-import { slugifyAscii } from '../../utils/slug.js';
+import { slugifyText } from '../../utils/slug.js';
 import { ParserError } from '../base.js';
 
 const SECTION_ADORNMENT_PATTERN = /^([=\-~^"`'#*+_:.<>])\1*\s*$/;
@@ -132,7 +132,7 @@ export class RstParser {
         const section: RstSection = {
           level,
           title: heading.title,
-          id: slugifyAscii(heading.title),
+          id: slugifyText(heading.title),
           content: [],
           children: [],
         };

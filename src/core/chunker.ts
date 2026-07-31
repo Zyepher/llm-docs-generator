@@ -758,10 +758,13 @@ function semanticSegment(node: NormalizedNode, fallback: string): string {
 }
 
 function slugify(value: string): string {
+  // Unicode-aware so non-Latin titles keep a semantic segment instead of
+  // degrading to the positional node-N fallback; dots, underscores, and hyphens
+  // stay verbatim and pure-ASCII input slugs exactly as before.
   return value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/[^\p{L}\p{N}._-]+/gu, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-');
 }

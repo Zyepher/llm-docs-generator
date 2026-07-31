@@ -21,7 +21,7 @@ import {
 } from '../../core/models.js';
 import { BaseParser, FormatType, ParserError } from '../base.js';
 import { errorMessage, isRecord } from '../../utils/guards.js';
-import { slugifyAscii } from '../../utils/slug.js';
+import { slugifyText } from '../../utils/slug.js';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 const PARAMETER_LOCATION_ORDER = ['path', 'query', 'header', 'cookie', 'formData', 'body'] as const;
@@ -1311,7 +1311,7 @@ function uniqueId(value: string, used: Map<string, number>): string {
 }
 
 function slugify(value: string): string {
-  return slugifyAscii(value, 'api-document');
+  return slugifyText(value, 'api-document');
 }
 
 function compareOperationEntries(left: OperationEntry, right: OperationEntry): number {

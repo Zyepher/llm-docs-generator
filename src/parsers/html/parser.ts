@@ -17,7 +17,7 @@ import {
   type ContentBlock,
   type DocNode,
 } from '../../core/models.js';
-import { slugifyAscii } from '../../utils/slug.js';
+import { slugifyText } from '../../utils/slug.js';
 import { ParserError } from '../base.js';
 
 const STRIPPED_ELEMENTS = ['script', 'style', 'template'] as const;
@@ -372,7 +372,7 @@ class HtmlContentExtractor {
     const section: HtmlSection = {
       level,
       title,
-      id: this.uniqueId(slugifyAscii(title)),
+      id: this.uniqueId(slugifyText(title)),
       content: [],
       children: [],
     };
