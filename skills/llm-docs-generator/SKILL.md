@@ -49,7 +49,7 @@ git rev-parse <tagB>:<docs-path>   # tree hash at tag B
 # different => diff them, then choose the newest tag whose differences are acceptable.
 ```
 
-   State the tag you chose and why. `repo-docs-discovery` covers deeper package→repo→docs-tree resolution (e.g. a package whose docs live in a *different* package's repo); use it when resolution is not obvious.
+State the tag you chose and why. `repo-docs-discovery` covers deeper package→repo→docs-tree resolution (e.g. a package whose docs live in a _different_ package's repo); use it when resolution is not obvious.
 
 ## Step 2 — CLONE PINNED
 
@@ -70,7 +70,7 @@ WHY: the engine faithfully converts whatever you point it at. If drafts, a wrong
 Walk the docs tree at the pinned commit and look for:
 
 - **Draft content** — `*.draft.md`, `drafts/` directories, `DRAFT`/`WIP` in frontmatter titles. These are not shipped docs; exclude them.
-- **Docs-site nav config** — e.g. `config.json`, `docs.json`, sidebar/nav manifests. This carries the *authoritative category structure* the vendor publishes. You will translate it into a `--categories` file in Step 4. The engine will not read it for you.
+- **Docs-site nav config** — e.g. `config.json`, `docs.json`, sidebar/nav manifests. This carries the _authoritative category structure_ the vendor publishes. You will translate it into a `--categories` file in Step 4. The engine will not read it for you.
 - **Non-markdown files** — images, scripts, JSON fixtures. The engine skips them and records a warning; know what you are dropping.
 - **Multi-framework subtrees** — e.g. `docs/framework/react` vs `docs/framework/vue`, or `docs/start/framework/react`. Point `--source` at the exact framework subtree you want. Never point it at the whole docs root blindly — that is how a pack balloons to a multi-framework monolith.
 
@@ -99,7 +99,7 @@ Rules:
   - `--split-by dirs` — one output file per top-level docs directory. Fast, structural.
   - `--categories <file.json>` — YOU author this by translating the vendor nav config from Step 3. Shape: `{"categories":[{"id","title","include":["glob"]}],"fallback":"misc"}`, **first-match-wins** ordering. This translation is your judgment; the engine cannot infer it. Prefer this when the nav config's grouping is better than raw directory layout.
   - Both modes still write the combined `-full` file alongside the per-topic files. A monolith with no split is a known failure — slice unless the pack is genuinely small.
-- **One output dir per pack.** The filename prefix derives from the source dir *basename*: two sources both named `react` (e.g. router's and query's) produce identical filenames and will collide. Keep each pack in its own `--output-dir`, or set a distinct prefix, so `router-react-*` and `query-react-*` never overwrite each other.
+- **One output dir per pack.** The filename prefix derives from the source dir _basename_: two sources both named `react` (e.g. router's and query's) produce identical filenames and will collide. Keep each pack in its own `--output-dir`, or set a distinct prefix, so `router-react-*` and `query-react-*` never overwrite each other.
 
 The pack the engine writes embeds: frontmatter titles as headings, `[source: <relpath>]` markers per section, a `<prefix>-toc-llms.txt` table-of-contents artifact, `pack:<relpath>` internal links, and commit-pinned GitHub URLs for external links — all traceable back to the pinned commit.
 
@@ -127,17 +127,17 @@ llm-docs verify --outputs-only --output-dir <project>/agent-docs/<pkg>
 
 WHY `--outputs-only`: once relocated, the recorded source paths no longer exist; this checks output integrity against the manifest without re-reading vanished sources.
 
-## Step 6 — AUTHOR THE INDEX (mandatory, yours)
+## Step 6 — REVIEW AND EXTEND THE INDEX (mandatory, yours)
 
-WHY: without an index, the next session reloads the whole pack into context — the exact waste this tool exists to prevent. The engine preserves `index.md` across regenerate/refresh but never writes it; the map is your job.
+WHY: without a good index, the next session reloads the whole pack into context — the exact waste this tool exists to prevent. `generate` seeds a starter `llm-docs/index.md` when none exists (file inventory, token estimates, top-level sections, pinned git provenance) and never touches it again: from that moment the map is yours. The seed is structure, not judgment — review it and extend it.
 
-Write `llm-docs/index.md` next to the pack containing:
+Make sure `llm-docs/index.md` carries:
 
-- Versions covered, and for each: repo URL + commit + tag.
-- A table of the generated packs/categories (the `*-llms.txt` files and, if sliced, each topic file) with a one-line **what-to-grep-for** hint per row, so a later agent loads only the slice it needs.
+- Versions covered, and for each: repo URL + commit + tag. The seed records the pinned remote@commit when git provenance was captured; add the rest.
+- A table of the generated packs/categories (the `*-llms.txt` files and, if sliced, each topic file) with a one-line **what-to-grep-for** hint per row, so a later agent loads only the slice it needs. The seed lists files, token estimates, and section headings; the grep hints are your judgment.
 - Any exclusions or known gaps worth remembering.
 
-This file is a navigation aid, not a verified artifact: it is not in `manifest.json`, `verify` ignores it, and `generate`/`refresh` preserve it (they delete only tool-owned outputs — the `*-llms.txt` files, the `-toc-llms.txt`, and the chunks output). Keep it accurate to the files actually present.
+This file is a navigation aid, not a verified artifact: it is not in `manifest.json`, `verify` reports it as unmanaged and never fails it, and `generate`/`refresh` seed it only when absent and otherwise preserve it (they delete only tool-owned outputs — the `*-llms.txt` files, the `-toc-llms.txt`, and the chunks output). Keep it accurate to the files actually present.
 
 ## Step 7 — MAINTAIN
 
@@ -169,7 +169,8 @@ python -c "import importlib.metadata as m; print(m.version('<dist>'))"  # instal
 pip show <dist>                                                          # version + summary
 ```
 
-  Read the repo from the project's `pyproject.toml` `[project.urls]` (e.g. `Repository`/`Source`) — the equivalent of npm's `repository` field.
+Read the repo from the project's `pyproject.toml` `[project.urls]` (e.g. `Repository`/`Source`) — the equivalent of npm's `repository` field.
+
 - **CLONE (Step 2).** `git clone --filter=blob:none <repo>` and `checkout` the tag/commit for that exact version, identical to the npm flow.
 - **INSPECT (Step 3).** Sphinx/RST projects keep docs under `docs/` as an RST tree (often topic- or framework-split) with a `conf.py`/`index.rst` nav; find drafts and non-doc files before generating.
 - **GENERATE (Step 4).** Point `--source` at the RST subtree and pass `--format rst`:
