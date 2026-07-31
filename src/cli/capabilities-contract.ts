@@ -253,7 +253,12 @@ export const CAPABILITIES_CONTRACT = {
         '--filename-prefix <prefix> explicit output filename prefix, same sanitization as the derived prefix, not usable with --preset',
         '--exclude <glob> (repeatable)',
       ],
-      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
+      outputFiles: [
+        'manifest.json',
+        'llm-docs/*-llms.txt',
+        'llm-docs/index.md (seeded only when absent; agent-owned, unverified)',
+        'chunks/semantic-chunks.jsonl',
+      ],
       summary:
         'deterministic local source parsing through the registered parser or an explicit local parser plugin and universal formatter, with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, opt-in semantic chunk JSONL export for built-in source generation, compact chunk manifest indexes, a scoped swift-book preset, best-effort git provenance capture, a verbatim operator label, an explicit or source-derived output filename prefix recorded in manifest.output.filenamePrefix, deterministic --exclude globbing, and recorded skipped-file and draft-file facts',
       limitations: [
@@ -273,6 +278,7 @@ export const CAPABILITIES_CONTRACT = {
         'no source selection decision',
         'semantic chunk JSONL is emitted only when --chunks jsonl is requested',
         'semantic chunk manifest indexes are source-docs JSONL metadata only',
+        'llm-docs/index.md is seeded only when absent and is never overwritten, listed in generatedOutputs, or verified',
       ],
     },
     {
@@ -287,7 +293,11 @@ export const CAPABILITIES_CONTRACT = {
         '--parser-plugin-manifest <path>',
         '--format <id>',
       ],
-      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt'],
+      outputFiles: [
+        'manifest.json',
+        'llm-docs/*-llms.txt',
+        'llm-docs/index.md (seeded only when absent; agent-owned, unverified)',
+      ],
       summary:
         'explicit parser plugin execution through one declared local module, normalized through the universal formatter with descriptive manifest contract metadata, content-free input provenance summary metadata, content-free artifact summary metadata, and parser plugin provenance in the source-docs manifest',
       limitations: [
@@ -466,7 +476,12 @@ export const CAPABILITIES_CONTRACT = {
       inputBoundary:
         'existing built-in-parser local-source-docs manifest.json with recorded local source path',
       options: ['--manifest <path>', '--output-dir <dir>', '--accept-drift'],
-      outputFiles: ['manifest.json', 'llm-docs/*-llms.txt', 'chunks/semantic-chunks.jsonl'],
+      outputFiles: [
+        'manifest.json',
+        'llm-docs/*-llms.txt',
+        'llm-docs/index.md (seeded only when absent; agent-owned, unverified)',
+        'chunks/semantic-chunks.jsonl',
+      ],
       summary:
         'deterministic regeneration of built-in-parser local source docs from the manifest-recorded explicit local source path, preserving opt-in chunk JSONL and chunk index metadata when the prior manifest recorded that output, preserving the recorded operator label and re-applying recorded --exclude globs, failing on git drift when the recorded source.git commit differs from the current source HEAD unless --accept-drift is passed (which records the new git state), writing current content-free input provenance summary metadata and content-free artifact summary metadata, recording verified refresh provenance metadata, followed by manifest integrity verification of regenerated outputs',
       limitations: [

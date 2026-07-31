@@ -31,6 +31,7 @@ import {
 import {
   formatDocNode,
   rewriteDocNodeProseInPlace,
+  type FormatterOutputInfo,
   type FormatterSourcePack,
 } from './universal-formatter.js';
 import { matchesAnyGlob } from './category-globs.js';
@@ -55,6 +56,10 @@ const SOURCE_DOCS_OUTPUT_DIR = 'llm-docs';
 const SOURCE_DOCS_CHUNKS_OUTPUT_DIR = 'chunks';
 const SOURCE_DOCS_CHUNKS_JSONL = 'semantic-chunks.jsonl';
 const SOURCE_DOCS_MANIFEST = 'manifest.json';
+const SOURCE_DOCS_INDEX_FILENAME = 'index.md';
+// Bound the per-file section roster in the seeded index so an unsliced pack
+// with hundreds of file sections cannot turn one table cell into a wall.
+const SOURCE_DOCS_INDEX_MAX_SECTIONS = 12;
 const DEFAULT_SOURCE_DOCS_MAX_DEPTH = 16;
 const DEFAULT_SOURCE_DOCS_MAX_ENTRIES = 20000;
 const DEFAULT_SOURCE_DOCS_MAX_FILES = 5000;
@@ -261,6 +266,9 @@ export interface GenerateSourceDocsResult {
   manifestPath: string;
   llmDocsDir: string;
   manifest: SourceDocsManifest;
+  // True when this run wrote the starter llm-docs/index.md; false when a
+  // pre-existing (agent-owned) index was preserved untouched.
+  indexSeeded: boolean;
 }
 
 export interface CleanupSourceDocsArtifactsOptions {
@@ -373,11 +381,13 @@ export async function generateSourceDocs(
     }
 
     const packRelpaths = new Set(preparedSource.sourceFiles.map((file) => file.path));
+    const formatterOutputs: FormatterOutputInfo[] = [];
     const sourcePack: FormatterSourcePack = {
       resolvedPath: source.resolvedPath,
       packRelpaths,
       emitToc: true,
       onWarning: (warning) => warnings.push(warning),
+      onOutput: (output) => formatterOutputs.push(output),
       ...(options.label === undefined ? {} : { label: options.label }),
       ...(options.gitContext === undefined ? {} : { gitContext: options.gitContext }),
     };
@@ -449,11 +459,19 @@ export async function generateSourceDocs(
 
     await writeJsonFileSafely(manifestPath, manifest);
 
+    const indexSeeded = await seedSourceDocsIndexIfAbsent({
+      outputDir,
+      llmDocsDir,
+      manifest,
+      formatterOutputs,
+    });
+
     return {
       outputDir,
       manifestPath,
       llmDocsDir,
       manifest,
+      indexSeeded,
     };
   } catch (error) {
     if (outputWorkStarted) {
@@ -1856,12 +1874,124 @@ function filenamePrefixForSource(sourcePath: string, type: SourceDocsSourceType)
 }
 
 /**
+ * Seed the starter llm-docs/index.md navigation file, only when no entry
+ * already exists at that path. Once present the index belongs to the operating
+ * agent: it is never overwritten, never listed in generatedOutputs, and never
+ * verified, so an agent-edited index survives regenerate and refresh
+ * byte-identical. Returns whether this run wrote the starter.
+ */
+async function seedSourceDocsIndexIfAbsent(options: {
+  outputDir: string;
+  llmDocsDir: string;
+  manifest: SourceDocsManifest;
+  formatterOutputs: FormatterOutputInfo[];
+}): Promise<boolean> {
+  const indexPath = join(options.llmDocsDir, SOURCE_DOCS_INDEX_FILENAME);
+
+  try {
+    await lstat(indexPath);
+
+    return false;
+  } catch (error) {
+    if (!isFileNotFoundError(error)) {
+      throw error;
+    }
+  }
+
+  await writeTextFileSafely(indexPath, renderSourceDocsIndex(options));
+
+  return true;
+}
+
+/**
+ * Render the seeded index from data already in memory: the manifest's
+ * generated-output inventory (paths and token estimates) and the formatter's
+ * per-output top-level section report. Deterministic by construction: no
+ * dates and no machine paths, so identical inputs produce identical bytes.
+ */
+function renderSourceDocsIndex(options: {
+  outputDir: string;
+  manifest: SourceDocsManifest;
+  formatterOutputs: FormatterOutputInfo[];
+}): string {
+  const manifest = options.manifest;
+  const packName = manifest.source.label ?? basename(manifest.source.resolvedPath);
+  const infoByRelpath = new Map(
+    options.formatterOutputs.map((info) => [relativeOutputPath(options.outputDir, info.path), info])
+  );
+  const lines: string[] = [
+    `# ${packName}: pack index`,
+    '',
+    'This index maps the docs pack so a session loads only what it needs. The generator seeded it and will not overwrite it: it is yours to edit and extend. It is not part of the verified pack; verify covers the generated text outputs and manifest.json.',
+    '',
+  ];
+  const git = manifest.source.git;
+
+  if (git !== undefined) {
+    const origin =
+      git.remoteUrl === null || git.remoteUrl.length === 0
+        ? `commit ${git.commit}`
+        : `${git.remoteUrl}@${git.commit}`;
+    const tags = git.tags.length === 0 ? '' : ` (tags: ${git.tags.join(', ')})`;
+
+    lines.push(`Pinned source: ${origin}${tags}`, '');
+  }
+
+  lines.push('| File | Est. tokens | Contents |', '| --- | --- | --- |');
+
+  for (const output of manifest.generatedOutputs) {
+    const contents = sourceDocsIndexContentsCell(output, infoByRelpath.get(output.path));
+
+    lines.push(
+      `| ${escapeIndexTableCell(output.path)} | ${output.estimatedTokenCount} | ${escapeIndexTableCell(contents)} |`
+    );
+  }
+
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+function sourceDocsIndexContentsCell(
+  output: SourceDocsGeneratedOutput,
+  info: FormatterOutputInfo | undefined
+): string {
+  if (output.kind === 'semantic-chunks-jsonl') {
+    return 'Semantic chunk export, one JSON record per line';
+  }
+
+  if (info === undefined) {
+    return 'Generated docs text';
+  }
+
+  if (info.role === 'toc') {
+    return 'Table of contents for the full pack';
+  }
+
+  const rolePrefix = info.role === 'full' ? 'Full pack' : 'Slice';
+
+  if (info.topLevelSections.length === 0) {
+    return rolePrefix;
+  }
+
+  const shown = info.topLevelSections.slice(0, SOURCE_DOCS_INDEX_MAX_SECTIONS);
+  const remainder = info.topLevelSections.length - shown.length;
+  const suffix = remainder > 0 ? `, +${remainder} more` : '';
+
+  return `${rolePrefix}: ${shown.join('; ')}${suffix}`;
+}
+
+function escapeIndexTableCell(value: string): string {
+  return value.replaceAll('|', '\\|').replaceAll('\n', ' ');
+}
+
+/**
  * Remove only the artifacts this mode owns: the manifest, generated
  * `*-llms.txt` outputs (the combined `-full-llms.txt`, any per-category
  * `-<categoryId>-llms.txt`, and the `-toc-llms.txt` table of contents), and the
- * semantic-chunks JSONL. Anything else in the output tree (for example an
- * agent-authored llm-docs/index.md navigation file, which the documented
- * workflow encourages) is deliberately preserved.
+ * semantic-chunks JSONL. Anything else in the output tree is deliberately
+ * preserved, most importantly llm-docs/index.md: the tool seeds that file once
+ * and it belongs to the operating agent from then on.
  */
 async function clearSourceDocsArtifacts(outputDir: string): Promise<void> {
   const llmDocsDir = join(outputDir, SOURCE_DOCS_OUTPUT_DIR);

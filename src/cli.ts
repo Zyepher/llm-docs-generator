@@ -24,10 +24,7 @@ import {
   discoverLocalSource,
 } from './core/discovery.js';
 import { discoverRepo } from './core/repo-discovery.js';
-import type {
-  SourceDocsCategoriesConfig,
-  SourceDocsPresetMetadata,
-} from './core/source-docs.js';
+import type { SourceDocsCategoriesConfig, SourceDocsPresetMetadata } from './core/source-docs.js';
 import { discoverWebsite } from './core/website-discovery.js';
 import { OpenRefParser } from './parsers/openref/parser.js';
 import { LLMFormatter } from './core/formatter.js';
@@ -55,10 +52,7 @@ import {
   isObjectRecord,
 } from './utils/guards.js';
 import { readJsonFile } from './utils/json.js';
-import {
-  isSanitizedFilenameSegment,
-  sanitizeFilenameSegment,
-} from './utils/filename-prefix.js';
+import { isSanitizedFilenameSegment, sanitizeFilenameSegment } from './utils/filename-prefix.js';
 import { Logger, LogLevel } from './utils/logger.js';
 import {
   CLI_NAME,
@@ -443,7 +437,10 @@ function validateGenerateOptions(options: {
     failGenerateRequest('generate --split-by and --categories are mutually exclusive.');
   }
 
-  if ((options.splitBy !== undefined || options.categories !== undefined) && options.sdk !== undefined) {
+  if (
+    (options.splitBy !== undefined || options.categories !== undefined) &&
+    options.sdk !== undefined
+  ) {
     failGenerateRequest(
       'generate --split-by/--categories are supported only with explicit --source and cannot be used with --sdk.'
     );
@@ -1022,9 +1019,8 @@ sourceTruthCommand
       console.log(`  Report: ${chalk.cyan(result.reportPath)}`);
       console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
     } catch (error) {
-      const { SourceVerificationNoDocsEvidenceError } = await import(
-        './core/source-verification.js'
-      );
+      const { SourceVerificationNoDocsEvidenceError } =
+        await import('./core/source-verification.js');
       const errorMsg = errorMessage(error);
 
       if (error instanceof SourceVerificationNoDocsEvidenceError) {
@@ -1391,6 +1387,11 @@ program
           if (chunkOutput !== undefined) {
             console.log(`  Chunk export: ${chalk.cyan(chunkOutput.path)}`);
           }
+          console.log(
+            `  Index: llm-docs/index.md ${
+              result.indexSeeded ? '(seeded starter, agent-owned)' : '(existing, preserved)'
+            }`
+          );
           console.log(`  Output: ${chalk.cyan(result.outputDir)}`);
           console.log(`  Manifest: ${chalk.cyan(result.manifestPath)}`);
         } catch (error) {

@@ -211,13 +211,14 @@ Current implementation:
   values, unknown presets, presets without `--source`, presets with `--sdk`,
   and preset-incompatible explicit formats, and does not fetch, crawl, select
   candidates, infer task fit, or decide source selection. Successful source
-  generation writes `manifest.json` plus generated docs under `llm-docs/`. An
-  agent may additionally author an `llm-docs/index.md` navigation file after
-  generation; it is agent-authored, not a CLI output, is not recorded in
-  `manifest.json`, and `verify` ignores it, so it must not be treated as a
-  verified artifact. Regeneration and refresh delete only tool-owned outputs
-  (the generated `*-llms.txt` files and the chunks output) and preserve this
-  agent-authored file.
+  generation writes `manifest.json` plus generated docs under `llm-docs/`. It
+  also seeds a starter `llm-docs/index.md` navigation file, but only when no
+  entry exists at that path; once present the index is agent-owned, is never
+  overwritten by the CLI, is not recorded in `manifest.json` generatedOutputs,
+  and `verify` reports it informationally as unmanaged, so it must not be
+  treated as a verified artifact. Regeneration and refresh delete only
+  tool-owned outputs (the generated `*-llms.txt` files and the chunks output)
+  and preserve this agent-owned file.
   With `--chunks jsonl`, it also writes `chunks/semantic-chunks.jsonl` and a
   compact source-docs `semanticChunkIndexes` manifest entry. The manifest
   records source file hashes, byte sizes, line counts, deterministic estimated

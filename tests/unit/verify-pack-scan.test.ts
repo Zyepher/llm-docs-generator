@@ -38,14 +38,16 @@ async function makeSourceDocsPack(): Promise<{ manifestPath: string; outputDir: 
 }
 
 describe('verify pack-directory scan (unlisted files)', () => {
-  it('verifies a fresh pack clean with no unmanaged files', async () => {
+  it('verifies a fresh pack clean, reporting only the seeded index as unmanaged', async () => {
     const { manifestPath } = await makeSourceDocsPack();
 
     const result = await verifyGenerationManifest({ manifestPath });
 
+    // The seeded llm-docs/index.md is agent-owned by design: never listed in
+    // generatedOutputs, reported informationally, and never a failure.
     expect(result.outputs?.status).toBe('passed');
     expect(result.failures).toHaveLength(0);
-    expect(result.unmanagedFiles).toBeUndefined();
+    expect(result.unmanagedFiles).toEqual(['llm-docs/index.md']);
   });
 
   it('fails when an unlisted file matches the tool output naming', async () => {
@@ -95,7 +97,7 @@ describe('verify pack-directory scan (unlisted files)', () => {
 
     expect(result.outputs?.status).toBe('passed');
     expect(result.failures).toHaveLength(0);
-    expect(result.unmanagedFiles).toEqual(['.DS_Store', 'index.md']);
+    expect(result.unmanagedFiles).toEqual(['.DS_Store', 'index.md', 'llm-docs/index.md']);
   });
 
   it('reports an unlisted symlink as unmanaged with a note and never follows it', async () => {
@@ -109,7 +111,10 @@ describe('verify pack-directory scan (unlisted files)', () => {
     // A symlink is never followed or hashed, so even a tool-pattern name is
     // reported informationally rather than failed.
     expect(result.failures).toHaveLength(0);
-    expect(result.unmanagedFiles).toEqual(['linked-llms.txt (symbolic link; not followed)']);
+    expect(result.unmanagedFiles).toEqual([
+      'linked-llms.txt (symbolic link; not followed)',
+      'llm-docs/index.md',
+    ]);
   });
 
   it('bounds the unmanaged listing to 20 entries plus a +N more marker', async () => {
@@ -127,8 +132,9 @@ describe('verify pack-directory scan (unlisted files)', () => {
 
     expect(result.failures).toHaveLength(0);
     expect(result.unmanagedFiles).toHaveLength(21);
-    expect(result.unmanagedFiles?.at(0)).toBe('stray-00.txt');
-    expect(result.unmanagedFiles?.at(-1)).toBe('+5 more');
+    expect(result.unmanagedFiles?.at(0)).toBe('llm-docs/index.md');
+    expect(result.unmanagedFiles?.at(1)).toBe('stray-00.txt');
+    expect(result.unmanagedFiles?.at(-1)).toBe('+6 more');
   });
 
   it('applies the pack scan in configured-sdk mode too', async () => {
