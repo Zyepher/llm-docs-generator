@@ -18,6 +18,7 @@ export type {
   SemanticChunk,
   SemanticChunkMetadata,
   SemanticChunkSource,
+  SemanticChunkSourceLines,
   SemanticChunkWarning,
   SemanticChunkWarningCode,
 } from './core/chunker.js';

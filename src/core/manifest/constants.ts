@@ -144,6 +144,7 @@ export const SOURCE_DOCS_SEMANTIC_CHUNK_INDEX_CHUNK_KEYS = new Set([
   'estimatedTokenCount',
   'sourceFormat',
   'sourcePath',
+  'sourceLines',
   'warningCount',
 ]);
 export const SOURCE_DOCS_SWIFT_BOOK_PRESET_NAME = 'swift-book';

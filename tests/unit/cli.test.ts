@@ -357,6 +357,7 @@ interface SemanticChunkManifestIndex {
     estimatedTokenCount: number;
     sourceFormat?: string;
     sourcePath?: string;
+    sourceLines?: { start: number; end: number };
     warningCount: number;
   }>;
 }
@@ -1220,6 +1221,7 @@ function semanticChunkIndexAggregateHashForTest(index: SemanticChunkManifestInde
         warningCount: chunk.warningCount,
         ...(chunk.sourceFormat === undefined ? {} : { sourceFormat: chunk.sourceFormat }),
         ...(chunk.sourcePath === undefined ? {} : { sourcePath: chunk.sourcePath }),
+        ...(chunk.sourceLines === undefined ? {} : { sourceLines: chunk.sourceLines }),
       })),
     })
   );
@@ -9183,7 +9185,13 @@ describe('CLI compatibility behavior', () => {
     }
 
     expect(records[0]?.sourceFormat).toBe('markdown');
-    expect(records[0]?.sourcePath).toBe(sourcePath);
+    // Root-relative to the source root (matching manifest sourceFiles[].path
+    // and the [source:] markers), never the generating machine's absolute path.
+    expect(records[0]?.sourcePath).toBe('chunk-docs.md');
+    // 1-indexed inclusive range into the ORIGINAL chunk-docs.md: the hoisted H1
+    // body spans lines 1-4, the first Install section lines 5-8.
+    expect(records[0]?.sourceLines).toEqual({ start: 1, end: 4 });
+    expect(records[1]?.sourceLines).toEqual({ start: 5, end: 8 });
     expect(String(records[0]?.content)).toContain('# Chunk Docs');
     expect(String(records[2]?.content)).toContain('```ts\nexport const value = 1;\n```');
     expect(records[2]?.warnings).toEqual([
@@ -9217,7 +9225,8 @@ describe('CLI compatibility behavior', () => {
         characterCount: records[0]?.characterCount,
         estimatedTokenCount: records[0]?.estimatedTokenCount,
         sourceFormat: 'markdown',
-        sourcePath,
+        sourcePath: 'chunk-docs.md',
+        sourceLines: { start: 1, end: 4 },
         warningCount: 0,
       },
       {
@@ -9230,7 +9239,8 @@ describe('CLI compatibility behavior', () => {
         characterCount: records[1]?.characterCount,
         estimatedTokenCount: records[1]?.estimatedTokenCount,
         sourceFormat: 'markdown',
-        sourcePath,
+        sourcePath: 'chunk-docs.md',
+        sourceLines: { start: 5, end: 8 },
         warningCount: 0,
       },
       {
@@ -9243,7 +9253,8 @@ describe('CLI compatibility behavior', () => {
         characterCount: records[2]?.characterCount,
         estimatedTokenCount: records[2]?.estimatedTokenCount,
         sourceFormat: 'markdown',
-        sourcePath,
+        sourcePath: 'chunk-docs.md',
+        sourceLines: { start: 9, end: 15 },
         warningCount: 1,
       },
     ]);

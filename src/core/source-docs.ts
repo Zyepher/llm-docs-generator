@@ -28,7 +28,11 @@ import {
   type InputProvenance,
   type ManifestContract,
 } from './manifest.js';
-import { formatDocNode, type FormatterSourcePack } from './universal-formatter.js';
+import {
+  formatDocNode,
+  rewriteDocNodeProseInPlace,
+  type FormatterSourcePack,
+} from './universal-formatter.js';
 import { matchesAnyGlob } from './category-globs.js';
 import { isUrlLikeInput } from './discovery.js';
 import { FormatType, type Parser } from '../parsers/base.js';
@@ -84,11 +88,7 @@ const DISCOVERY_REPORT_MODES = new Set([
 type SourceDocsSourceType = 'file' | 'directory';
 export type SourceDocsChunksFormat = 'jsonl';
 type BuiltInSourceDocsResolvedFormat =
-  | FormatType.MARKDOWN
-  | FormatType.OPENAPI
-  | FormatType.OPENREF
-  | FormatType.RST
-  | FormatType.HTML;
+  FormatType.MARKDOWN | FormatType.OPENAPI | FormatType.OPENREF | FormatType.RST | FormatType.HTML;
 type SourceDocsResolvedFormat = BuiltInSourceDocsResolvedFormat | string;
 
 export type SourceDocsGeneratorMetadata = GeneratorMetadata;
@@ -400,8 +400,14 @@ export async function generateSourceDocs(
       sourcePack,
     });
     const generatedOutputs = await describeGeneratedOutputs(outputDir, outputPaths);
-    const chunkOutput =
-      chunksFormat === 'jsonl' ? await writeSemanticChunksJsonl(outputDir, root) : undefined;
+    let chunkOutput: Awaited<ReturnType<typeof writeSemanticChunksJsonl>> | undefined;
+    if (chunksFormat === 'jsonl') {
+      // Chunk prose must agree with the pack's rewritten prose: rewrite the IR
+      // in place with the formatter's exact link machinery (safe here because
+      // every pack output has already been written from the original tree).
+      rewriteDocNodeProseInPlace(root, sourcePack);
+      chunkOutput = await writeSemanticChunksJsonl(outputDir, root);
+    }
     const semanticChunkIndexes: SemanticChunkManifestIndex[] = [];
     if (chunkOutput !== undefined) {
       generatedOutputs.push(chunkOutput.output);
@@ -1469,9 +1475,7 @@ function applySourceDocsCategories(
     if (config === undefined) {
       continue;
     }
-    const matched = config.categories.find((category) =>
-      matchesAnyGlob(relpath, category.include)
-    );
+    const matched = config.categories.find((category) => matchesAnyGlob(relpath, category.include));
     if (matched !== undefined) {
       pushInto(matched.id, matched.title, node);
     } else {
@@ -1588,6 +1592,9 @@ function toSemanticChunkJsonlRecord(
   }
   if (chunk.sourcePath !== undefined) {
     record.sourcePath = chunk.sourcePath;
+  }
+  if (chunk.sourceLines !== undefined) {
+    record.sourceLines = chunk.sourceLines;
   }
 
   return record;

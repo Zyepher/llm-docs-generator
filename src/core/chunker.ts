@@ -3,6 +3,19 @@
  *
  * The chunker is a library capability only. It does not select sources, write
  * manifests, or change CLI generation behavior.
+ *
+ * Source evidence carried per chunk:
+ *  - `sourcePath` comes from node metadata, preferring `sourceRelPath` (the
+ *    source-root-relative path the generation flow stamps on every file
+ *    section, matching manifest sourceFiles[].path and the pack's `[source:]`
+ *    markers) over the parser-recorded `sourcePath`/`path` values.
+ *  - `sourceLines` is a 1-indexed inclusive line range into the ORIGINAL file
+ *    named by `sourcePath`, taken from per-node `sourceLines` metadata and
+ *    never inherited from an ancestor (a child section must not claim its
+ *    parent's range). Parser coverage: the markdown family (Markdown, MDX,
+ *    DocC) records ranges for located headings and document-level content;
+ *    openref, openapi, rst, and html record no positions, so their chunks
+ *    simply omit the field. An absent range is honest; one is never estimated.
  */
 
 import { isRecord } from '../utils/guards.js';
@@ -37,6 +50,15 @@ export interface SemanticChunkSource {
   path?: string;
 }
 
+/**
+ * 1-indexed inclusive line range into the original source file named by the
+ * chunk's `sourcePath`. Present only when the parser recorded real positions.
+ */
+export interface SemanticChunkSourceLines {
+  start: number;
+  end: number;
+}
+
 export interface SemanticChunkMetadata {
   nodeId: string;
   nodeType: string;
@@ -56,6 +78,7 @@ export interface SemanticChunk {
   nodePath: string[];
   sourceFormat?: string;
   sourcePath?: string;
+  sourceLines?: SemanticChunkSourceLines;
   content: string;
   contentHash: string;
   characterCount: number;
@@ -119,6 +142,7 @@ interface ChunkDraft {
   nodeId: string;
   nodeType: string;
   source: SemanticChunkSource;
+  sourceLines?: SemanticChunkSourceLines;
   content: string;
   blockTypes: string[];
   warnings: SemanticChunkWarning[];
@@ -208,7 +232,8 @@ export function chunkDocNode(root: DocNode, options: ChunkDocNodeOptions = {}): 
     }
 
     const source = sourceFromMetadata(frame.source, node.metadata);
-    drafts.push(...chunkSingleNode(node, frame.path, source, maxCharacters, warnings));
+    const sourceLines = sourceLinesFromMetadata(node.metadata);
+    drafts.push(...chunkSingleNode(node, frame.path, source, sourceLines, maxCharacters, warnings));
     pushChildren(stack, node, frame.path, source, warnings);
   }
 
@@ -235,6 +260,7 @@ function chunkSingleNode(
   node: NormalizedNode,
   path: PathLink,
   source: SemanticChunkSource,
+  sourceLines: SemanticChunkSourceLines | undefined,
   maxCharacters: number,
   globalWarnings: SemanticChunkWarning[]
 ): ChunkDraft[] {
@@ -289,6 +315,7 @@ function chunkSingleNode(
       nodeId: node.id,
       nodeType: node.type,
       source,
+      ...(sourceLines === undefined ? {} : { sourceLines }),
       content: composeChunkContent(headingContext, currentParts),
       blockTypes: [...currentBlockTypes],
       warnings: currentWarnings,
@@ -597,6 +624,9 @@ function finalizeChunk(
   if (draft.source.path !== undefined) {
     chunk.sourcePath = draft.source.path;
   }
+  if (draft.sourceLines !== undefined) {
+    chunk.sourceLines = draft.sourceLines;
+  }
 
   return chunk;
 }
@@ -779,9 +809,15 @@ function sourceFromMetadata(
     readMetadataString(metadata, 'sourceFormat') ??
     readMetadataString(metadata, 'sourceKind') ??
     parent?.format;
+  // `sourceRelPath` (source-root-relative, stamped by the generation flow and
+  // matching the pack's [source:] markers) outranks the parser-recorded
+  // absolute `sourcePath`/`path`, so chunk records never leak the generating
+  // machine's filesystem layout when a relative path is available.
+  const explicitRelPath = readMetadataString(metadata, 'sourceRelPath');
   const explicitSourcePath = readMetadataString(metadata, 'sourcePath');
   const genericPath = readMetadataString(metadata, 'path');
   const path =
+    explicitRelPath ??
     explicitSourcePath ??
     (genericPath !== undefined &&
     !isKnownApiSourceFormat(format) &&
@@ -823,18 +859,48 @@ function isLikelyLocalFilePath(path: string): boolean {
   return ['readme', 'license', 'changelog', 'contributing'].includes(filename.toLowerCase());
 }
 
-function readMetadataString(metadata: unknown, key: string): string | undefined {
+/**
+ * Per-node source line range. Deliberately NOT inherited from a parent node:
+ * a section without recorded positions must omit the field rather than claim
+ * its parent's range. Malformed shapes are ignored, never repaired.
+ */
+function sourceLinesFromMetadata(metadata: unknown): SemanticChunkSourceLines | undefined {
+  const raw = readMetadataValue(metadata, 'sourceLines');
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+
+  const start = raw.start;
+  const end = raw.end;
+  if (
+    typeof start !== 'number' ||
+    typeof end !== 'number' ||
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 1 ||
+    end < start
+  ) {
+    return undefined;
+  }
+
+  return { start, end };
+}
+
+function readMetadataValue(metadata: unknown, key: string): unknown {
   if (metadata instanceof Map) {
-    const value = metadata.get(key);
-    return typeof value === 'string' && value.length > 0 ? value : undefined;
+    return metadata.get(key);
   }
 
   if (isRecord(metadata)) {
-    const value = metadata[key];
-    return typeof value === 'string' && value.length > 0 ? value : undefined;
+    return metadata[key];
   }
 
   return undefined;
+}
+
+function readMetadataString(metadata: unknown, key: string): string | undefined {
+  const value = readMetadataValue(metadata, key);
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function readAnnotationString(block: ContentBlock, key: string): string | undefined {
