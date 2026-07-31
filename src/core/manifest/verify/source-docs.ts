@@ -2,7 +2,7 @@
  * Verifier and validators for source-docs manifests.
  */
 
-import { lstat, open } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve, win32 } from 'node:path';
 
 import {
@@ -60,6 +60,8 @@ import {
   describeFile,
   hasEmptyOrParentPathSegment,
   isUrlLikePath,
+  pathExists,
+  scanManifestDirectoryForUnlistedFiles,
   verifyFile,
   verifyPathType,
 } from '../fs-verify.js';
@@ -370,6 +372,15 @@ export async function verifySourceDocsManifest(
     notes,
   });
 
+  // Pack-directory scan: an unlisted file in the pack that matches the tool's
+  // own output naming can masquerade as verified content (outputs-tier
+  // failure); every other unlisted file is reported informationally.
+  const scan = await scanManifestDirectoryForUnlistedFiles({
+    manifestPath,
+    listedPaths: [...outputChecks, ...sourceChecks].map((check) => check.path),
+  });
+  outputFailures.push(...scan.failures);
+
   // Source tier: the external recorded source. A missing source root is reported
   // as `unavailable` (expected for a relocated pack) instead of a wall of
   // missing-file failures.
@@ -422,6 +433,7 @@ export async function verifySourceDocsManifest(
     failures: [...outputFailures, ...sourceFailures],
     outputs,
     source: sourceTier,
+    ...(scan.unmanagedFiles.length > 0 ? { unmanagedFiles: scan.unmanagedFiles } : {}),
     ...(notes.length > 0 ? { notes } : {}),
   };
 }
@@ -633,14 +645,6 @@ function firstGitSegmentMarker(systemContent: string): { index: number } | undef
   return { index: Math.min(...candidates) };
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 interface SourceDocsParserPluginRecord {
   manifestPath: string;
   resolvedManifestPath: string;

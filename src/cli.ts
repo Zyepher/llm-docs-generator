@@ -1679,6 +1679,22 @@ program
 // VERIFY COMMAND
 // ============================================================================
 
+function printUnmanagedFiles(unmanagedFiles: string[] | undefined): void {
+  if (unmanagedFiles === undefined || unmanagedFiles.length === 0) {
+    return;
+  }
+
+  console.log(
+    chalk.gray(
+      '  Unmanaged files (present in the pack directory but not covered by this manifest; informational only, never a failure):'
+    )
+  );
+
+  for (const entry of unmanagedFiles) {
+    console.log(chalk.gray(`    - ${entry}`));
+  }
+}
+
 program
   .command('verify')
   .description(
@@ -1688,7 +1704,7 @@ program
   .option('--output-dir <dir>', 'Output directory containing manifest.json')
   .option(
     '--outputs-only',
-    'Exit zero when the self-contained generated outputs pass AND the recorded source is unavailable (relocated pack). A present source that fails hash verification still exits non-zero; only an unavailable source is ignored.',
+    'Exit zero when the self-contained generated outputs pass, ignoring a recorded source that is unavailable (relocated pack). A present source that fails hash verification still exits non-zero; only an unavailable source is ignored.',
     false
   )
   .option('-v, --verbose', 'Enable verbose logging', false)
@@ -1716,29 +1732,35 @@ program
         console.log(chalk.bold('Manifest verification'));
         console.log(`  Manifest: ${result.manifestPath}`);
 
-        // Two-tier reporting for local-source-docs manifests: the generated
-        // outputs are always hash-checked, the recorded source may be
-        // unavailable for a relocated pack.
-        if (result.outputs !== undefined && result.source !== undefined) {
+        // Two-tier reporting: the generated outputs are always hash-checked;
+        // the recorded source (when the mode records one) may be unavailable
+        // for a relocated pack. Modes without source-side checks
+        // (discovery-report, source-verification) report only the outputs tier.
+        if (result.outputs !== undefined) {
           const { outputs, source } = result;
           console.log(
             `  Outputs: ${outputs.status} (${outputs.checkedFiles} file(s) hash-checked)`
           );
-          console.log(`  Source: ${source.status} (${source.checkedFiles} file(s) hash-checked)`);
+          if (source !== undefined) {
+            console.log(`  Source: ${source.status} (${source.checkedFiles} file(s) hash-checked)`);
+          }
           console.log(`  Checked files: ${result.checkedFiles}`);
           console.log(`  Failures: ${result.failures.length}`);
 
           for (const failure of outputs.failures) {
             console.error(chalk.red(`  - [outputs] ${failure}`));
           }
-          for (const failure of source.failures) {
-            console.error(chalk.red(`  - [source] ${failure}`));
+          if (source !== undefined) {
+            for (const failure of source.failures) {
+              console.error(chalk.red(`  - [source] ${failure}`));
+            }
           }
           if (result.notes !== undefined) {
             for (const note of result.notes) {
               console.log(chalk.gray(`  - [note] ${note}`));
             }
           }
+          printUnmanagedFiles(result.unmanagedFiles);
 
           const outputsPassed = outputs.status === 'passed';
 
@@ -1753,7 +1775,7 @@ program
             // (tampered/drifted) is a real integrity failure and must not be
             // blessed: only an unavailable source is ignorable. Its red [source]
             // mismatch lines were already printed above.
-            if (source.status === 'failed') {
+            if (source !== undefined && source.status === 'failed') {
               console.error(
                 chalk.red(
                   'Source verification failed: the recorded source is present but does not match the manifest; --outputs-only ignores only an unavailable (relocated) source, not a present, failed source'
@@ -1762,7 +1784,13 @@ program
               process.exit(1);
             }
 
-            if (source.status === 'unavailable') {
+            if (source === undefined) {
+              console.log(
+                chalk.yellow(
+                  'This manifest mode records no separate source tier; the generated outputs are the entire verification'
+                )
+              );
+            } else if (source.status === 'unavailable') {
               console.log(
                 chalk.yellow(
                   'Outputs verified; source unavailable (ignored with --outputs-only for a relocated pack)'
@@ -1774,7 +1802,7 @@ program
             return;
           }
 
-          if (!outputsPassed || source.status !== 'passed') {
+          if (!outputsPassed || (source !== undefined && source.status !== 'passed')) {
             if (outputsPassed) {
               console.log(chalk.yellow('Outputs verified; source verification did not pass'));
             }
@@ -1787,6 +1815,7 @@ program
 
         console.log(`  Checked files: ${result.checkedFiles}`);
         console.log(`  Failures: ${result.failures.length}`);
+        printUnmanagedFiles(result.unmanagedFiles);
 
         if (result.failures.length > 0) {
           for (const failure of result.failures) {

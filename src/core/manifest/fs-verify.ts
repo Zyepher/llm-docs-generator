@@ -1,36 +1,154 @@
 /**
  * Filesystem verification primitives: file metadata checks, symlink-refusing
- * path traversal, and path-type checks used by the manifest verifiers.
+ * path traversal, path-type checks, and the pack-directory scan used by the
+ * manifest verifiers.
  */
 
-import { lstat, realpath, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import type { Dirent } from 'node:fs';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { describeGeneratedTextOutput } from '../generated-output-metadata.js';
 import { errorMessage, isFileNotFoundError } from '../../utils/guards.js';
 import { isParentRelativePath } from '../../utils/fs-path.js';
 import { sha256File } from '../../utils/hash.js';
+import { compareStringsByCodeUnit } from '../../utils/sort.js';
 import { isInsideDirectory } from './predicates.js';
-import type { VerifyGenerationManifestResult } from './types.js';
 
-export async function runFileChecks(
-  manifestPath: string,
-  failures: string[],
-  fileChecks: FileCheck[]
-): Promise<VerifyGenerationManifestResult> {
-  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
+export async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  if (failures.length === 0) {
-    for (const check of fileChecks) {
-      await verifyFile(check, failures);
+// Filenames the generator itself emits. An unlisted file matching one of these
+// can masquerade as verified content, so the pack scan reports it as a
+// verification failure instead of an informational unmanaged entry. The root
+// manifest.json is exempt (it is the manifest under verification); a nested
+// manifest.json is not.
+const GENERATED_OUTPUT_NAMING_FILENAMES: ReadonlySet<string> = new Set([
+  'semantic-chunks.jsonl',
+  'manifest.json',
+  'discovery-report.json',
+  'failure.json',
+]);
+
+// Cap on reported paths so a pack directory with thousands of stray files
+// cannot flood the verify report; the overflow collapses into a "+N more"
+// marker after deterministic sorting.
+const PACK_SCAN_REPORT_LIMIT = 20;
+
+function matchesGeneratedOutputNaming(filename: string): boolean {
+  return filename.endsWith('-llms.txt') || GENERATED_OUTPUT_NAMING_FILENAMES.has(filename);
+}
+
+function boundReportedEntries(entries: string[]): string[] {
+  if (entries.length <= PACK_SCAN_REPORT_LIMIT) {
+    return entries;
+  }
+
+  return [
+    ...entries.slice(0, PACK_SCAN_REPORT_LIMIT),
+    `+${entries.length - PACK_SCAN_REPORT_LIMIT} more`,
+  ];
+}
+
+/**
+ * Enumerate the manifest's directory recursively and classify every entry the
+ * manifest does not cover. Unlisted files matching the tool's own output
+ * naming are verification failures (they can masquerade as verified content);
+ * every other unlisted entry is reported informationally as unmanaged, never a
+ * failure. Symlinks are reported as unmanaged and are never followed or
+ * hashed, so a link cannot pull content from outside the pack into the scan.
+ */
+export async function scanManifestDirectoryForUnlistedFiles(options: {
+  manifestPath: string;
+  listedPaths: Iterable<string>;
+}): Promise<{ failures: string[]; unmanagedFiles: string[] }> {
+  const manifestPath = resolve(options.manifestPath);
+  const packDir = dirname(manifestPath);
+  const listedPaths = new Set<string>([manifestPath]);
+
+  for (const listedPath of options.listedPaths) {
+    listedPaths.add(resolve(listedPath));
+  }
+
+  const failures: string[] = [];
+  const masqueradingPaths: string[] = [];
+  const unmanagedEntries: string[] = [];
+  const pendingDirectories: string[] = [packDir];
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop();
+
+    if (directory === undefined) {
+      break;
+    }
+
+    let entries: Dirent[];
+
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      failures.push(`pack scan: cannot read directory ${directory}: ${errorMessage(error)}`);
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        pendingDirectories.push(entryPath);
+        continue;
+      }
+
+      if (listedPaths.has(resolve(entryPath))) {
+        continue;
+      }
+
+      const relativePath = toManifestRelativePath(packDir, entryPath);
+
+      if (entry.isSymbolicLink()) {
+        unmanagedEntries.push(`${relativePath} (symbolic link; not followed)`);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        unmanagedEntries.push(`${relativePath} (not a regular file)`);
+        continue;
+      }
+
+      if (matchesGeneratedOutputNaming(entry.name)) {
+        masqueradingPaths.push(relativePath);
+      } else {
+        unmanagedEntries.push(relativePath);
+      }
     }
   }
 
-  return {
-    manifestPath,
-    checkedFiles,
-    failures,
-  };
+  masqueradingPaths.sort(compareStringsByCodeUnit);
+  unmanagedEntries.sort(compareStringsByCodeUnit);
+
+  const reportedMasqueradingPaths = masqueradingPaths.slice(0, PACK_SCAN_REPORT_LIMIT);
+
+  for (const path of reportedMasqueradingPaths) {
+    failures.push(
+      `unlisted file matches generated-output naming; not covered by this manifest: ${path}`
+    );
+  }
+
+  if (masqueradingPaths.length > PACK_SCAN_REPORT_LIMIT) {
+    failures.push(
+      `unlisted files matching generated-output naming; not covered by this manifest: +${
+        masqueradingPaths.length - PACK_SCAN_REPORT_LIMIT
+      } more`
+    );
+  }
+
+  return { failures, unmanagedFiles: boundReportedEntries(unmanagedEntries) };
 }
 
 export async function describeFile(path: string): Promise<{ byteSize: number; hash: string }> {

@@ -14711,8 +14711,13 @@ describe('CLI compatibility behavior', () => {
     );
     expect(result.stderr).toContain('sourceFiles[0]: line count mismatch');
     expect(result.stderr).toContain('sourceFiles[0]: estimated token count mismatch');
-    expect(result.stderr).not.toContain('hash mismatch');
-    expect(result.stderr).not.toContain('byte size mismatch');
+    // The recorded byteSize/hash match the drifted file, so the file-level
+    // checks stay clean. The report consistency check (outputs tier, now run
+    // regardless of source-tier drift) still flags that the hand-edited
+    // manifest metadata no longer matches the hash-bound report.
+    expect(result.stderr).not.toContain('sourceFiles[0]: hash mismatch');
+    expect(result.stderr).not.toContain('sourceFiles[0]: byte size mismatch');
+    expect(result.stderr).toContain('source-truth report: sourceFiles[0].hash mismatch');
   });
 
   it('rejects malformed source-truth docs source-file text metadata before file checks', async () => {
@@ -14841,7 +14846,10 @@ describe('CLI compatibility behavior', () => {
     ]);
 
     expect(sourceResult.exitCode).toBe(1);
-    expect(sourceResult.stdout).toContain('Checked files: 0');
+    // The symlinked source ancestor fails the source tier; the self-contained
+    // outputs are still hash-checked (they are clean here).
+    expect(sourceResult.stdout).toContain('Outputs: passed');
+    expect(sourceResult.stdout).toContain('Source: failed');
     expect(sourceResult.stderr).toContain('source: symbolic links are not allowed in path');
     expect(sourceResult.stderr).toContain(sourceParentLink);
     expect(sourceResult.stderr).not.toContain('hash mismatch');
@@ -14954,7 +14962,11 @@ describe('CLI compatibility behavior', () => {
     const result = await runCliWithExit(['verify', '--manifest', manifestPath], join(dir, 'cwd'));
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain(`missing file at ${sourcePath}`);
+    // The unavailable-source message must name the path resolved against the
+    // manifest directory, proving the relative spec path never fell back to a
+    // cwd lookup (the decoy at cwd/config/source.yml exists and would pass).
+    expect(result.stdout).toContain('Source: unavailable');
+    expect(result.stderr).toContain(`recorded source path is unavailable at ${sourcePath}`);
   });
 
   it('reports malformed and unsupported manifests', async () => {

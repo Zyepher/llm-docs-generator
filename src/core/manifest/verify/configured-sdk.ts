@@ -14,9 +14,14 @@ import {
   CONFIGURED_SDK_PARSER_FORMAT,
   CONFIGURED_SDK_PARSER_NAME,
 } from '../constants.js';
-import { resolveManifestSourcePath, runFileChecks } from '../fs-verify.js';
+import {
+  pathExists,
+  resolveManifestSourcePath,
+  scanManifestDirectoryForUnlistedFiles,
+  verifyFile,
+} from '../fs-verify.js';
 import type { FileCheck } from '../fs-verify.js';
-import type { VerifyGenerationManifestResult } from '../types.js';
+import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
 import { validateRequiredInputProvenance } from '../provenance.js';
 import { validateRequiredArtifactSummary } from '../artifact-summary.js';
@@ -78,7 +83,11 @@ export async function verifyConfiguredSdkManifest(
   }
 
   const manifestDir = dirname(manifestPath);
-  const fileChecks: FileCheck[] = [];
+  // Two integrity tiers checked separately: `outputChecks` are the
+  // self-contained generated pack (always verified), `sourceChecks` are the
+  // external recorded spec (verified only when the spec is available).
+  const outputChecks: FileCheck[] = [];
+  const sourceChecks: FileCheck[] = [];
   const sourceRecord = source as Record<string, unknown>;
   const outputRecords = generatedOutputs as unknown[];
   const sourcePath = sourceRecord.resolvedSpecPath;
@@ -115,7 +124,7 @@ export async function verifyConfiguredSdkManifest(
     const hasValidSourceLineCount = isNonNegativeInteger(sourceLineCount);
     const hasValidSourceEstimatedTokenCount = isNonNegativeInteger(sourceEstimatedTokenCount);
 
-    fileChecks.push({
+    sourceChecks.push({
       label: 'source',
       path: resolveManifestSourcePath(sourcePath, manifestDir),
       expectedByteSize: sourceByteSize,
@@ -131,7 +140,7 @@ export async function verifyConfiguredSdkManifest(
     generatedOutputs: outputRecords,
     manifestDir,
     failures,
-    fileChecks,
+    fileChecks: outputChecks,
     requireTextMetadata: true,
     // Intentionally lenient (unlike the source-* modes): the legacy
     // configured-SDK path may have its generated outputs symlinked into a
@@ -158,7 +167,69 @@ export async function verifyConfiguredSdkManifest(
     failures
   );
 
-  return runFileChecks(manifestPath, failures, fileChecks);
+  // A malformed manifest cannot be integrity-checked: structural failures block
+  // every filesystem check and no tier is reported.
+  if (failures.length > 0) {
+    return {
+      manifestPath,
+      checkedFiles: 0,
+      failures,
+    };
+  }
+
+  // Outputs tier: ALWAYS hash-check the self-contained generated pack, even
+  // when the recorded spec is missing or fails, so a verifier can attest the
+  // outputs it holds.
+  const outputFailures: string[] = [];
+
+  for (const check of outputChecks) {
+    await verifyFile(check, outputFailures);
+  }
+
+  const scan = await scanManifestDirectoryForUnlistedFiles({
+    manifestPath,
+    listedPaths: [...sourceChecks, ...outputChecks].map((check) => check.path),
+  });
+  outputFailures.push(...scan.failures);
+
+  // Source tier: the recorded spec file. A missing spec is reported as
+  // `unavailable` (expected for a relocated pack); a present spec that fails
+  // its hash check is a real failure.
+  const sourceFailures: string[] = [];
+  let sourceCheckedFiles = 0;
+  let sourceStatus: VerifyTierResult['status'];
+  const sourceCheck = sourceChecks.at(0);
+
+  if (sourceCheck === undefined || !(await pathExists(sourceCheck.path))) {
+    sourceStatus = 'unavailable';
+    sourceFailures.push(
+      `source: recorded source path is unavailable at ${sourceCheck?.path ?? '(unknown)'}`
+    );
+  } else {
+    await verifyFile(sourceCheck, sourceFailures);
+    sourceCheckedFiles = 1;
+    sourceStatus = sourceFailures.length === 0 ? 'passed' : 'failed';
+  }
+
+  const outputs: VerifyTierResult = {
+    status: outputFailures.length === 0 ? 'passed' : 'failed',
+    checkedFiles: outputChecks.length,
+    failures: outputFailures,
+  };
+  const sourceTier: VerifyTierResult = {
+    status: sourceStatus,
+    checkedFiles: sourceCheckedFiles,
+    failures: sourceFailures,
+  };
+
+  return {
+    manifestPath,
+    checkedFiles: outputs.checkedFiles + sourceTier.checkedFiles,
+    failures: [...outputFailures, ...sourceFailures],
+    outputs,
+    source: sourceTier,
+    ...(scan.unmanagedFiles.length > 0 ? { unmanagedFiles: scan.unmanagedFiles } : {}),
+  };
 }
 function validateConfiguredSdkMetadata(sdk: Record<string, unknown>, failures: string[]): void {
   if (!isNonEmptyString(sdk.name)) {

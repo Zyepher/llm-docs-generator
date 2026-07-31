@@ -22,9 +22,14 @@ import {
   SOURCE_TRUTH_REPORT_SCHEMA_VERSION,
 } from '../constants.js';
 import { isInsideDirectory, isSourceTruthSourceType } from '../predicates.js';
-import { verifyFile, verifyPathType } from '../fs-verify.js';
+import {
+  pathExists,
+  scanManifestDirectoryForUnlistedFiles,
+  verifyFile,
+  verifyPathType,
+} from '../fs-verify.js';
 import type { FileCheck, PathTypeCheck } from '../fs-verify.js';
-import type { VerifyGenerationManifestResult } from '../types.js';
+import type { VerifyGenerationManifestResult, VerifyTierResult } from '../types.js';
 import { validateRequiredManifestContract } from '../contract.js';
 import { validateRequiredInputProvenance } from '../provenance.js';
 import { validateRequiredArtifactSummary } from '../artifact-summary.js';
@@ -68,7 +73,11 @@ export async function verifySourceTruthDocsManifest(
     };
   }
 
-  const fileChecks: FileCheck[] = [];
+  // Two integrity tiers checked separately: `outputChecks` are the
+  // self-contained generated pack (always verified), `sourceChecks` are the
+  // external recorded source (verified only when the source is available).
+  const outputChecks: FileCheck[] = [];
+  const sourceChecks: FileCheck[] = [];
   const pathTypeChecks: PathTypeCheck[] = [];
   const sourceRecord = source as Record<string, unknown>;
   const inspectionRecord = inspection as Record<string, unknown>;
@@ -112,7 +121,7 @@ export async function verifySourceTruthDocsManifest(
     sourcePath,
     sourceType,
     failures,
-    fileChecks,
+    fileChecks: sourceChecks,
   });
 
   if (sourceType === 'file' && sourceFileEntries.length !== 1) {
@@ -125,7 +134,7 @@ export async function verifySourceTruthDocsManifest(
     generatedOutputs: outputRecords,
     manifestDir,
     failures,
-    fileChecks,
+    fileChecks: outputChecks,
     requireTextMetadata: true,
     rejectSymlinks: true,
     rejectSymlinkAncestors: true,
@@ -148,48 +157,106 @@ export async function verifySourceTruthDocsManifest(
     failures
   );
 
-  if (failures.length === 0) {
+  const reportOutputPath = sourceTruthReportOutputPath(outputRecords);
+
+  if (reportOutputPath === undefined) {
+    failures.push(
+      `malformed manifest: source-truth manifests must include a ${SOURCE_TRUTH_REPORT_OUTPUT_KIND} output`
+    );
+  }
+
+  // A malformed manifest cannot be integrity-checked: structural failures block
+  // every filesystem check and no tier is reported.
+  if (failures.length > 0) {
+    return {
+      manifestPath,
+      checkedFiles: 0,
+      failures,
+    };
+  }
+
+  // Outputs tier: ALWAYS hash-check the self-contained generated pack, even
+  // when the recorded source is missing or fails, so a verifier can attest the
+  // outputs it holds.
+  const outputFailures: string[] = [];
+
+  for (const check of outputChecks) {
+    await verifyFile(check, outputFailures);
+  }
+
+  // The report consistency check binds the report output to the manifest's own
+  // metadata; it reads only pack contents, so it belongs to the outputs tier
+  // and is skipped when a hash check already failed (a tampered report proves
+  // nothing beyond the failure already surfaced).
+  if (outputFailures.length === 0 && reportOutputPath !== undefined) {
+    await verifySourceTruthReportFile({
+      reportPath: resolve(manifestDir, reportOutputPath),
+      expected: {
+        source: sourceRecord,
+        inspection: inspectionRecord,
+        sourceFiles: sourceFileEntries,
+      },
+      failures: outputFailures,
+    });
+  }
+
+  const scan = await scanManifestDirectoryForUnlistedFiles({
+    manifestPath,
+    listedPaths: [...sourceChecks, ...outputChecks].map((check) => check.path),
+  });
+  outputFailures.push(...scan.failures);
+
+  // Source tier: the external recorded source. A missing source root is
+  // reported as `unavailable` (expected for a relocated pack) instead of a
+  // wall of missing-file failures.
+  const sourceFailures: string[] = [];
+  let sourceCheckedFiles = 0;
+  let sourceStatus: VerifyTierResult['status'];
+  const sourceAvailable =
+    isNonEmptyString(sourcePath) && isAbsolute(sourcePath) ? await pathExists(sourcePath) : false;
+
+  if (!sourceAvailable) {
+    sourceStatus = 'unavailable';
+    sourceFailures.push(
+      `source: recorded source path is unavailable at ${
+        isNonEmptyString(sourcePath) ? sourcePath : '(unknown)'
+      }`
+    );
+  } else {
     for (const check of pathTypeChecks) {
-      await verifyPathType(check, failures);
+      await verifyPathType(check, sourceFailures);
     }
-  }
 
-  if (failures.length === 0 && isNonEmptyString(sourcePath) && isAbsolute(sourcePath)) {
-    await verifyCanonicalSourcePath(sourcePath, failures);
-  }
-
-  const checkedFiles = failures.length === 0 ? fileChecks.length : 0;
-
-  if (failures.length === 0) {
-    for (const check of fileChecks) {
-      await verifyFile(check, failures);
+    if (isNonEmptyString(sourcePath) && isAbsolute(sourcePath)) {
+      await verifyCanonicalSourcePath(sourcePath, sourceFailures);
     }
-  }
 
-  if (failures.length === 0) {
-    const reportOutputPath = sourceTruthReportOutputPath(outputRecords);
-
-    if (reportOutputPath === undefined) {
-      failures.push(
-        `malformed manifest: source-truth manifests must include a ${SOURCE_TRUTH_REPORT_OUTPUT_KIND} output`
-      );
-    } else {
-      await verifySourceTruthReportFile({
-        reportPath: resolve(manifestDir, reportOutputPath),
-        expected: {
-          source: sourceRecord,
-          inspection: inspectionRecord,
-          sourceFiles: sourceFileEntries,
-        },
-        failures,
-      });
+    for (const check of sourceChecks) {
+      await verifyFile(check, sourceFailures);
     }
+
+    sourceCheckedFiles = sourceChecks.length;
+    sourceStatus = sourceFailures.length === 0 ? 'passed' : 'failed';
   }
+
+  const outputs: VerifyTierResult = {
+    status: outputFailures.length === 0 ? 'passed' : 'failed',
+    checkedFiles: outputChecks.length,
+    failures: outputFailures,
+  };
+  const sourceTier: VerifyTierResult = {
+    status: sourceStatus,
+    checkedFiles: sourceCheckedFiles,
+    failures: sourceFailures,
+  };
 
   return {
     manifestPath,
-    checkedFiles,
-    failures,
+    checkedFiles: outputs.checkedFiles + sourceTier.checkedFiles,
+    failures: [...outputFailures, ...sourceFailures],
+    outputs,
+    source: sourceTier,
+    ...(scan.unmanagedFiles.length > 0 ? { unmanagedFiles: scan.unmanagedFiles } : {}),
   };
 }
 

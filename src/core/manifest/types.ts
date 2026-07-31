@@ -71,12 +71,21 @@ export interface VerifyGenerationManifestResult {
   manifestPath: string;
   checkedFiles: number;
   failures: string[];
-  // Two-tier integrity result populated by the local-source-docs verifier:
-  // `outputs` covers the self-contained generated pack (always hash-checked),
-  // `source` covers the external recorded source (may be unavailable for a
-  // relocated pack). Other manifest modes leave these undefined.
+  // Two-tier integrity result: `outputs` covers the self-contained generated
+  // pack (always hash-checked, even when the recorded source is missing or
+  // fails), `source` covers the external recorded source (may be unavailable
+  // for a relocated pack). `outputs` is undefined only when the manifest is
+  // too malformed to integrity-check; `source` additionally stays undefined
+  // for modes that record no source-side checks (discovery-report,
+  // source-verification-local-evidence).
   outputs?: VerifyTierResult;
   source?: VerifyTierResult;
+  // Files found in the pack directory that the manifest does not cover and
+  // that do not match the tool's own output naming (for example an agent's
+  // own llm-docs/index.md nav aid, or .DS_Store). Informational only: never a
+  // failure, never hashed. Sorted by code unit and bounded to 20 entries plus
+  // a trailing "+N more" marker.
+  unmanagedFiles?: string[];
   // Non-fatal verifier notes (e.g. a provenance cross-check skipped because the
   // output header predates provenance stamping). Never affect the exit code.
   notes?: string[];
