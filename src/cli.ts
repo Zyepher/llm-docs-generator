@@ -1657,6 +1657,11 @@ program
         console.log('  Refresh provenance: recorded');
         console.log(`  Post-refresh verification: ${result.postRefreshVerification.status}`);
         console.log(`  Checked files: ${result.postRefreshVerification.checkedFiles}`);
+        if (result.warnings !== undefined) {
+          for (const warning of result.warnings) {
+            console.log(chalk.yellow(`  Warning: ${warning}`));
+          }
+        }
         console.log(chalk.green('Refresh complete'));
       } catch (error) {
         const errorMsg = errorMessage(error);

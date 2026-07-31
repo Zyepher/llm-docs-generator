@@ -42,9 +42,13 @@ import {
   generateSourceDocs,
   SOURCE_DOCS_MODE,
   type GenerateSourceGitContext,
+  type SourceDocsCategoriesConfig,
   type SourceDocsGeneratorMetadata,
+  type SourceDocsOutputDefaults,
   type SourceDocsPresetMetadata,
+  type SourceDocsSplitBy,
 } from './source-docs.js';
+import { isSanitizedFilenameSegment } from '../utils/filename-prefix.js';
 import { captureGitState } from './git-state.js';
 import { generateSourceTruthDocs, SOURCE_TRUTH_DOCS_MODE } from './source-truth-docs.js';
 import {
@@ -101,6 +105,9 @@ export interface RefreshManifestResult {
     status: 'passed';
     checkedFiles: number;
   };
+  // Non-fatal fidelity notes, for example an old manifest whose exclude globs
+  // were not recorded so only the matched globs could be replayed.
+  warnings?: string[];
   chunkOutputPath?: string;
   candidateCount?: number;
   presetName?: string;
@@ -338,7 +345,11 @@ async function refreshSourceDocsManifest(options: {
   const preset = sourceDocsPresetFromManifest(options.manifest.preset);
   const recordedGit = readRecordedGit(source.git);
   const recordedLabel = typeof source.label === 'string' ? source.label : undefined;
-  const excludeGlobs = recordedExcludeGlobs(source.excluded);
+  const recordedOutput = optionalObject(options.manifest.output, 'output');
+  const recordedFilenamePrefix = readRecordedFilenamePrefix(recordedOutput);
+  const recordedSplit = readRecordedSplitConfig(recordedOutput);
+  const warnings: string[] = [];
+  const excludeGlobs = resolveRefreshExcludeGlobs(source, warnings);
   const outputDir = dirname(options.manifestPath);
   await assertExistingLocalSourcePathForRefresh(sourcePath, recordedGit);
   await assertSourceOutsideRefreshOutput({ sourcePath, outputDir });
@@ -355,31 +366,67 @@ async function refreshSourceDocsManifest(options: {
     ? 'jsonl'
     : undefined;
 
+  // The recorded output.filenamePrefix is the RESOLVED prefix of the original
+  // generation (explicit --filename-prefix, preset default, or source-basename
+  // fallback), so replaying it verbatim reproduces the original shape. Preset
+  // precedence is preserved: --filename-prefix and --preset are mutually
+  // exclusive at the CLI, so a preset manifest's recorded prefix IS the preset
+  // default; the preset default remains the fallback for old manifests that
+  // lack the output block.
+  const outputDefaults: SourceDocsOutputDefaults = {};
+  const replayFilenamePrefix = recordedFilenamePrefix ?? preset?.defaults.filenamePrefix;
+
+  if (replayFilenamePrefix !== undefined) {
+    outputDefaults.filenamePrefix = replayFilenamePrefix;
+  }
+
+  if (preset !== undefined) {
+    outputDefaults.title = preset.defaults.title;
+    outputDefaults.systemPrompt = preset.defaults.systemPrompt;
+  }
+
   const result = await generateSourceDocs({
     source: sourcePath,
     outputDir,
     format: formatHint,
     ...(chunks === undefined ? {} : { chunks }),
-    ...(preset === undefined
-      ? {}
-      : {
-          preset,
-          output: {
-            filenamePrefix: preset.defaults.filenamePrefix,
-            title: preset.defaults.title,
-            systemPrompt: preset.defaults.systemPrompt,
-          },
-        }),
+    ...(preset === undefined ? {} : { preset }),
+    ...(Object.keys(outputDefaults).length === 0 ? {} : { output: outputDefaults }),
     ...(currentGit === undefined ? {} : { gitContext: currentGit }),
     ...(recordedLabel === undefined ? {} : { label: recordedLabel }),
+    ...(recordedSplit.splitBy === undefined ? {} : { splitBy: recordedSplit.splitBy }),
+    ...(recordedSplit.categories === undefined ? {} : { categories: recordedSplit.categories }),
     ...(excludeGlobs.length === 0 ? {} : { exclude: excludeGlobs }),
     generator: options.generator,
   });
+
+  // Shape-fidelity proof: the refreshed manifest must carry the recorded
+  // prefix. Post-refresh verification only checks the NEW manifest's internal
+  // consistency, so a prefix regression would otherwise verify clean.
+  if (
+    replayFilenamePrefix !== undefined &&
+    result.manifest.output.filenamePrefix !== replayFilenamePrefix
+  ) {
+    const error = new RefreshManifestError(
+      `refresh did not preserve the recorded filename prefix: recorded '${replayFilenamePrefix}', regenerated '${result.manifest.output.filenamePrefix}'`
+    );
+
+    await quarantineFailedRefresh({
+      manifestPath: result.manifestPath,
+      outputDir: result.outputDir,
+      reason: 'post-refresh-shape-fidelity-failed',
+      error,
+    });
+
+    throw error;
+  }
+
   const chunkOutput = result.manifest.generatedOutputs.find(
     (output) => output.kind === SOURCE_DOCS_SEMANTIC_CHUNK_JSONL_KIND
   );
 
   return withPostRefreshVerification({
+    ...(warnings.length === 0 ? {} : { warnings }),
     mode: SOURCE_DOCS_MODE,
     manifestPath: result.manifestPath,
     outputDir: result.outputDir,
@@ -1440,6 +1487,129 @@ function readRecordedGit(value: unknown): RecordedGitIdentity | undefined {
     : [];
 
   return { commit, remoteUrl, tags };
+}
+
+function optionalObject(value: unknown, label: string): Record<string, unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return requiredObject(value, label);
+}
+
+function readRecordedFilenamePrefix(
+  output: Record<string, unknown> | undefined
+): string | undefined {
+  if (output === undefined) {
+    return undefined;
+  }
+
+  const filenamePrefix = requiredNonEmptyString(output.filenamePrefix, 'output.filenamePrefix');
+
+  // The prefix becomes generated output basenames; a hand-edited unsanitized
+  // value must fail loudly instead of flowing into filesystem writes.
+  if (!isSanitizedFilenameSegment(filenamePrefix)) {
+    throw new RefreshManifestError(
+      'malformed manifest: output.filenamePrefix must be a sanitized filename segment'
+    );
+  }
+
+  return filenamePrefix;
+}
+
+function readRecordedSplitConfig(output: Record<string, unknown> | undefined): {
+  splitBy?: SourceDocsSplitBy;
+  categories?: SourceDocsCategoriesConfig;
+} {
+  if (output === undefined) {
+    return {};
+  }
+
+  if (output.splitBy !== undefined && output.categories !== undefined) {
+    throw new RefreshManifestError(
+      'malformed manifest: output.splitBy and output.categories are mutually exclusive'
+    );
+  }
+
+  const split: { splitBy?: SourceDocsSplitBy; categories?: SourceDocsCategoriesConfig } = {};
+
+  if (output.splitBy !== undefined) {
+    if (output.splitBy !== 'dirs') {
+      throw new RefreshManifestError("malformed manifest: output.splitBy must be 'dirs'");
+    }
+
+    split.splitBy = 'dirs';
+  }
+
+  if (output.categories !== undefined) {
+    split.categories = readRecordedCategoriesConfig(output.categories);
+  }
+
+  return split;
+}
+
+function readRecordedCategoriesConfig(value: unknown): SourceDocsCategoriesConfig {
+  const record = requiredObject(value, 'output.categories');
+  const rawCategories = requiredArray(record.categories, 'output.categories.categories');
+  const fallback = requiredNonEmptyString(record.fallback, 'output.categories.fallback');
+
+  if (rawCategories.length === 0) {
+    throw new RefreshManifestError(
+      'malformed manifest: output.categories.categories must be a non-empty array'
+    );
+  }
+
+  const categories = rawCategories.map((entry, index) => {
+    const label = `output.categories.categories[${index}]`;
+    const definition = requiredObject(entry, label);
+    const include = requiredArray(definition.include, `${label}.include`).map((glob, globIndex) =>
+      requiredNonEmptyString(glob, `${label}.include[${globIndex}]`)
+    );
+
+    if (include.length === 0) {
+      throw new RefreshManifestError(`malformed manifest: ${label}.include must not be empty`);
+    }
+
+    return {
+      id: requiredNonEmptyString(definition.id, `${label}.id`),
+      title: requiredNonEmptyString(definition.title, `${label}.title`),
+      include,
+    };
+  });
+
+  return { categories, fallback };
+}
+
+/**
+ * Prefer the verbatim recorded exclude set (source.excludeGlobs, which includes
+ * globs that matched nothing at generation time). Manifests generated before
+ * that field exists fall back to the globs recoverable from the matched
+ * source.excluded entries, with a warning: zero-match globs, if any were
+ * originally passed, cannot be recovered and are not replayed.
+ */
+function resolveRefreshExcludeGlobs(source: Record<string, unknown>, warnings: string[]): string[] {
+  const recordedGlobs = source.excludeGlobs;
+
+  if (recordedGlobs !== undefined) {
+    if (
+      !Array.isArray(recordedGlobs) ||
+      !recordedGlobs.every((glob): glob is string => typeof glob === 'string' && glob.length > 0)
+    ) {
+      throw new RefreshManifestError(
+        'malformed manifest: source.excludeGlobs must be an array of non-empty strings'
+      );
+    }
+
+    return [...recordedGlobs];
+  }
+
+  if (source.type === 'directory') {
+    warnings.push(
+      'exclude globs were not recorded by the generating version; refresh replayed only the globs that matched at generation time (from source.excluded). Zero-match globs, if any were originally passed, were not replayed. Regenerate to record source.excludeGlobs.'
+    );
+  }
+
+  return recordedExcludeGlobs(source.excluded);
 }
 
 function recordedExcludeGlobs(value: unknown): string[] {

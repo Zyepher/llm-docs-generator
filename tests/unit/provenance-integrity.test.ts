@@ -681,3 +681,294 @@ describe('verify provenance cross-check (P3: manifest git/label vs hash-bound he
     );
   });
 });
+
+describe('generate --source exclude-glob recording (refresh fidelity)', () => {
+  it('records all exclude globs verbatim, including zero-match globs', async () => {
+    const source = await makeTempDir('llm-docs-excl-record-');
+    await writeSourceFile(source, 'a.md', '# a\n');
+    await writeSourceFile(source, 'b.tmp.md', '# b\n');
+    const outputDir = await makeTempDir('llm-docs-excl-record-out-');
+
+    const { manifest } = await generate({
+      source,
+      outputDir,
+      format: 'markdown',
+      exclude: ['never/matches/**', '*.tmp.md'],
+    });
+
+    expect(manifest.source.excludeGlobs).toEqual(['never/matches/**', '*.tmp.md']);
+    // Matched-only per-file records are unchanged.
+    expect(manifest.source.excluded).toEqual([{ path: 'b.tmp.md', glob: '*.tmp.md' }]);
+  });
+
+  it('records an empty excludeGlobs array for a directory source with no excludes', async () => {
+    const source = await makeTempDir('llm-docs-excl-empty-');
+    await writeSourceFile(source, 'a.md', '# a\n');
+    const outputDir = await makeTempDir('llm-docs-excl-empty-out-');
+
+    const { manifest } = await generate({ source, outputDir, format: 'markdown' });
+
+    expect(manifest.source.excludeGlobs).toEqual([]);
+  });
+
+  it('replays a zero-match glob on refresh so a later matching file stays excluded', async () => {
+    const source = await makeTempDir('llm-docs-excl-replay-');
+    await writeSourceFile(source, 'a.md', '# a\n');
+    const outputDir = await makeTempDir('llm-docs-excl-replay-out-');
+    const { manifestPath } = await generate({
+      source,
+      outputDir,
+      format: 'markdown',
+      exclude: ['later/**'],
+    });
+
+    await writeSourceFile(source, 'later/new.md', '# new\n');
+    const result = await refreshGenerationManifest({ manifestPath, generator });
+    const manifest = await readManifest(manifestPath);
+
+    expect(result.warnings).toBeUndefined();
+    expect(manifest.source.excludeGlobs).toEqual(['later/**']);
+    expect(manifest.sourceFiles.map((file) => file.path)).toEqual(['a.md']);
+    expect(manifest.source.excluded).toEqual([{ path: 'later/new.md', glob: 'later/**' }]);
+  });
+
+  it('falls back to matched globs with a warning for manifests without excludeGlobs', async () => {
+    const source = await makeTempDir('llm-docs-excl-legacy-');
+    await writeSourceFile(source, 'a.md', '# a\n');
+    await writeSourceFile(source, 'skip/b.md', '# b\n');
+    const outputDir = await makeTempDir('llm-docs-excl-legacy-out-');
+    const { manifestPath } = await generate({
+      source,
+      outputDir,
+      format: 'markdown',
+      exclude: ['skip/**'],
+    });
+
+    // Simulate a manifest generated before excludeGlobs recording existed.
+    const manifest = await readManifest(manifestPath);
+    delete (manifest.source as { excludeGlobs?: string[] }).excludeGlobs;
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+
+    const result = await refreshGenerationManifest({ manifestPath, generator });
+    const refreshed = await readManifest(manifestPath);
+
+    expect(
+      result.warnings?.some((warning) => warning.includes('exclude globs were not recorded'))
+    ).toBe(true);
+    // The matched glob is recoverable from source.excluded and still replayed.
+    expect(refreshed.source.excluded).toEqual([{ path: 'skip/b.md', glob: 'skip/**' }]);
+    expect(refreshed.sourceFiles.map((file) => file.path)).toEqual(['a.md']);
+  });
+});
+
+describe('split configuration recording and replay (refresh fidelity)', () => {
+  it('records splitBy and the explicit prefix, and refresh reproduces the identical output set', async () => {
+    const source = await makeTempDir('llm-docs-split-');
+    await writeSourceFile(source, 'guides/a.md', '# A\n\nbody\n');
+    await writeSourceFile(source, 'reference/b.md', '# B\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-split-out-');
+    const { manifestPath, manifest } = await generate({
+      source,
+      outputDir,
+      format: 'markdown',
+      chunks: 'jsonl',
+      splitBy: 'dirs',
+      output: { filenamePrefix: 'mypack' },
+      exclude: ['never/**'],
+    });
+
+    expect(manifest.output.splitBy).toBe('dirs');
+    expect(manifest.output.filenamePrefix).toBe('mypack');
+    const originalPaths = manifest.generatedOutputs.map((output) => output.path);
+    expect(originalPaths).toContain('llm-docs/mypack-guides-llms.txt');
+    expect(originalPaths).toContain('llm-docs/mypack-reference-llms.txt');
+    expect(originalPaths).toContain('llm-docs/mypack-full-llms.txt');
+
+    await refreshGenerationManifest({ manifestPath, generator });
+    const refreshed = await readManifest(manifestPath);
+
+    expect(refreshed.output.filenamePrefix).toBe('mypack');
+    expect(refreshed.output.splitBy).toBe('dirs');
+    expect(refreshed.source.excludeGlobs).toEqual(['never/**']);
+    expect(refreshed.generatedOutputs.map((output) => output.path)).toEqual(originalPaths);
+    expect(refreshed.generatedOutputs.map((output) => output.hash)).toEqual(
+      manifest.generatedOutputs.map((output) => output.hash)
+    );
+  });
+
+  it('records explicit categories and replays them on refresh', async () => {
+    const source = await makeTempDir('llm-docs-cat-');
+    await writeSourceFile(source, 'intro.md', '# Intro\n\nbody\n');
+    await writeSourceFile(source, 'api-one.md', '# API One\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-cat-out-');
+    const categories = {
+      categories: [{ id: 'api', title: 'API', include: ['api-*.md'] }],
+      fallback: 'misc',
+    };
+    const { manifestPath, manifest } = await generate({
+      source,
+      outputDir,
+      format: 'markdown',
+      categories,
+      output: { filenamePrefix: 'mypack' },
+    });
+
+    expect(manifest.output.categories).toEqual(categories);
+    const originalPaths = manifest.generatedOutputs.map((output) => output.path);
+    expect(originalPaths).toContain('llm-docs/mypack-api-llms.txt');
+    expect(originalPaths).toContain('llm-docs/mypack-misc-llms.txt');
+
+    await refreshGenerationManifest({ manifestPath, generator });
+    const refreshed = await readManifest(manifestPath);
+
+    expect(refreshed.output.categories).toEqual(categories);
+    expect(refreshed.generatedOutputs.map((output) => output.path)).toEqual(originalPaths);
+  });
+
+  it('legacy manifest without splitBy refreshes to the old shape without failing', async () => {
+    const source = await makeTempDir('llm-docs-split-legacy-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-split-legacy-out-');
+    const { manifestPath } = await generate({ source, outputDir, format: 'markdown' });
+
+    const manifest = await readManifest(manifestPath);
+    expect(manifest.output.splitBy).toBeUndefined();
+
+    const result = await refreshGenerationManifest({ manifestPath, generator });
+    expect(result.postRefreshVerification.status).toBe('passed');
+  });
+});
+
+describe('verify source-tier added-file rescan (source drift)', () => {
+  it('fails the source tier when a file is added to the recorded source directory', async () => {
+    const source = await makeTempDir('llm-docs-drift-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-drift-out-');
+    const { manifestPath } = await generate({ source, outputDir, format: 'markdown' });
+
+    await writeSourceFile(source, 'added.md', '# Added\n');
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.source?.status).toBe('failed');
+    expect(
+      result.source?.failures.some(
+        (failure) =>
+          failure.includes('source drift: 1 file(s) added since generation') &&
+          failure.includes('added.md')
+      )
+    ).toBe(true);
+  });
+
+  it('does not flag files the recorded exclude globs would drop', async () => {
+    const source = await makeTempDir('llm-docs-drift-excl-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-drift-excl-out-');
+    const { manifestPath } = await generate({
+      source,
+      outputDir,
+      format: 'markdown',
+      exclude: ['tmp/**'],
+    });
+
+    await writeSourceFile(source, 'tmp/scratch.md', '# scratch\n');
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.source?.status).toBe('passed');
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('skips the rescan with a note for manifests without recorded excludeGlobs', async () => {
+    const source = await makeTempDir('llm-docs-drift-legacy-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-drift-legacy-out-');
+    const { manifestPath } = await generate({ source, outputDir, format: 'markdown' });
+
+    const manifest = await readManifest(manifestPath);
+    delete (manifest.source as { excludeGlobs?: string[] }).excludeGlobs;
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    await writeSourceFile(source, 'added.md', '# Added\n');
+
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.source?.status).toBe('passed');
+    expect(result.notes?.some((note) => note.includes('source added-file rescan skipped'))).toBe(
+      true
+    );
+  });
+
+  it('lists at most 20 added paths and reports the remainder as a count', async () => {
+    const source = await makeTempDir('llm-docs-drift-many-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-drift-many-out-');
+    const { manifestPath } = await generate({ source, outputDir, format: 'markdown' });
+
+    for (let index = 0; index < 25; index++) {
+      await writeSourceFile(source, `added-${String(index).padStart(2, '0')}.md`, '# x\n');
+    }
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    const drift = result.source?.failures.find((failure) => failure.startsWith('source drift'));
+    expect(drift).toBeDefined();
+    expect(drift).toContain('25 file(s) added since generation');
+    expect(drift).toContain('added-19.md');
+    expect(drift).not.toContain('added-20.md');
+    expect(drift).toContain('(+5 more)');
+  });
+});
+
+describe('verify recorded filename prefix cross-check', () => {
+  it('fails when generated outputs do not carry the recorded prefix', async () => {
+    const source = await makeTempDir('llm-docs-prefix-check-');
+    await writeSourceFile(source, 'a.md', '# A\n\nbody\n');
+    const outputDir = await makeTempDir('llm-docs-prefix-check-out-');
+    const { manifestPath } = await generate({
+      source,
+      outputDir,
+      format: 'markdown',
+      output: { filenamePrefix: 'mypack' },
+    });
+
+    const manifest = await readManifest(manifestPath);
+    manifest.output.filenamePrefix = 'otherpack';
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+
+    const result = await verifyGenerationManifest({ manifestPath });
+
+    expect(result.failures.some((failure) => failure.includes('output.filenamePrefix'))).toBe(true);
+  });
+});
+
+describe('generate --source unsupported-extension warning', () => {
+  it('aggregates skipped unsupported extensions and excludes hidden files', async () => {
+    const source = await makeTempDir('llm-docs-skipext-');
+    await writeSourceFile(source, 'a.md', '# a\n');
+    await writeSourceFile(source, 'one.pdf', 'PDFDATA');
+    await writeSourceFile(source, 'two.pdf', 'PDFDATA');
+    await writeSourceFile(source, 'notes.docx', 'DOCXDATA');
+    await writeSourceFile(source, '.env', 'SECRET=1');
+    const outputDir = await makeTempDir('llm-docs-skipext-out-');
+
+    const { manifest } = await generate({ source, outputDir, format: 'markdown' });
+
+    const warning = manifest.warnings.find((entry) =>
+      entry.startsWith('Skipped 3 file(s) with unsupported extensions')
+    );
+    expect(warning).toBe(
+      'Skipped 3 file(s) with unsupported extensions (.docx: 1, .pdf: 2); see source.skippedFiles.'
+    );
+    expect(warning).not.toContain('.env');
+    // The hidden file is still a recorded fact in the roster.
+    expect(manifest.source.skippedFiles?.some((entry) => entry.path === '.env')).toBe(true);
+  });
+
+  it('emits no unsupported-extension warning when only hidden files are skipped', async () => {
+    const source = await makeTempDir('llm-docs-skipext-hidden-');
+    await writeSourceFile(source, 'a.md', '# a\n');
+    await writeSourceFile(source, '.npmrc', 'registry=x\n');
+    const outputDir = await makeTempDir('llm-docs-skipext-hidden-out-');
+
+    const { manifest } = await generate({ source, outputDir, format: 'markdown' });
+
+    expect(manifest.warnings.some((entry) => entry.includes('unsupported extensions'))).toBe(false);
+  });
+});

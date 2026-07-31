@@ -57,6 +57,9 @@ const DEFAULT_SOURCE_DOCS_MAX_FILES = 5000;
 // Cap the recorded skipped-file roster so a source tree with a large vendored
 // asset set cannot balloon the manifest; a truncation warning records the fact.
 const SOURCE_DOCS_MAX_SKIPPED_FILES = 500;
+// Bound the per-extension breakdown in the unsupported-extension warning so a
+// tree with many exotic extensions cannot turn one warning into a wall.
+const SOURCE_DOCS_MAX_SKIPPED_EXTENSIONS = 10;
 const DRAFT_HEADING_PREFIX = 'DRAFT';
 
 export const SOURCE_DOCS_SCHEMA_VERSION = '0.1.0';
@@ -222,12 +225,19 @@ export interface SourceDocsManifest {
     aggregateHash?: string;
     label?: string;
     git?: GenerateSourceGitContext;
+    // Every --exclude glob as given (trimmed, deduplicated, in given order),
+    // including globs that matched nothing. Always present for built-in
+    // directory sources (possibly empty) so verify and refresh can distinguish
+    // "no excludes recorded" (old manifest) from "no excludes given".
+    excludeGlobs?: string[];
     excluded?: SourceDocsExcludedFile[];
     skippedFiles?: SourceDocsSkippedFile[];
   };
   sourceFiles: SourceDocsFileManifestEntry[];
   output: {
     filenamePrefix: string;
+    splitBy?: SourceDocsSplitBy;
+    categories?: SourceDocsCategoriesConfig;
   };
   parser: {
     name: string;
@@ -300,6 +310,7 @@ interface PreparedSourceDocsInput {
   parserPlugin?: SourceDocsParserPluginProvenance;
   sourceFiles: BoundedSourceFile[];
   warnings: string[];
+  excludeGlobs?: string[];
   excluded?: SourceDocsExcludedFile[];
   skippedFiles?: SourceDocsSkippedFile[];
 }
@@ -416,6 +427,11 @@ export async function generateSourceDocs(
       ...(options.preset === undefined ? {} : { preset: options.preset }),
       ...(options.gitContext === undefined ? {} : { gitContext: options.gitContext }),
       ...(options.label === undefined ? {} : { label: options.label }),
+      ...(options.splitBy === undefined ? {} : { splitBy: options.splitBy }),
+      ...(options.categories === undefined ? {} : { categories: options.categories }),
+      ...(preparedSource.excludeGlobs === undefined
+        ? {}
+        : { excludeGlobs: preparedSource.excludeGlobs }),
       ...(preparedSource.excluded === undefined || preparedSource.excluded.length === 0
         ? {}
         : { excluded: preparedSource.excluded }),
@@ -969,7 +985,7 @@ async function prepareSourceDocsInput(
   }
 
   const excludeGlobs = compileExcludeGlobs(exclude);
-  const sourceFiles = await describeDirectorySourceFiles(source, excludeGlobs);
+  const sourceFiles = await describeDirectorySourceFiles(source.resolvedPath, excludeGlobs);
   const resolvedFormat =
     formatHint.parserHint === FormatType.AUTO
       ? resolveDirectoryAutoFormat(sourceFiles.files, source.resolvedPath)
@@ -1001,6 +1017,7 @@ async function prepareSourceDocsInput(
     ...sourceFiles.warnings,
     ...excludeSummaryWarnings(sourceFiles.excluded, excludeGlobs),
     ...skippedSummaryWarnings(skippedFiles, truncationWarning),
+    ...unsupportedExtensionSummaryWarnings(sourceFiles.skippedFiles),
     ...(await collectDraftWarnings(selectedFiles)),
   ];
 
@@ -1009,6 +1026,7 @@ async function prepareSourceDocsInput(
     parser: getSourceDocsParser(resolvedFormat),
     sourceFiles: selectedFiles,
     warnings,
+    excludeGlobs: excludeGlobs.map((entry) => entry.glob),
     excluded: sourceFiles.excluded,
     skippedFiles,
   };
@@ -1044,7 +1062,7 @@ function formatSupportsDirectory(
 }
 
 async function describeDirectorySourceFiles(
-  source: ResolvedSourceDocsInput,
+  rootPath: string,
   excludeGlobs: CompiledExcludeGlob[]
 ): Promise<SourceFileCollection> {
   const state: DirectoryTraversalState = {
@@ -1056,16 +1074,14 @@ async function describeDirectorySourceFiles(
     skipped: [],
   };
   const files = await collectDirectorySourceFiles({
-    rootPath: source.resolvedPath,
-    currentPath: source.resolvedPath,
+    rootPath,
+    currentPath: rootPath,
     depth: 0,
     state,
   });
 
   if (files.length === 0) {
-    throw new Error(
-      `No supported source files found under local directory: ${source.resolvedPath}`
-    );
+    throw new Error(`No supported source files found under local directory: ${rootPath}`);
   }
 
   return {
@@ -1074,6 +1090,27 @@ async function describeDirectorySourceFiles(
     excluded: state.excluded.sort((a, b) => compareStringsByCodeUnit(a.path, b.path)),
     skippedFiles: state.skipped,
   };
+}
+
+/**
+ * Recompute the relative paths a built-in directory generation would select
+ * today, using the exact traversal the generator uses (same bounds, symlink and
+ * vendored-directory skips, exclude globs, and format selection). Exists so the
+ * verifier's source-tier rescan can never drift from generation behavior; the
+ * cost of re-describing (hashing) each candidate file is accepted for that
+ * parity. Throws the same traversal-bound errors generation would.
+ */
+export async function scanSourceDocsDirectorySelection(options: {
+  sourcePath: string;
+  resolvedFormat: string;
+  exclude: string[];
+}): Promise<string[]> {
+  const excludeGlobs = compileExcludeGlobs(options.exclude);
+  const collection = await describeDirectorySourceFiles(resolve(options.sourcePath), excludeGlobs);
+
+  return collection.files
+    .filter((file) => file.format === options.resolvedFormat)
+    .map((file) => file.path);
 }
 
 async function describeParserPluginDirectorySourceFiles(
@@ -1640,6 +1677,9 @@ function buildSourceDocsManifest(options: {
   preset?: SourceDocsPresetMetadata;
   gitContext?: GenerateSourceGitContext;
   label?: string;
+  splitBy?: SourceDocsSplitBy;
+  categories?: SourceDocsCategoriesConfig;
+  excludeGlobs?: string[];
   excluded?: SourceDocsExcludedFile[];
   skippedFiles?: SourceDocsSkippedFile[];
   warnings: string[];
@@ -1683,6 +1723,7 @@ function buildSourceDocsManifest(options: {
           }),
       ...(options.label === undefined ? {} : { label: options.label }),
       ...(options.gitContext === undefined ? {} : { git: options.gitContext }),
+      ...(options.excludeGlobs === undefined ? {} : { excludeGlobs: [...options.excludeGlobs] }),
       ...(options.excluded === undefined || options.excluded.length === 0
         ? {}
         : { excluded: options.excluded }),
@@ -1693,6 +1734,10 @@ function buildSourceDocsManifest(options: {
     sourceFiles,
     output: {
       filenamePrefix: options.filenamePrefix,
+      ...(options.splitBy === undefined ? {} : { splitBy: options.splitBy }),
+      ...(options.categories === undefined
+        ? {}
+        : { categories: cloneSourceDocsCategoriesConfig(options.categories) }),
     },
     parser: {
       name: options.parser.name,
@@ -2119,6 +2164,64 @@ function skippedSummaryWarnings(
   }
 
   return warnings;
+}
+
+/**
+ * Aggregate warning for real skipped content: regular files whose extension no
+ * built-in parser supports (for example .pdf). Hidden files (basename starting
+ * with '.') are left out of this warning because dotfiles are tooling metadata,
+ * not documentation content, and counting them would bury the signal; they are
+ * still listed in source.skippedFiles. Aggregated per extension with a bounded,
+ * code-unit-sorted breakdown, never per file.
+ */
+function unsupportedExtensionSummaryWarnings(skippedFiles: SourceDocsSkippedFile[]): string[] {
+  const counts = new Map<string, number>();
+  let total = 0;
+
+  for (const skipped of skippedFiles) {
+    if (skipped.reason !== 'unsupported-file-type') {
+      continue;
+    }
+
+    const fileName = skipped.path.split('/').at(-1) ?? skipped.path;
+
+    if (fileName.startsWith('.')) {
+      continue;
+    }
+
+    const extension = extname(fileName).toLowerCase();
+    const key = extension.length === 0 ? '(no extension)' : extension;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    total++;
+  }
+
+  if (total === 0) {
+    return [];
+  }
+
+  const entries = [...counts.entries()].sort((a, b) => compareStringsByCodeUnit(a[0], b[0]));
+  const shown = entries
+    .slice(0, SOURCE_DOCS_MAX_SKIPPED_EXTENSIONS)
+    .map(([extension, count]) => `${extension}: ${count}`);
+  const remainder = entries.length - shown.length;
+  const suffix = remainder > 0 ? `, +${remainder} more extension(s)` : '';
+
+  return [
+    `Skipped ${total} file(s) with unsupported extensions (${shown.join(', ')}${suffix}); see source.skippedFiles.`,
+  ];
+}
+
+function cloneSourceDocsCategoriesConfig(
+  config: SourceDocsCategoriesConfig
+): SourceDocsCategoriesConfig {
+  return {
+    categories: config.categories.map((category) => ({
+      id: category.id,
+      title: category.title,
+      include: [...category.include],
+    })),
+    fallback: config.fallback,
+  };
 }
 
 /**

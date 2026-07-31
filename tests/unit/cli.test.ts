@@ -15167,14 +15167,17 @@ describe('CLI compatibility behavior', () => {
     const originalOutputPath = join(outputDir, outputFile.path);
     const originalOutput = await readFile(originalOutputPath, 'utf-8');
     const outsideDir = join(dirname(outputDir), 'outside-output-dir');
-    const outsidePath = join(outsideDir, 'file.txt');
+    // The tampered basename keeps the recorded filename prefix so the manifest
+    // stays structurally valid and the symlink guard is what fails.
+    const outsideName = `${manifest.output.filenamePrefix}-outside-llms.txt`;
+    const outsidePath = join(outsideDir, outsideName);
     const linkPath = join(outputDir, 'llm-docs/link');
 
     await mkdir(outsideDir, { recursive: true });
     await writeFile(outsidePath, originalOutput, 'utf-8');
     await symlink(outsideDir, linkPath, 'dir');
 
-    outputFile.path = 'llm-docs/link/file.txt';
+    outputFile.path = `llm-docs/link/${outsideName}`;
     refreshArtifactSummaryForTest(manifest);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
