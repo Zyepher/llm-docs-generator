@@ -535,9 +535,22 @@ export class UniversalFormatter {
     const parts: string[] = [];
 
     switch (content.type) {
-      case ContentBlockType.PROSE:
-        parts.push(this.rewriteProse(content.content, ctx), DOUBLE_NEWLINE);
+      case ContentBlockType.PROSE: {
+        const prose = this.rewriteProse(content.content, ctx);
+        if (content.annotations?.get('style') === 'blockquote') {
+          // The markdown parser strips the "> " markers when it lifts a
+          // blockquote into prose; restore them on every line so callouts like
+          // "> [!NOTE]" survive as blockquotes instead of ordinary paragraphs.
+          const quoted = prose
+            .split(NEWLINE)
+            .map((line) => (line.length > 0 ? `> ${line}` : '>'))
+            .join(NEWLINE);
+          parts.push(quoted, DOUBLE_NEWLINE);
+        } else {
+          parts.push(prose, DOUBLE_NEWLINE);
+        }
         break;
+      }
 
       case ContentBlockType.CODE: {
         // Reproduce the source fence info string byte-verbatim: undefined means a
